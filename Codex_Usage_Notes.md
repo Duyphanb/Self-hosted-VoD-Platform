@@ -1,0 +1,6 @@
+- Use small batches.
+- Read AGENTS.md first.
+- Do not let Codex expand scope.
+- Prefer docs and skeleton before business logic.
+- After each batch, require: files created, assumptions, blockers, next batch.
+- For worker, prepare Dockerfile with ffmpeg/ffprobe available in PATH early.
