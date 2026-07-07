@@ -1,0 +1,150 @@
+name: vod-platform
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vod_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-vod_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vod_app} -d ${POSTGRES_DB:-vod_platform}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vod_internal
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vod_internal
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-vod_app}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-change-me}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vod_internal
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-vod_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-change-me}
+    volumes:
+      - minio_data:/data
+    networks:
+      - vod_internal
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-vod_minio} ${MINIO_SECRET_KEY:-change-me}; do sleep 2; done;
+      mc mb --ignore-existing local/${MINIO_BUCKET_RAW:-vod-raw};
+      mc mb --ignore-existing local/${MINIO_BUCKET_HLS:-vod-hls};
+      mc mb --ignore-existing local/${MINIO_BUCKET_THUMBNAILS:-vod-thumbnails};
+      mc anonymous set none local/${MINIO_BUCKET_RAW:-vod-raw};
+      mc anonymous set none local/${MINIO_BUCKET_HLS:-vod-hls};
+      mc anonymous set none local/${MINIO_BUCKET_THUMBNAILS:-vod-thumbnails};
+      "
+    networks:
+      - vod_internal
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/vod_platform}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-vod_app}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-change-me}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      MINIO_BUCKET_RAW: ${MINIO_BUCKET_RAW:-vod-raw}
+      MINIO_BUCKET_HLS: ${MINIO_BUCKET_HLS:-vod-hls}
+      MINIO_BUCKET_THUMBNAILS: ${MINIO_BUCKET_THUMBNAILS:-vod-thumbnails}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - vod_internal
+
+  worker:
+    build:
+      context: ../worker
+      dockerfile: Dockerfile
+    environment:
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      FFMPEG_PATH: ${FFMPEG_PATH:-ffmpeg}
+      FFPROBE_PATH: ${FFPROBE_PATH:-ffprobe}
+      WORKER_TEMP_DIR: ${WORKER_TEMP_DIR:-/tmp/vod-worker}
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/vod_platform}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - vod_internal
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    networks:
+      - vod_internal
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - vod_internal
+
+networks:
+  vod_internal:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  minio_data:

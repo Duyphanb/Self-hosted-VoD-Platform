@@ -1,0 +1,1151 @@
+# Status: Frozen for MVP implementation
+openapi: 3.0.3
+info:
+  title: Self-hosted VoD Platform Public Contract
+  version: 1.0.0-frozen
+  description: >
+    Frozen MVP public contract for the modular monolith plus worker architecture.
+    Browser traffic enters through Nginx. JSON APIs use /api/v1/*.
+    HLS uses /hls/* through the authenticated backend proxy.
+    Refresh tokens use JSON request and response bodies only.
+servers:
+  - url: http://localhost
+    description: Local Nginx edge
+  - url: https://{domain}
+    description: VPS Nginx edge
+    variables:
+      domain:
+        default: example.com
+security:
+  - bearerAuth: []
+tags:
+  - name: Health
+  - name: Auth
+  - name: Users
+  - name: Movies
+  - name: Upload
+  - name: Stream
+  - name: Search
+  - name: Watchlist
+  - name: History
+  - name: Progress
+  - name: Rating
+  - name: Admin
+
+paths:
+  /api/v1/health:
+    get:
+      tags: [Health]
+      summary: Public smoke health check
+      security: []
+      responses:
+        "200":
+          description: API is reachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a user account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate refresh token and return new tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke current refresh token
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "204":
+          description: Logged out
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [Users]
+      summary: Update current user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/movies:
+    get:
+      tags: [Movies]
+      summary: List published movies
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+        - name: genre
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: year
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1888
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [latest, title]
+            default: latest
+      responses:
+        "200":
+          description: Movie page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoviePageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Movies, Admin]
+      summary: Create movie metadata
+      description: Requires ROLE_ADMIN.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertMovieRequest"
+      responses:
+        "201":
+          description: Created movie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MovieDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/movies/{movieId}:
+    parameters:
+      - $ref: "#/components/parameters/MovieId"
+    get:
+      tags: [Movies]
+      summary: Get movie details
+      responses:
+        "200":
+          description: Movie detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MovieDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Movies, Admin]
+      summary: Update movie metadata
+      description: Requires ROLE_ADMIN.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertMovieRequest"
+      responses:
+        "200":
+          description: Updated movie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MovieDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Movies, Admin]
+      summary: Archive movie metadata
+      description: Requires ROLE_ADMIN. Archive-only; sets status to ARCHIVED. No hard delete endpoint is exposed.
+      responses:
+        "204":
+          description: Archived
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/movies/{movieId}/video:
+    parameters:
+      - $ref: "#/components/parameters/MovieId"
+    post:
+      tags: [Upload, Admin]
+      summary: Upload raw video for a movie
+      description: Requires ROLE_ADMIN. Stores raw video in MinIO and queues encoding.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "202":
+          description: Upload accepted and encoding queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoAssetStatusResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+
+  /api/v1/movies/{movieId}/playback:
+    parameters:
+      - $ref: "#/components/parameters/MovieId"
+    get:
+      tags: [Stream]
+      summary: Get playback information for a ready movie
+      responses:
+        "200":
+          description: Playback info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybackInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /hls/video-assets/{videoAssetId}/master.m3u8:
+    parameters:
+      - $ref: "#/components/parameters/VideoAssetId"
+    get:
+      tags: [Stream]
+      summary: Authenticated HLS master playlist
+      description: Only MVP HLS path. Nginx /hls/* proxies to backend; bearer token required; no direct MinIO or presigned playback.
+      responses:
+        "200":
+          description: HLS playlist
+          content:
+            application/vnd.apple.mpegurl:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /hls/video-assets/{videoAssetId}/segments/{segmentName}:
+    parameters:
+      - $ref: "#/components/parameters/VideoAssetId"
+      - name: segmentName
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[A-Za-z0-9._-]+\\.ts$"
+    get:
+      tags: [Stream]
+      summary: Authenticated HLS segment
+      description: Only MVP HLS path. Nginx /hls/* proxies to backend; bearer token required; no direct MinIO or presigned playback.
+      responses:
+        "200":
+          description: HLS segment
+          content:
+            video/mp2t:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/movies/{movieId}/progress:
+    parameters:
+      - $ref: "#/components/parameters/MovieId"
+    get:
+      tags: [Progress]
+      summary: Get current user's playback progress for a movie
+      responses:
+        "200":
+          description: Progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgressResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Progress]
+      summary: Save playback progress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProgressRequest"
+      responses:
+        "202":
+          description: Progress accepted for buffering
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgressResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/movies/{movieId}/rating:
+    parameters:
+      - $ref: "#/components/parameters/MovieId"
+    put:
+      tags: [Rating]
+      summary: Create or update current user's rating
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RatingRequest"
+      responses:
+        "200":
+          description: Rating saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RatingResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/search:
+    get:
+      tags: [Search]
+      summary: Search movie catalog
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/search/suggestions:
+    get:
+      tags: [Search]
+      summary: Get search suggestions
+      description: MVP core helper for US-012 using persisted catalog metadata.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Suggestions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchSuggestionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/me/watchlist:
+    get:
+      tags: [Watchlist]
+      summary: Get current user's watchlist
+      responses:
+        "200":
+          description: Watchlist
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WatchlistItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/me/watchlist/{movieId}:
+    parameters:
+      - $ref: "#/components/parameters/MovieId"
+    put:
+      tags: [Watchlist]
+      summary: Add movie to watchlist
+      responses:
+        "200":
+          description: Watchlist item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchlistItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Watchlist]
+      summary: Remove movie from watchlist
+      responses:
+        "204":
+          description: Removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/me/history:
+    get:
+      tags: [History]
+      summary: Get current user's watch history
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: History page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryPageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/me/continue-watching:
+    get:
+      tags: [History, Progress]
+      summary: Get current user's continue-watching list
+      responses:
+        "200":
+          description: Continue-watching list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContinueWatchingItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/admin/video-assets:
+    get:
+      tags: [Admin]
+      summary: List video assets and processing state
+      description: Requires ROLE_ADMIN.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/VideoAssetStatus"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Video asset page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoAssetPageResponse"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/admin/video-assets/{videoAssetId}/retry:
+    parameters:
+      - $ref: "#/components/parameters/VideoAssetId"
+    post:
+      tags: [Admin]
+      summary: Retry a failed encoding job
+      description: Requires ROLE_ADMIN. Only FAILED assets are eligible.
+      responses:
+        "202":
+          description: Retry queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VideoAssetStatusResponse"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    MovieId:
+      name: movieId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VideoAssetId:
+      name: videoAssetId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    Unauthorized:
+      description: Authentication required or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    Forbidden:
+      description: Authenticated user is not allowed to perform this action
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    Conflict:
+      description: Resource state conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    PayloadTooLarge:
+      description: Uploaded file is larger than the configured limit
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: UP
+
+    ApiError:
+      type: object
+      required: [timestamp, status, code, message]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        code:
+          type: string
+        message:
+          type: string
+        requestId:
+          type: string
+          nullable: true
+        fieldErrors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+    RegisterRequest:
+      type: object
+      required: [email, password, displayName]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 100
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+
+    RefreshRequest:
+      description: JSON-body refresh token request.
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          description: Opaque refresh token.
+          type: string
+
+    AuthResponse:
+      description: JSON-body authentication result.
+      type: object
+      required: [user, accessToken, refreshToken, expiresInSeconds]
+      properties:
+        user:
+          $ref: "#/components/schemas/UserProfile"
+        accessToken:
+          type: string
+        refreshToken:
+          description: Opaque refresh token.
+          type: string
+        expiresInSeconds:
+          type: integer
+
+    UserProfile:
+      type: object
+      required: [id, email, displayName, roles]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [ROLE_USER, ROLE_ADMIN]
+
+    UpdateProfileRequest:
+      type: object
+      required: [displayName]
+      properties:
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 100
+
+    MovieStatus:
+      type: string
+      enum: [DRAFT, PUBLISHED, ARCHIVED]
+
+    VideoAssetStatus:
+      type: string
+      enum: [UPLOADED, QUEUED, PROCESSING, READY, FAILED]
+
+    MovieSummary:
+      type: object
+      required: [id, title, slug, genres, status, videoStatus]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        releaseYear:
+          type: integer
+          nullable: true
+        posterUrl:
+          type: string
+          nullable: true
+        genres:
+          type: array
+          items:
+            type: string
+        averageRating:
+          type: number
+          format: float
+          nullable: true
+        status:
+          $ref: "#/components/schemas/MovieStatus"
+        videoStatus:
+          $ref: "#/components/schemas/VideoAssetStatus"
+
+    MovieDetail:
+      allOf:
+        - $ref: "#/components/schemas/MovieSummary"
+        - type: object
+          properties:
+            people:
+              type: array
+              items:
+                $ref: "#/components/schemas/MovieCredit"
+            userRating:
+              type: integer
+              nullable: true
+            inWatchlist:
+              type: boolean
+            playbackProgress:
+              $ref: "#/components/schemas/ProgressResponse"
+
+    MovieCredit:
+      type: object
+      required: [personId, name, role]
+      properties:
+        personId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          type: string
+          enum: [ACTOR, DIRECTOR]
+
+    MovieCreditInput:
+      type: object
+      required: [name, role]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        role:
+          type: string
+          enum: [ACTOR, DIRECTOR]
+
+    UpsertMovieRequest:
+      description: >
+        Admin movie metadata payload. Genre strings are matched by normalized name
+        or created by the backend when no existing genre matches.
+      type: object
+      required: [title, description, genres, status]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          minLength: 1
+        releaseYear:
+          type: integer
+          minimum: 1888
+          nullable: true
+        maturityRating:
+          type: string
+          nullable: true
+        genres:
+          description: Genre names, not genre IDs.
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+        people:
+          type: array
+          items:
+            $ref: "#/components/schemas/MovieCreditInput"
+        status:
+          $ref: "#/components/schemas/MovieStatus"
+
+    MoviePageResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MovieSummary"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+
+    VideoAssetStatusResponse:
+      type: object
+      required: [videoAssetId, status]
+      properties:
+        videoAssetId:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/VideoAssetStatus"
+        message:
+          type: string
+
+    PlaybackInfo:
+      type: object
+      required: [movieId, videoAssetId, status, hlsManifestUrl]
+      properties:
+        movieId:
+          type: string
+          format: uuid
+        videoAssetId:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/VideoAssetStatus"
+        hlsManifestUrl:
+          type: string
+          example: /hls/video-assets/00000000-0000-0000-0000-000000000000/master.m3u8
+        resumeSeconds:
+          type: integer
+          minimum: 0
+        durationSeconds:
+          type: integer
+          nullable: true
+
+    ProgressRequest:
+      type: object
+      required: [currentSeconds, finished]
+      properties:
+        currentSeconds:
+          type: integer
+          minimum: 0
+        durationSeconds:
+          type: integer
+          minimum: 0
+          nullable: true
+        finished:
+          type: boolean
+
+    ProgressResponse:
+      type: object
+      required: [movieId, currentSeconds, finished]
+      properties:
+        movieId:
+          type: string
+          format: uuid
+        currentSeconds:
+          type: integer
+        durationSeconds:
+          type: integer
+          nullable: true
+        finished:
+          type: boolean
+        lastPlayedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    RatingRequest:
+      type: object
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+
+    RatingResponse:
+      type: object
+      required: [movieId, rating]
+      properties:
+        movieId:
+          type: string
+          format: uuid
+        rating:
+          type: integer
+        averageRating:
+          type: number
+          format: float
+          nullable: true
+
+    SearchResponse:
+      type: object
+      required: [query, items, page]
+      properties:
+        query:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MovieSummary"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+
+    SearchSuggestionResponse:
+      type: object
+      required: [query, suggestions]
+      properties:
+        query:
+          type: string
+        suggestions:
+          type: array
+          items:
+            type: string
+
+    WatchlistItem:
+      type: object
+      required: [movie, createdAt]
+      properties:
+        movie:
+          $ref: "#/components/schemas/MovieSummary"
+        createdAt:
+          type: string
+          format: date-time
+
+    HistoryItem:
+      type: object
+      required: [movie, startedAt, lastWatchedAt]
+      properties:
+        movie:
+          $ref: "#/components/schemas/MovieSummary"
+        startedAt:
+          type: string
+          format: date-time
+        lastWatchedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    HistoryPageResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryItem"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+
+    ContinueWatchingItem:
+      type: object
+      required: [movie, progress]
+      properties:
+        movie:
+          $ref: "#/components/schemas/MovieSummary"
+        progress:
+          $ref: "#/components/schemas/ProgressResponse"
+
+    VideoAssetAdmin:
+      type: object
+      required: [id, movieId, movieTitle, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        movieId:
+          type: string
+          format: uuid
+        movieTitle:
+          type: string
+        status:
+          $ref: "#/components/schemas/VideoAssetStatus"
+        durationSeconds:
+          type: integer
+          nullable: true
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        codec:
+          type: string
+          nullable: true
+        failureReason:
+          type: string
+          nullable: true
+        latestAttempt:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    VideoAssetPageResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/VideoAssetAdmin"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+
+    PageMeta:
+      type: object
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
