@@ -10,7 +10,7 @@ Keep the MVP tight. Prefer documentation, skeletons, contracts, and tests before
 
 Treat the frozen docs under `docs/requirements/` and `docs/architecture/` as the source of truth for implementation.
 
-Root-level planning artifacts such as `VoD_Platform_Final.docx`, `VoD_SDLC_Master_Plan_Codex_Final_Reviewed.docx`, and `VoD_SDLC_Master_Plan_Codex_Final_Reviewed.md` are archival inputs only. Do not use their older schema or storage names when they conflict with frozen docs. In particular, prefer `docs/architecture/ERD.md` for table names and `docs/architecture/INFRASTRUCTURE.md` for MinIO bucket names.
+Archival planning artifacts under `docs/reports/`, such as `docs/reports/VoD_Platform_Final.docx`, `docs/reports/VoD_SDLC_Master_Plan_Codex_Final_Reviewed.docx`, and `docs/reports/VoD_SDLC_Master_Plan_Codex_Final_Reviewed.md`, are archival inputs only. Do not use their older schema or storage names when they conflict with frozen docs. In particular, prefer `docs/architecture/ERD.md` for table names and `docs/architecture/INFRASTRUCTURE.md` for MinIO bucket names.
 
 ## Stack
 
