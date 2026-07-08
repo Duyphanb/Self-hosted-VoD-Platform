@@ -7,6 +7,25 @@ name: CI
   pull_request:
 
 jobs:
+  backend-build:
+    name: Backend Maven build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build and test all backend modules
+        working-directory: backend
+        run: mvn -B -ntp verify
+
   skeleton:
     name: Skeleton build checks
     runs-on: ubuntu-latest
