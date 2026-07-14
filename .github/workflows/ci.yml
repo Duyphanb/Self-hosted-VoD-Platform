@@ -93,3 +93,47 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+  schema-migration:
+    name: Flyway schema migration
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: vod
+          POSTGRES_USER: vod
+          POSTGRES_PASSWORD: vod
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vod -d vod"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply Flyway migration
+        run: >-
+          docker run --rm --network host
+          -v "${{ github.workspace }}/backend/common/src/main/resources/db/migration:/flyway/sql:ro"
+          flyway/flyway:12.10.0
+          -url=jdbc:postgresql://localhost:5432/vod
+          -user=vod
+          -password=vod
+          -connectRetries=60
+          migrate
+
+      - name: Verify ERD schema counts
+        run: |
+          query() {
+            docker run --rm --network host -e PGPASSWORD=vod postgres:16-alpine psql -h localhost -U vod -d vod -Atc "$1"
+          }
+          test "$(query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> 'flyway_schema_history';")" = "15"
+          test "$(query "SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname ~ '^(ux|ix)_';")" = "30"
+          test "$(query "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'public' AND t.relname IN ('users', 'roles', 'user_roles', 'refresh_tokens', 'movies', 'genres', 'movie_genres', 'people', 'movie_credits', 'video_assets', 'encoding_jobs', 'playback_progress', 'watchlist_items', 'watch_history', 'ratings');")" = "53"
+          test "$(query "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'public' AND c.contype = 'f' AND t.relname IN ('users', 'roles', 'user_roles', 'refresh_tokens', 'movies', 'genres', 'movie_genres', 'people', 'movie_credits', 'video_assets', 'encoding_jobs', 'playback_progress', 'watchlist_items', 'watch_history', 'ratings');")" = "17"
+          test "$(query "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'public' AND c.contype = 'c' AND t.relname IN ('users', 'roles', 'user_roles', 'refresh_tokens', 'movies', 'genres', 'movie_genres', 'people', 'movie_credits', 'video_assets', 'encoding_jobs', 'playback_progress', 'watchlist_items', 'watch_history', 'ratings');")" = "9"
