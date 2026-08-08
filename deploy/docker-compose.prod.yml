@@ -9,6 +9,8 @@ services:
 
   redis:
     restart: unless-stopped
+    volumes:
+      - redis_data:/data
     deploy:
       resources:
         limits:
@@ -55,8 +57,24 @@ services:
           cpus: "0.25"
           memory: 128M
 
+  flyway:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  minio-init:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
   nginx:
     restart: unless-stopped
+    ports:
+      - "${NGINX_HTTPS_PORT:-443}:443"
     deploy:
       resources:
         limits:
@@ -65,5 +83,6 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   rabbitmq_data:
   minio_data:
