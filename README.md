@@ -48,7 +48,9 @@ Bash:
 cp .env.example .env
 ```
 
-The committed `.env.example` contains placeholders only. Before sharing the stack or using persistent data, replace at least `JWT_SECRET`, `POSTGRES_PASSWORD`, `RABBITMQ_PASSWORD`, and `MINIO_SECRET_KEY` in the ignored `.env` file.
+The committed `.env.example` contains placeholders only. Before sharing the stack or using persistent data, replace at least `JWT_SECRET`, `POSTGRES_PASSWORD`, `SPRING_DATASOURCE_PASSWORD`, `RABBITMQ_PASSWORD`, and `MINIO_SECRET_KEY` in the ignored `.env` file.
+
+For the default local Compose setup, `SPRING_DATASOURCE_PASSWORD` must match `POSTGRES_PASSWORD`. If you also change the PostgreSQL database name or username, keep `SPRING_DATASOURCE_URL` and `SPRING_DATASOURCE_USERNAME` aligned with the corresponding `POSTGRES_*` values.
 
 Do not commit `.env`. Credentials stored in existing named volumes do not change automatically when `.env` changes.
 
@@ -72,6 +74,8 @@ Expected result:
 - `flyway` and `minio-init` have exited successfully with status code 0.
 
 ### 4. Verify the public routes
+
+The commands below assume the default `NGINX_HTTP_PORT=80`. If you configure another host port, include it in each URL, for example `http://localhost:8088/`.
 
 ```bash
 curl --fail http://localhost/
@@ -101,6 +105,7 @@ These service ports are available only inside the `vod_internal` Docker network:
 | MinIO S3 API | 9000 |
 | MinIO console | 9001 |
 | Backend | 8080 |
+| Worker | 8081 |
 | Frontend | 80 |
 
 ## Logs and Shutdown
