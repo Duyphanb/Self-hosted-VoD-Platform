@@ -141,14 +141,14 @@ Create `docker-compose.prod.yml` with resource limits, restart policies, named v
 
 ### Sprint 1 Definition of Done
 
-- [ ] Backend, worker, and frontend build and start successfully
-- [ ] Flyway migration creates all ERD tables in PostgreSQL
-- [ ] Docker Compose local stack starts all services with health checks passing
-- [ ] Nginx routes frontend, backend health endpoint, and placeholder API paths
-- [ ] `.env.example` is complete with placeholders
-- [ ] Production Compose includes resource limits and named volumes
-- [ ] README documents how to run the local stack
-- [ ] No secrets are committed
+- [x] Backend, worker, and frontend build and start successfully
+- [x] Flyway migration creates all ERD tables in PostgreSQL
+- [x] Docker Compose local stack starts all services with health checks passing
+- [x] Nginx routes frontend, backend health endpoint, and placeholder API paths
+- [x] `.env.example` is complete with placeholders
+- [x] Production Compose includes resource limits and named volumes
+- [x] README documents how to run the local stack
+- [x] No secrets are committed
 
 ---
 
