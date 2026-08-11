@@ -92,5 +92,3 @@ Phase 3 - Feature Development is active.
 - Sprint 1 - Foundation is complete.
 - Sprint 2 - Auth is active.
 - The next implementation batch is Issue 2.1 / GitHub Issue #17 - Backend Auth Service - Registration.
-
-GitHub Issue #17 remains `OPEN`; implementation has not started.
