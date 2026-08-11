@@ -87,11 +87,10 @@ See `BACKLOG.md` for detailed sprint backlog with issues, acceptance criteria, d
 
 ## Current Next Step
 
-Continue Phase 0 / Batch 4 by creating the baseline container and deployment skeleton only:
+Phase 3 - Feature Development is active.
 
-- backend, worker, and frontend Dockerfiles
-- local and production Docker Compose skeletons
-- Nginx routing skeleton for frontend, API, and HLS paths
-- CI skeleton that validates builds and configuration as far as possible
+- Sprint 1 - Foundation is complete.
+- Sprint 2 - Auth is active.
+- The next implementation batch is Issue 2.1 / GitHub Issue #17 - Backend Auth Service - Registration.
 
-Do not add business logic in this batch. Phase 2 architecture is already frozen for MVP implementation.
+GitHub Issue #17 remains `OPEN`; implementation has not started.
