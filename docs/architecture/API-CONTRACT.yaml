@@ -63,7 +63,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AuthResponse"
+                $ref: "#/components/schemas/UserProfile"
         "400":
           $ref: "#/components/responses/ValidationError"
         "409":
