@@ -162,14 +162,16 @@ Create `docker-compose.prod.yml` with resource limits, restart policies, named v
 ### Issue 2.1: Backend Auth Service - Registration
 
 **Description:**  
-Implement user registration endpoint `POST /api/v1/auth/register` with email, password, display_name. Hash passwords with BCrypt. Assign `ROLE_USER` by default. Return DTO without password.
+Implement user registration endpoint `POST /api/v1/auth/register` with request fields `email`, `password`, and `displayName`. Map `displayName` to `users.display_name`. Hash passwords with BCrypt, create the user with `ACTIVE` status, and assign `ROLE_USER` by default. Return `201 Created` with the existing `UserProfile` DTO. Registration does not issue access or refresh tokens; token issuance remains scoped to Issue 2.2.
 
 **Acceptance Criteria:**
 - Registration validates email format, password strength, and display name length
 - Duplicate email returns 409 Conflict
 - Password is stored as BCrypt hash
+- New user has `ACTIVE` status
 - New user has `ROLE_USER` in `user_roles` table
-- Response DTO excludes password hash
+- Successful registration returns 201 Created with the existing `UserProfile` DTO
+- Response DTO excludes password hash, access token, and refresh token
 - Unit tests cover validation and service logic
 
 **Dependencies:** Sprint 1 complete
