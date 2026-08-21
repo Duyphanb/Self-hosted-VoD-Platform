@@ -58,6 +58,16 @@ public class AuthExceptionHandler {
         );
     }
 
+    @ExceptionHandler(CurrentUserUnavailableException.class)
+    ResponseEntity<ApiError> handleCurrentUserUnavailable(CurrentUserUnavailableException exception) {
+        return buildResponse(
+                HttpStatus.UNAUTHORIZED,
+                "UNAUTHORIZED",
+                exception.getMessage(),
+                List.of()
+        );
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ResponseEntity<ApiError> handleUnreadableRequest() {
         return buildResponse(
