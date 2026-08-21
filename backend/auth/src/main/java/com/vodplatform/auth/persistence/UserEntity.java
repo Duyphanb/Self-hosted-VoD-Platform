@@ -75,6 +75,11 @@ public class UserEntity {
         roles.add(role);
     }
 
+    public void updateDisplayName(String displayName, Instant updatedAt) {
+        this.displayName = displayName;
+        this.updatedAt = updatedAt;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -93,6 +98,10 @@ public class UserEntity {
 
     public UserStatus getStatus() {
         return status;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 
     public Set<RoleEntity> getRoles() {
