@@ -1,0 +1,3 @@
+INSERT INTO roles (name)
+VALUES ('ROLE_USER')
+ON CONFLICT (name) DO NOTHING;
