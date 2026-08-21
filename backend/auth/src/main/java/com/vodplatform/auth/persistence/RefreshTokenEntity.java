@@ -74,4 +74,8 @@ public class RefreshTokenEntity {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    public void revoke(Instant revokedAt) {
+        this.revokedAt = revokedAt;
+    }
 }
