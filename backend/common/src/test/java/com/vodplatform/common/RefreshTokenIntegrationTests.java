@@ -18,6 +18,7 @@ import com.vodplatform.auth.service.RefreshTokenService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,9 +66,7 @@ class RefreshTokenIntegrationTests {
 
     @BeforeEach
     void createRegisteredUser() {
-        refreshTokenRepository.deleteAll();
-        userRepository.deleteAll();
-        roleRepository.deleteAll();
+        cleanDatabase();
         jdbcTemplate.update("INSERT INTO roles (name) VALUES (?)", "ROLE_USER");
         RoleEntity role = roleRepository.findByName("ROLE_USER").orElseThrow();
         Instant now = Instant.now();
@@ -82,6 +81,13 @@ class RefreshTokenIntegrationTests {
         );
         user.addRole(role);
         userRepository.saveAndFlush(user);
+    }
+
+    @AfterEach
+    void cleanDatabase() {
+        refreshTokenRepository.deleteAll();
+        userRepository.deleteAll();
+        roleRepository.deleteAll();
     }
 
     @Test
