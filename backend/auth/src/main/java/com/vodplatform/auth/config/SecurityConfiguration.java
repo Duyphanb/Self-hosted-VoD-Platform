@@ -1,11 +1,13 @@
 package com.vodplatform.auth.config;
 
 import com.vodplatform.auth.security.AccessTokenAuthenticationConverter;
+import com.vodplatform.auth.security.ApiAccessDeniedHandler;
 import com.vodplatform.auth.security.ApiAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -16,6 +18,7 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfiguration {
 
     private static final RequestMatcher PUBLIC_ENDPOINTS = new OrRequestMatcher(
@@ -42,11 +45,14 @@ public class SecurityConfiguration {
     SecurityFilterChain bearerSecurityFilterChain(
             HttpSecurity http,
             ApiAuthenticationEntryPoint authenticationEntryPoint,
+            ApiAccessDeniedHandler accessDeniedHandler,
             AccessTokenAuthenticationConverter authenticationConverter
     ) throws Exception {
         applyStatelessDefaults(http);
         http.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
-                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint))
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler))
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(authenticationConverter)));
