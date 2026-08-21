@@ -15,6 +15,7 @@ import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
+import com.vodplatform.auth.security.Utf8AwareBcryptPasswordEncoder;
 import java.util.Optional;
 import java.sql.SQLException;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,7 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.hibernate.exception.ConstraintViolationException;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,13 +40,20 @@ class RegistrationServiceTest {
     @Mock
     private RoleEntity role;
 
-    private BCryptPasswordEncoder passwordEncoder;
+    private PasswordEncoder passwordEncoder;
     private RegistrationService registrationService;
+    private UserProfileMapper userProfileMapper;
 
     @BeforeEach
     void setUp() {
-        passwordEncoder = new BCryptPasswordEncoder();
-        registrationService = new RegistrationService(userRepository, roleRepository, passwordEncoder);
+        passwordEncoder = new Utf8AwareBcryptPasswordEncoder();
+        userProfileMapper = new UserProfileMapper();
+        registrationService = new RegistrationService(
+                userRepository,
+                roleRepository,
+                passwordEncoder,
+                userProfileMapper
+        );
     }
 
     @Test
