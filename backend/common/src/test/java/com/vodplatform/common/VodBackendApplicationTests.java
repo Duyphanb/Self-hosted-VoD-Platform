@@ -11,7 +11,10 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes"
+)
 class VodBackendApplicationTests {
 
     private final TestRestTemplate restTemplate;

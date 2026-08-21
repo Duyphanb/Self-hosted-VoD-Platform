@@ -5,6 +5,12 @@ spring:
   application:
     name: vod-backend
 
+auth:
+  tokens:
+    secret: ${JWT_SECRET}
+    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL_MINUTES:60}m
+    refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL_DAYS:7}d
+
 management:
   endpoints:
     web:
