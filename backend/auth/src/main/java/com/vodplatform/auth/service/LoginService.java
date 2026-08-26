@@ -48,6 +48,10 @@ public class LoginService {
                 .filter(candidate -> candidate.getStatus() == UserStatus.ACTIVE)
                 .orElseThrow(InvalidCredentialsException::new);
 
+        if (passwordEncoder.upgradeEncoding(passwordHash)) {
+            user.updatePasswordHash(passwordEncoder.encode(request.password()));
+        }
+
         IssuedAccessToken accessToken = jwtAccessTokenService.issue(user);
         IssuedRefreshToken refreshToken = refreshTokenService.issue(user);
         return new AuthResponse(
