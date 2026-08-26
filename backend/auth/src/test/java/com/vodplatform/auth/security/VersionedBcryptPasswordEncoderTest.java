@@ -21,6 +21,16 @@ class VersionedBcryptPasswordEncoderTest {
     }
 
     @Test
+    void authenticatesExplicitDirectBcryptHashesAndMarksThemForUpgrade() {
+        String password = "prefixed-password";
+        String directBcryptHash = "{bcrypt}" + new BCryptPasswordEncoder().encode(password);
+
+        assertThat(passwordEncoder.matches(password, directBcryptHash)).isTrue();
+        assertThat(passwordEncoder.matches("wrong-password", directBcryptHash)).isFalse();
+        assertThat(passwordEncoder.upgradeEncoding(directBcryptHash)).isTrue();
+    }
+
+    @Test
     void createsVersionedBcryptHashesThatDoNotNeedUpgrade() {
         String encodedPassword = passwordEncoder.encode("new-password");
 
