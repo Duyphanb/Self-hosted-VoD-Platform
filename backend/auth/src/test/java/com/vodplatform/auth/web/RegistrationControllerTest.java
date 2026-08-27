@@ -9,7 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.vodplatform.auth.dto.RegisterRequest;
 import com.vodplatform.auth.dto.UserProfile;
 import com.vodplatform.auth.exception.EmailAlreadyExistsException;
-import com.vodplatform.auth.exception.RegistrationExceptionHandler;
+import com.vodplatform.auth.exception.AuthExceptionHandler;
 import com.vodplatform.auth.service.RegistrationService;
 import java.util.List;
 import java.util.UUID;
@@ -39,7 +39,7 @@ class RegistrationControllerTest {
         validator.afterPropertiesSet();
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new RegistrationController(registrationService))
-                .setControllerAdvice(new RegistrationExceptionHandler())
+                .setControllerAdvice(new AuthExceptionHandler())
                 .setValidator(validator)
                 .build();
     }

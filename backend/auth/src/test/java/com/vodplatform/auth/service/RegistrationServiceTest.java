@@ -15,8 +15,9 @@ import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
-import java.util.Optional;
+import com.vodplatform.auth.security.VersionedBcryptPasswordEncoder;
 import java.sql.SQLException;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,7 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.hibernate.exception.ConstraintViolationException;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,13 +40,20 @@ class RegistrationServiceTest {
     @Mock
     private RoleEntity role;
 
-    private BCryptPasswordEncoder passwordEncoder;
+    private PasswordEncoder passwordEncoder;
     private RegistrationService registrationService;
+    private UserProfileMapper userProfileMapper;
 
     @BeforeEach
     void setUp() {
-        passwordEncoder = new BCryptPasswordEncoder();
-        registrationService = new RegistrationService(userRepository, roleRepository, passwordEncoder);
+        passwordEncoder = new VersionedBcryptPasswordEncoder();
+        userProfileMapper = new UserProfileMapper();
+        registrationService = new RegistrationService(
+                userRepository,
+                roleRepository,
+                passwordEncoder,
+                userProfileMapper
+        );
     }
 
     @Test
@@ -71,6 +79,7 @@ class RegistrationServiceTest {
         assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(savedUser.getRoles()).containsExactly(role);
         assertThat(savedUser.getPasswordHash()).isNotEqualTo(request.password());
+        assertThat(savedUser.getPasswordHash()).startsWith("{bcrypt-sha256}$2");
         assertThat(passwordEncoder.matches(request.password(), savedUser.getPasswordHash())).isTrue();
         assertThat(profile.id()).isEqualTo(savedUser.getId());
         assertThat(profile.email()).isEqualTo(request.email());

@@ -9,11 +9,9 @@ import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
 import java.time.Instant;
-import java.util.Comparator;
-import java.util.List;
 import java.util.UUID;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,15 +24,18 @@ public class RegistrationService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final UserProfileMapper userProfileMapper;
 
     public RegistrationService(
             UserRepository userRepository,
             RoleRepository roleRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            UserProfileMapper userProfileMapper
     ) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
+        this.userProfileMapper = userProfileMapper;
     }
 
     @Transactional
@@ -59,7 +60,7 @@ public class RegistrationService {
 
         try {
             UserEntity savedUser = userRepository.saveAndFlush(user);
-            return toProfile(savedUser);
+            return userProfileMapper.toProfile(savedUser);
         } catch (DataIntegrityViolationException exception) {
             if (hasConstraint(exception, "ux_users_email")) {
                 throw new EmailAlreadyExistsException();
@@ -80,11 +81,4 @@ public class RegistrationService {
         return false;
     }
 
-    private UserProfile toProfile(UserEntity user) {
-        List<String> roles = user.getRoles().stream()
-                .map(RoleEntity::getName)
-                .sorted(Comparator.naturalOrder())
-                .toList();
-        return new UserProfile(user.getId(), user.getEmail(), user.getDisplayName(), roles);
-    }
 }
