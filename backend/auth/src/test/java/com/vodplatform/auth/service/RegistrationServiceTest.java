@@ -15,9 +15,9 @@ import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
-import com.vodplatform.auth.security.Utf8AwareBcryptPasswordEncoder;
-import java.util.Optional;
+import com.vodplatform.auth.security.VersionedBcryptPasswordEncoder;
 import java.sql.SQLException;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -46,7 +46,7 @@ class RegistrationServiceTest {
 
     @BeforeEach
     void setUp() {
-        passwordEncoder = new Utf8AwareBcryptPasswordEncoder();
+        passwordEncoder = new VersionedBcryptPasswordEncoder();
         userProfileMapper = new UserProfileMapper();
         registrationService = new RegistrationService(
                 userRepository,
@@ -79,6 +79,7 @@ class RegistrationServiceTest {
         assertThat(savedUser.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(savedUser.getRoles()).containsExactly(role);
         assertThat(savedUser.getPasswordHash()).isNotEqualTo(request.password());
+        assertThat(savedUser.getPasswordHash()).startsWith("{bcrypt-sha256}$2");
         assertThat(passwordEncoder.matches(request.password(), savedUser.getPasswordHash())).isTrue();
         assertThat(profile.id()).isEqualTo(savedUser.getId());
         assertThat(profile.email()).isEqualTo(request.email());
