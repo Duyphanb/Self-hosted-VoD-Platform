@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PropsWithChildren } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthResponse, UserProfile } from '../lib/api/types';
 import { AuthProvider } from '../features/auth/AuthContext';
 import { createAuthSession, writeAuthSession } from '../features/auth/authStorage';
@@ -16,6 +16,18 @@ const regularUser: UserProfile = {
 };
 
 describe('AppLayout auth navigation', () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it('shows guest links without protected or admin navigation', async () => {
     renderLayout();
 
@@ -23,6 +35,7 @@ describe('AppLayout auth navigation', () => {
     expect(screen.getByRole('link', { name: 'Register' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Account' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
   });
 
   it('hides admin navigation from a regular authenticated user', async () => {
@@ -32,6 +45,7 @@ describe('AppLayout auth navigation', () => {
     expect(await screen.findByRole('link', { name: 'Account' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeEnabled();
   });
 
   it('shows admin navigation only to ROLE_ADMIN', async () => {
@@ -41,6 +55,44 @@ describe('AppLayout auth navigation', () => {
     expect(await screen.findByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
   });
 
+  it('sends the refresh token once and keeps a stable disabled control while logout is pending', async () => {
+    persistUser(regularUser);
+    let resolveLogout: ((response: Response) => void) | undefined;
+    fetchMock.mockReturnValue(new Promise<Response>((resolve) => {
+      resolveLogout = resolve;
+    }));
+    renderLayout();
+
+    const signOut = await screen.findByRole('button', { name: 'Sign out' });
+    fireEvent.click(signOut);
+    fireEvent.click(signOut);
+
+    const pendingControl = await screen.findByRole('button', { name: 'Signing out…' });
+    expect(pendingControl).toBe(signOut);
+    expect(pendingControl).toBeDisabled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem('vod.auth.session.v1')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument();
+    expectLogoutRequest(fetchMock.mock.calls[0]);
+
+    resolveLogout?.(new Response(null, { status: 204 }));
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument());
+  });
+
+  it('stays signed out and reports an accessible error when revocation fails', async () => {
+    persistUser(regularUser);
+    fetchMock.mockRejectedValue(new TypeError('network unavailable'));
+    renderLayout();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Signed out locally, but server token revocation could not be confirmed.'
+    );
+    expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('vod.auth.session.v1')).toBeNull();
+  });
 });
 
 function renderLayout() {
@@ -68,4 +120,12 @@ function persistUser(user: UserProfile) {
     expiresInSeconds: 900
   };
   writeAuthSession(createAuthSession(response), window.localStorage);
+}
+
+function expectLogoutRequest(call: [input: RequestInfo | URL, init?: RequestInit]) {
+  const [input, init] = call;
+  expect(input).toBe('/api/v1/auth/logout');
+  expect(init?.method).toBe('POST');
+  expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
+  expect(JSON.parse(init?.body?.toString() ?? '{}')).toEqual({ refreshToken: 'refresh-token' });
 }

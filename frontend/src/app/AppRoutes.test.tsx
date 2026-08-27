@@ -48,6 +48,18 @@ describe('AppRoutes guard wiring', () => {
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
   });
 
+  it('redirects to login after logout from a protected route', async () => {
+    persistUser(regularUser);
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    renderProductionRoutes('/account');
+
+    expect(await screen.findByRole('heading', { name: 'Account' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+    await waitFor(() => expect(screen.getByTestId('current-location')).toHaveTextContent('/login'));
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
   it('preserves the intended route when bootstrap refresh fails before login', async () => {
     persistUser(regularUser, Date.now() + 1_000);
     fetchMock
