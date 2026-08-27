@@ -1,0 +1,691 @@
+{
+  "info": {
+    "_postman_id": "42fef3b5-193a-4c60-a39d-d8d5018f4b37",
+    "name": "VoD Platform - Sprint 2 Auth",
+    "description": "Ordered Sprint 2 contract checks for registration, login, refresh rotation, protected profile access, and idempotent logout. This is intentionally narrower than the comprehensive MVP collection reserved for Issue 10.3.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "item": [
+    {
+      "name": "01 - Register user",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const suffix = Date.now() + '-' + pm.variables.replaceIn('{{$randomInt}}');",
+              "pm.environment.set('testEmail', 'postman-auth-' + suffix + '@example.com');",
+              "['userId', 'accessToken', 'refreshToken', 'previousRefreshToken'].forEach((name) => {",
+              "  pm.environment.set(name, '');",
+              "});"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 201 Created', () => {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('Response matches UserProfile and assigns ROLE_USER', () => {",
+              "  pm.expect(body).to.be.an('object');",
+              "  pm.expect(body.id).to.be.a('string').and.not.empty;",
+              "  pm.expect(body.email).to.equal(pm.environment.get('testEmail'));",
+              "  pm.expect(body.displayName).to.equal(pm.environment.get('testDisplayName'));",
+              "  pm.expect(body.roles).to.be.an('array').that.includes('ROLE_USER');",
+              "});",
+              "pm.test('Registration exposes no password or tokens', () => {",
+              "  ['password', 'passwordHash', 'accessToken', 'refreshToken'].forEach((field) => {",
+              "    pm.expect(body).not.to.have.property(field);",
+              "  });",
+              "});",
+              "",
+              "pm.environment.set('userId', body.id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"displayName\": \"{{testDisplayName}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/register",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "register"
+          ]
+        },
+        "description": "Creates one synthetic ACTIVE user with ROLE_USER. The pre-request script generates a unique email for each ordered run."
+      },
+      "response": []
+    },
+    {
+      "name": "02 - Reject duplicate registration",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 409 Conflict', () => {",
+              "  pm.response.to.have.status(409);",
+              "});",
+              "",
+              "const error = pm.response.json();",
+              "pm.test('Response matches ApiError', () => {",
+              "  pm.expect(error).to.include.keys('timestamp', 'status', 'code', 'message');",
+              "  pm.expect(error.status).to.equal(409);",
+              "  pm.expect(error.timestamp).to.be.a('string').and.not.empty;",
+              "  pm.expect(error.message).to.be.a('string').and.not.empty;",
+              "});",
+              "pm.test('Implementation regression code is EMAIL_ALREADY_EXISTS', () => {",
+              "  pm.expect(error.code).to.equal('EMAIL_ALREADY_EXISTS');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"displayName\": \"{{testDisplayName}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/register",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "register"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "03 - Reject invalid login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 401 Unauthorized', () => {",
+              "  pm.response.to.have.status(401);",
+              "});",
+              "",
+              "const error = pm.response.json();",
+              "pm.test('Response matches generic authentication ApiError', () => {",
+              "  pm.expect(error).to.include.keys('timestamp', 'status', 'code', 'message');",
+              "  pm.expect(error.status).to.equal(401);",
+              "  pm.expect(error.message).to.be.a('string').and.not.empty;",
+              "});",
+              "pm.test('Implementation regression code is INVALID_CREDENTIALS', () => {",
+              "  pm.expect(error.code).to.equal('INVALID_CREDENTIALS');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}-wrong\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "login"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "04 - Login and capture tokens",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200 OK', () => {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('Response matches AuthResponse', () => {",
+              "  pm.expect(body.user).to.be.an('object');",
+              "  pm.expect(body.user.id).to.equal(pm.environment.get('userId'));",
+              "  pm.expect(body.user.email).to.equal(pm.environment.get('testEmail'));",
+              "  pm.expect(body.user.displayName).to.equal(pm.environment.get('testDisplayName'));",
+              "  pm.expect(body.user.roles).to.include('ROLE_USER');",
+              "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+              "  pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
+              "  pm.expect(body.expiresInSeconds).to.be.a('number').and.above(0);",
+              "  pm.expect(Number.isInteger(body.expiresInSeconds)).to.equal(true);",
+              "  ['password', 'passwordHash'].forEach((field) => {",
+              "    pm.expect(body.user).not.to.have.property(field);",
+              "  });",
+              "});",
+              "",
+              "pm.environment.set('accessToken', body.accessToken);",
+              "pm.environment.set('refreshToken', body.refreshToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "login"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "05 - Refresh and rotate tokens",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.environment.set('previousRefreshToken', pm.environment.get('refreshToken'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200 OK', () => {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "const previousRefreshToken = pm.environment.get('previousRefreshToken');",
+              "pm.test('Refresh returns a rotated AuthResponse for the same user', () => {",
+              "  pm.expect(body.user.id).to.equal(pm.environment.get('userId'));",
+              "  pm.expect(body.user.email).to.equal(pm.environment.get('testEmail'));",
+              "  pm.expect(body.user.displayName).to.equal(pm.environment.get('testDisplayName'));",
+              "  pm.expect(body.user.roles).to.include('ROLE_USER');",
+              "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+              "  pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
+              "  pm.expect(body.refreshToken).not.to.equal(previousRefreshToken);",
+              "  pm.expect(body.expiresInSeconds).to.be.a('number').and.above(0);",
+              "  pm.expect(Number.isInteger(body.expiresInSeconds)).to.equal(true);",
+              "  ['password', 'passwordHash'].forEach((field) => {",
+              "    pm.expect(body.user).not.to.have.property(field);",
+              "  });",
+              "});",
+              "",
+              "pm.environment.set('accessToken', body.accessToken);",
+              "pm.environment.set('refreshToken', body.refreshToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/refresh",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "refresh"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "06 - Reject replayed refresh token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 401 Unauthorized', () => {",
+              "  pm.response.to.have.status(401);",
+              "});",
+              "",
+              "const error = pm.response.json();",
+              "pm.test('Response matches ApiError', () => {",
+              "  pm.expect(error).to.include.keys('timestamp', 'status', 'code', 'message');",
+              "  pm.expect(error.status).to.equal(401);",
+              "});",
+              "pm.test('Implementation regression code is INVALID_REFRESH_TOKEN', () => {",
+              "  pm.expect(error.code).to.equal('INVALID_REFRESH_TOKEN');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{previousRefreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/refresh",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "refresh"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "07 - Get authenticated user profile",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200 OK', () => {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('Response matches the authenticated UserProfile', () => {",
+              "  pm.expect(body.id).to.equal(pm.environment.get('userId'));",
+              "  pm.expect(body.email).to.equal(pm.environment.get('testEmail'));",
+              "  pm.expect(body.displayName).to.equal(pm.environment.get('testDisplayName'));",
+              "  pm.expect(body.roles).to.include('ROLE_USER');",
+              "});",
+              "pm.test('Profile exposes no password data', () => {",
+              "  ['password', 'passwordHash'].forEach((field) => {",
+              "    pm.expect(body).not.to.have.property(field);",
+              "  });",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{accessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/users/me",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "users",
+            "me"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "08 - Logout current refresh token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 204 No Content', () => {",
+              "  pm.response.to.have.status(204);",
+              "});",
+              "pm.test('Response body is empty', () => {",
+              "  pm.expect(pm.response.text()).to.equal('');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/logout",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "logout"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "09 - Reject refresh after logout",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 401 Unauthorized', () => {",
+              "  pm.response.to.have.status(401);",
+              "});",
+              "",
+              "const error = pm.response.json();",
+              "pm.test('Response matches ApiError', () => {",
+              "  pm.expect(error).to.include.keys('timestamp', 'status', 'code', 'message');",
+              "  pm.expect(error.status).to.equal(401);",
+              "});",
+              "pm.test('Implementation regression code is INVALID_REFRESH_TOKEN', () => {",
+              "  pm.expect(error.code).to.equal('INVALID_REFRESH_TOKEN');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/refresh",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "refresh"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10 - Repeat logout idempotently",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status remains 204 No Content', () => {",
+              "  pm.response.to.have.status(204);",
+              "});",
+              "pm.test('Response body remains empty', () => {",
+              "  pm.expect(pm.response.text()).to.equal('');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/logout",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "logout"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11 - Logout without a token idempotently",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 204 No Content', () => {",
+              "  pm.response.to.have.status(204);",
+              "});",
+              "pm.test('Response body is empty', () => {",
+              "  pm.expect(pm.response.text()).to.equal('');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/logout",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "logout"
+          ]
+        },
+        "description": "The Sprint 2 implementation deliberately treats an omitted refresh token as an idempotent no-op."
+      },
+      "response": []
+    }
+  ]
+}
