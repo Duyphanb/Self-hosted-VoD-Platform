@@ -90,6 +90,34 @@ class LoginServiceTest {
     }
 
     @Test
+    void upgradesLegacyPasswordHashAfterSuccessfulAuthentication() {
+        LoginRequest request = new LoginRequest("viewer@example.com", "correct-password");
+        UserProfile profile = new UserProfile(
+                UUID.randomUUID(),
+                request.email(),
+                "Viewer",
+                List.of("ROLE_USER")
+        );
+        when(userRepository.findByEmail(request.email())).thenReturn(Optional.of(user));
+        when(user.getPasswordHash()).thenReturn("legacy-bcrypt-hash");
+        when(user.getStatus()).thenReturn(UserStatus.ACTIVE);
+        when(passwordEncoder.matches(request.password(), "legacy-bcrypt-hash")).thenReturn(true);
+        when(passwordEncoder.upgradeEncoding("legacy-bcrypt-hash")).thenReturn(true);
+        when(passwordEncoder.encode(request.password())).thenReturn("versioned-bcrypt-hash");
+        when(jwtAccessTokenService.issue(user)).thenReturn(new IssuedAccessToken("access-token", 900));
+        when(refreshTokenService.issue(user)).thenReturn(new IssuedRefreshToken(
+                "refresh-token",
+                "refresh-hash",
+                Instant.parse("2030-01-08T00:00:00Z")
+        ));
+        when(userProfileMapper.toProfile(user)).thenReturn(profile);
+
+        loginService.login(request);
+
+        verify(user).updatePasswordHash("versioned-bcrypt-hash");
+    }
+
+    @Test
     void unknownEmailUsesDummyHashAndReturnsGenericFailure() {
         LoginRequest request = new LoginRequest("missing@example.com", "wrong-password");
         when(userRepository.findByEmail(request.email())).thenReturn(Optional.empty());
