@@ -4,7 +4,7 @@ import com.vodplatform.auth.persistence.RoleEntity;
 import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
-import com.vodplatform.auth.security.Utf8AwareBcryptPasswordEncoder;
+import com.vodplatform.auth.security.VersionedBcryptPasswordEncoder;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,6 +18,6 @@ public class AuthConfiguration {
 
     @Bean
     PasswordEncoder passwordEncoder() {
-        return new Utf8AwareBcryptPasswordEncoder();
+        return new VersionedBcryptPasswordEncoder();
     }
 }
