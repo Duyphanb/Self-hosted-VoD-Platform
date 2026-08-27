@@ -80,6 +80,11 @@ public class UserEntity {
         this.updatedAt = updatedAt;
     }
 
+    public void updatePasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }
