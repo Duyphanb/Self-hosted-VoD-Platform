@@ -17,6 +17,7 @@ import com.vodplatform.auth.persistence.UserStatus;
 import com.vodplatform.auth.service.RefreshTokenService;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
@@ -60,9 +61,6 @@ class LoginIntegrationTests {
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    @Autowired
     private RefreshTokenService refreshTokenService;
 
     @BeforeEach
@@ -73,7 +71,7 @@ class LoginIntegrationTests {
         UserEntity user = new UserEntity(
                 UUID.randomUUID(),
                 "viewer@example.com",
-                passwordEncoder.encode("strong-password"),
+                new BCryptPasswordEncoder().encode("strong-password"),
                 "Viewer",
                 UserStatus.ACTIVE,
                 now,
@@ -84,7 +82,7 @@ class LoginIntegrationTests {
     }
 
     @Test
-    void loginReturnsTokensAndPersistsOnlyRefreshTokenHash() throws Exception {
+    void legacyDirectBcryptLoginReturnsTokensAndUpgradesPasswordHash() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -110,6 +108,39 @@ class LoginIntegrationTests {
         assertThat(storedToken.getTokenHash()).isNotEqualTo(rawRefreshToken);
         assertThat(storedToken.getExpiresAt()).isAfter(Instant.now().plusSeconds(6 * 24 * 60 * 60));
         assertThat(storedToken.getRevokedAt()).isNull();
+        assertThat(userRepository.findByEmail("viewer@example.com").orElseThrow().getPasswordHash())
+                .startsWith("{bcrypt-sha256}$2");
+    }
+
+    @Test
+    void registrationAndLoginSupportFullUnicodeCharacterLimit() throws Exception {
+        String password = "密".repeat(72);
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "email", "unicode@example.com",
+                                "password", password,
+                                "displayName", "Unicode Viewer"
+                        ))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.email").value("unicode@example.com"))
+                .andExpect(jsonPath("$.accessToken").doesNotExist())
+                .andExpect(jsonPath("$.refreshToken").doesNotExist());
+
+        assertThat(userRepository.findByEmail("unicode@example.com").orElseThrow().getPasswordHash())
+                .startsWith("{bcrypt-sha256}$2");
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "email", "unicode@example.com",
+                                "password", password
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.email").value("unicode@example.com"))
+                .andExpect(jsonPath("$.accessToken").isString())
+                .andExpect(jsonPath("$.refreshToken").isString());
     }
 
     @Test
