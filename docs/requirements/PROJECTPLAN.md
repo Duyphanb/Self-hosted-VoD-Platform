@@ -89,6 +89,7 @@ See `BACKLOG.md` for detailed sprint backlog with issues, acceptance criteria, d
 
 Phase 3 - Feature Development is active.
 
-- Sprint 1 - Foundation is complete.
-- Sprint 2 - Auth is active.
-- The next implementation batch is Issue 2.1 / GitHub Issue #17 - Backend Auth Service - Registration.
+- Sprint 1 - Foundation and Sprint 2 - Auth are complete.
+- Complete any open P0/P1 security or repository-governance gate before starting another feature batch.
+- Select the next dependency-safe implementation issue from `BACKLOG.md`.
+- GitHub Issues and pull requests are the operational source for the currently active batch.
