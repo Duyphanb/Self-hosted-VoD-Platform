@@ -48,6 +48,16 @@ public class AuthExceptionHandler {
         );
     }
 
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    ResponseEntity<ApiError> handleInvalidRefreshToken(InvalidRefreshTokenException exception) {
+        return buildResponse(
+                HttpStatus.UNAUTHORIZED,
+                "INVALID_REFRESH_TOKEN",
+                exception.getMessage(),
+                List.of()
+        );
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ResponseEntity<ApiError> handleUnreadableRequest() {
         return buildResponse(
