@@ -10,7 +10,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vod_app} -d ${POSTGRES_DB:-vod_platform}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -65,12 +65,13 @@ services:
 
   flyway:
     image: flyway/flyway:12.10.0
+    environment:
+      FLYWAY_URL: jdbc:postgresql://${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-vod_platform}
+      FLYWAY_USER: ${POSTGRES_USER:-vod_app}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      FLYWAY_CONNECT_RETRIES: "60"
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
     command:
-      - -url=jdbc:postgresql://${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-vod_platform}
-      - -user=${POSTGRES_USER:-vod_app}
-      - -password=${POSTGRES_PASSWORD:-change-me}
-      - -connectRetries=60
-      - -locations=filesystem:/flyway/sql
       - migrate
     volumes:
       - ../backend/common/src/main/resources/db/migration:/flyway/sql:ro
@@ -82,19 +83,26 @@ services:
 
   minio-init:
     image: minio/mc:latest
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-vod_minio}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me}
+      MINIO_BUCKET_RAW: ${MINIO_BUCKET_RAW:-vod-raw}
+      MINIO_BUCKET_HLS: ${MINIO_BUCKET_HLS:-vod-hls}
+      MINIO_BUCKET_THUMBNAILS: ${MINIO_BUCKET_THUMBNAILS:-vod-thumbnails}
     depends_on:
       minio:
         condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-vod_minio} ${MINIO_SECRET_KEY:-change-me}; do sleep 2; done;
-      mc mb --ignore-existing local/${MINIO_BUCKET_RAW:-vod-raw};
-      mc mb --ignore-existing local/${MINIO_BUCKET_HLS:-vod-hls};
-      mc mb --ignore-existing local/${MINIO_BUCKET_THUMBNAILS:-vod-thumbnails};
-      mc anonymous set none local/${MINIO_BUCKET_RAW:-vod-raw};
-      mc anonymous set none local/${MINIO_BUCKET_HLS:-vod-hls};
-      mc anonymous set none local/${MINIO_BUCKET_THUMBNAILS:-vod-thumbnails};
-      "
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until mc alias set local http://minio:9000 "$${MINIO_ACCESS_KEY}" "$${MINIO_SECRET_KEY}"; do sleep 2; done
+        mc mb --ignore-existing "local/$${MINIO_BUCKET_RAW}"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET_HLS}"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET_THUMBNAILS}"
+        mc anonymous set none "local/$${MINIO_BUCKET_RAW}"
+        mc anonymous set none "local/$${MINIO_BUCKET_HLS}"
+        mc anonymous set none "local/$${MINIO_BUCKET_THUMBNAILS}"
     networks:
       - vod_internal
 
