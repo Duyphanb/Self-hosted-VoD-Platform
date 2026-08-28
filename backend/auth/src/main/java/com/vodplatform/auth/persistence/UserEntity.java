@@ -75,6 +75,11 @@ public class UserEntity {
         roles.add(role);
     }
 
+    public void updateDisplayName(String displayName, Instant updatedAt) {
+        this.displayName = displayName;
+        this.updatedAt = updatedAt;
+    }
+
     public void updatePasswordHash(String passwordHash) {
         this.passwordHash = passwordHash;
         this.updatedAt = Instant.now();
@@ -98,6 +103,10 @@ public class UserEntity {
 
     public UserStatus getStatus() {
         return status;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 
     public Set<RoleEntity> getRoles() {
