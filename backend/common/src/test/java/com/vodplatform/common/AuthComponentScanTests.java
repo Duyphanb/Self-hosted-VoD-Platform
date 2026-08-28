@@ -3,9 +3,11 @@ package com.vodplatform.common;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vodplatform.auth.service.LoginService;
+import com.vodplatform.auth.service.LogoutService;
 import com.vodplatform.auth.service.RefreshTokenRotationService;
 import com.vodplatform.auth.service.RegistrationService;
 import com.vodplatform.auth.web.LoginController;
+import com.vodplatform.auth.web.LogoutController;
 import com.vodplatform.auth.web.RefreshTokenController;
 import com.vodplatform.auth.web.RegistrationController;
 import org.junit.jupiter.api.Test;
@@ -31,6 +33,12 @@ class AuthComponentScanTests {
     private LoginController loginController;
 
     @Autowired
+    private LogoutService logoutService;
+
+    @Autowired
+    private LogoutController logoutController;
+
+    @Autowired
     private RefreshTokenRotationService refreshTokenRotationService;
 
     @Autowired
@@ -42,6 +50,8 @@ class AuthComponentScanTests {
         assertThat(registrationController).isNotNull();
         assertThat(loginService).isNotNull();
         assertThat(loginController).isNotNull();
+        assertThat(logoutService).isNotNull();
+        assertThat(logoutController).isNotNull();
         assertThat(refreshTokenRotationService).isNotNull();
         assertThat(refreshTokenController).isNotNull();
     }
