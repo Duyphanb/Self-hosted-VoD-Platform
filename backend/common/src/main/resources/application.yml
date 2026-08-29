@@ -11,6 +11,10 @@ auth:
     access-token-ttl: ${JWT_ACCESS_TOKEN_TTL_MINUTES:60}m
     refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL_DAYS:7}d
 
+security:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+
 management:
   endpoints:
     web:
