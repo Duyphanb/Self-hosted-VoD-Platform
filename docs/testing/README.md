@@ -11,6 +11,10 @@ Use this folder for Phase 4 testing and hardening artifacts.
 - known limitations
 - test evidence index
 
+## Current Hardening Guides
+
+- [Dependency security](DEPENDENCY-SECURITY.md)
+
 ## Purpose
 
 - prove the upload -> transcode -> playback flow
