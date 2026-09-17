@@ -85,6 +85,7 @@ run_production_compose() {
   MINIO_ACCESS_KEY="$minio_access_key_value" \
   MINIO_SECRET_KEY="$minio_secret_key_value" \
   JWT_SECRET="$jwt_secret_value" \
+  CORS_ALLOWED_ORIGINS= \
     docker compose \
       -p "$compose_project" \
       -f deploy/docker-compose.yml \
@@ -101,6 +102,7 @@ run_production_compose_from_file() {
     -u MINIO_ACCESS_KEY \
     -u MINIO_SECRET_KEY \
     -u JWT_SECRET \
+    -u CORS_ALLOWED_ORIGINS \
     docker compose \
       --env-file "$env_file" \
       -p "$compose_project" \
@@ -262,6 +264,7 @@ expected = {
         "SPRING_DATASOURCE_USERNAME": "ci_postgres_user",
         "SPRING_DATASOURCE_PASSWORD": "ci-postgres-password-46",
         "JWT_SECRET": "ci-jwt-signing-secret-with-at-least-thirty-two-bytes",
+        "CORS_ALLOWED_ORIGINS": "",
         "RABBITMQ_USERNAME": "ci_rabbitmq_user",
         "RABBITMQ_PASSWORD": "ci-rabbitmq-password-46",
         "MINIO_ACCESS_KEY": "ci_minio_access_key",
