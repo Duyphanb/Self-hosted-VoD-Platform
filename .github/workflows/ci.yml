@@ -53,8 +53,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate compose config
-        run: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml config
+      - name: Verify production configuration fails closed
+        run: sh deploy/tests/production-config-smoke.sh
 
       - name: Build backend image
         run: docker build -t vod-backend-skeleton ./backend
