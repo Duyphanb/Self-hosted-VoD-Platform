@@ -1,185 +1,38 @@
 # Documentation Index
 
-## How To Use These Docs
+Use this map when the task needs context. Select relevant sections and follow dependencies as needed; phase labels describe project organization, not reading restrictions. There is no mandatory document stack for every edit.
 
-Read documents in this order:
+## Source of truth
 
-1. `AGENTS.md`
-2. `docs/INDEX.md`
-3. The docs for the current phase only
-4. The current GitHub issue, task, or batch instructions
+Frozen requirements and architecture govern implementation. Planning/status documents describe intended work, not proof of completion. `docs/reports/` contains archival plans and may use obsolete names.
 
-Do not read later-phase docs unless the task explicitly asks for them.
+| Task or decision | Relevant source |
+|---|---|
+| MVP scope and exclusions | [VISION.md](requirements/VISION.md), [OUT_OF_SCOPE.md](requirements/OUT_OF_SCOPE.md) |
+| Acceptance criteria, constraints, terminology | [USERSTORIES.md](requirements/USERSTORIES.md), [NFR.md](requirements/NFR.md), [DOMAINGLOSSARY.md](requirements/DOMAINGLOSSARY.md) |
+| Backlog issue, dependencies, planned next step | Specific issue in [BACKLOG.md](requirements/BACKLOG.md), [PROJECTPLAN.md](requirements/PROJECTPLAN.md); verify status against current code/GitHub when relevant |
+| Requirement coverage and risks | [TRACEABILITY.md](requirements/TRACEABILITY.md), [RISKREGISTER.md](requirements/RISKREGISTER.md) |
+| Runtime/module boundaries | [SYSTEM-ARCHITECTURE.md](architecture/SYSTEM-ARCHITECTURE.md), relevant [ADR](architecture/adr/) |
+| Tables, fields, constraints, migrations | [ERD.md](architecture/ERD.md); use frozen names such as `people`, `movie_credits`, `watchlist_items` |
+| HTTP methods, paths, payloads, status codes | [API-CONTRACT.yaml](architecture/API-CONTRACT.yaml), affected flow in [SEQUENCE-DIAGRAMS.md](architecture/SEQUENCE-DIAGRAMS.md) |
+| Authentication, authorization, uploads, HLS access | [SECURITY.md](architecture/SECURITY.md) plus the affected API/sequence |
+| Compose, network exposure, storage, environment configuration | [INFRASTRUCTURE.md](architecture/INFRASTRUCTURE.md); private buckets are `vod-raw`, `vod-hls`, `vod-thumbnails` |
+| Logs, health, metrics | [OBSERVABILITY.md](architecture/OBSERVABILITY.md) |
 
-## Source Of Truth Warning
+## Implementation and verification
 
-Implementation must follow the frozen files under `docs/requirements/` and `docs/architecture/`.
+- [Implementation conventions](../Codex_Usage_Notes.md#implementation-conventions): backend, frontend, and worker rules; read the applicable section when changing code.
+- Current code and tests live in `backend/`, `frontend/`, `worker/`, and `deploy/`. Inspect the paths needed to understand and verify the change.
+- [README.md](../README.md): local stack commands and runtime limitations. Check destinations and data persistence before running commands that mutate state.
+- [CI workflow](../.github/workflows/ci.yml), module POMs, and [frontend scripts](../frontend/package.json): current build/test commands. Select relevant checks rather than treating the entire CI workflow as a per-edit checklist.
+- [Testing docs](testing/README.md): test evidence and hardening guides. [Dependency security](testing/DEPENDENCY-SECURITY.md) covers dependency scans.
+- [Deployment docs](deployment/README.md): deployment and production preflight guidance. Reading a runbook does not authorize production operations.
 
-Root-level master-plan artifacts are archival context only and may contain pre-freeze names. If they conflict with frozen docs, use:
+## Optional Codex guidance
 
-- `docs/architecture/ERD.md` for schema/table names such as `people`, `movie_credits`, and `watchlist_items`
-- `docs/architecture/INFRASTRUCTURE.md` for bucket names such as `vod-raw`, `vod-hls`, and `vod-thumbnails`
-- `docs/requirements/PROJECTPLAN.md` for current phase and next-batch guidance
+- [Ghi chú review kỹ thuật](reports/ENGINEERING-REVIEW-NOTES.md): đọc khi chọn ưu tiên hardening, thiết kế upload/worker/playback hoặc cân nhắc sau MVP. Tổng hợp trao đổi của người dùng; các đề xuất chưa thay thế frozen contracts hay trạng thái GitHub hiện tại.
+- [Batch prompt](ai-prompts/BATCH-RUNNER.md): specify a bounded outcome and completion evidence when preparing a task.
+- [Sprint guide](ai-prompts/SPRINT-EXECUTION-GUIDE.md): backlog dependencies and issue acceptance checks when implementing a sprint issue.
+- [Instruction maintenance](../Codex_Usage_Notes.md#instruction-maintenance): where guidance belongs and when a skill is justified.
 
-## Phase Map
-
-### Phase 0 - Project Harness
-
-Read:
-
-- `AGENTS.md`
-- `README.md`
-- `.env.example`
-- `docs/ai-prompts/` when prompt templates are needed
-
-Purpose:
-
-- repo skeleton
-- workflow rules
-- environment baseline
-- Codex usage rules
-
-### Phase 1 - Requirements And Planning
-
-Read:
-
-- `docs/requirements/README.md`
-- `docs/requirements/VISION.md`
-- `docs/requirements/USERSTORIES.md`
-- `docs/requirements/NFR.md`
-- `docs/requirements/OUT_OF_SCOPE.md`
-- `docs/requirements/TRACEABILITY.md`
-- `docs/requirements/DOMAINGLOSSARY.md`
-- `docs/requirements/PROJECTPLAN.md`
-- `docs/requirements/RISKREGISTER.md`
-
-Purpose:
-
-- freeze MVP scope
-- define stories and acceptance criteria
-- define measurable constraints
-- define traceability and risks
-
-### Phase 2 - Architecture Design
-
-Read:
-
-- `docs/architecture/README.md`
-- `docs/architecture/SYSTEM-ARCHITECTURE.md`
-- `docs/architecture/ERD.md`
-- `docs/architecture/API-CONTRACT.yaml`
-- `docs/architecture/SEQUENCE-DIAGRAMS.md`
-- `docs/architecture/INFRASTRUCTURE.md`
-- `docs/architecture/SECURITY.md`
-- `docs/architecture/OBSERVABILITY.md`
-- `docs/architecture/adr/`
-
-Purpose:
-
-- freeze domain model
-- freeze API contract
-- define runtime flows
-- define infrastructure, security, observability, and ADR decisions
-
-### Phase 3 - Implementation
-
-Read:
-
-- `backend/`
-- `frontend/`
-- `worker/`
-- `deploy/`
-- only the relevant Phase 1 and Phase 2 docs for the task
-
-Purpose:
-
-- implement features
-- keep code aligned with frozen requirements and architecture
-- add tests with behavior changes
-
-### Phase 4 - Testing And Hardening
-
-Read:
-
-- `docs/testing/README.md`
-- `docs/testing/`
-- relevant Phase 1 and Phase 2 docs
-- relevant implementation files
-
-Purpose:
-
-- add test evidence
-- prepare Postman/Newman/manual E2E checks
-- harden reliability
-
-### Phase 5 - Deployment And Operations
-
-Read:
-
-- `docs/deployment/README.md`
-- `docs/deployment/`
-- relevant architecture docs
-- relevant implementation files
-
-Purpose:
-
-- Oracle VPS deployment
-- HTTPS setup
-- backup and restore
-- rollback
-- runbook
-
-## Default Rule
-
-If a task does not mention a phase explicitly, assume the current phase only and ignore later phases.
-
-## File Selection Rule
-
-Read the minimum set of files required for the current task.
-
-If a file is not relevant to the current batch, do not open it.
-
-## Examples
-
-### Requirements Task
-
-Read:
-
-- `AGENTS.md`
-- `docs/INDEX.md`
-- `docs/requirements/README.md`
-- relevant files under `docs/requirements/`
-
-Do not read:
-
-- `docs/architecture/`
-- `backend/`
-- `frontend/`
-- `worker/`
-
-### Architecture Task
-
-Read:
-
-- `AGENTS.md`
-- `docs/INDEX.md`
-- `docs/requirements/`
-- relevant current files under `docs/architecture/`
-
-Do not read:
-
-- implementation code unless the task explicitly asks to compare against it
-
-### Backend Feature Task
-
-Read:
-
-- `AGENTS.md`
-- `docs/INDEX.md`
-- relevant requirements docs
-- relevant architecture docs
-- backend files needed for the task
-
-Do not read:
-
-- unrelated frontend, worker, deployment, or docs files
+Repository-wide boundaries and completion criteria live in [AGENTS.md](../AGENTS.md). These optional guides add context without imposing another reading sequence or overriding frozen contracts.

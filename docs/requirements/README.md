@@ -2,7 +2,9 @@
 
 Use this folder for Phase 1 requirements and planning.
 
-## Read Order
+## Document Map
+
+Choose the documents relevant to the task; this list is not a required reading order. Use [the documentation index](../INDEX.md) for task-based routing.
 
 1. `VISION.md`
 2. `DOMAINGLOSSARY.md`
