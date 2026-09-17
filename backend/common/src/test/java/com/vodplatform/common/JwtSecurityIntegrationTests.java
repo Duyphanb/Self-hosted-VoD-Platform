@@ -125,6 +125,32 @@ class JwtSecurityIntegrationTests {
     }
 
     @Test
+    void securityHeadersAreWrittenForCommittedUnauthorizedAndSuccessfulResponses() throws Exception {
+        mockMvc.perform(get("/test/security-context"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(
+                        HttpHeaders.CACHE_CONTROL,
+                        "no-cache, no-store, max-age=0, must-revalidate"
+                ))
+                .andExpect(header().string(HttpHeaders.PRAGMA, "no-cache"))
+                .andExpect(header().string(HttpHeaders.EXPIRES, "0"))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"));
+
+        String accessToken = loginAndReadTokens().path("accessToken").asText();
+
+        mockMvc.perform(get("/test/security-context")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        HttpHeaders.CACHE_CONTROL,
+                        "no-cache, no-store, max-age=0, must-revalidate"
+                ))
+                .andExpect(header().string(HttpHeaders.PRAGMA, "no-cache"))
+                .andExpect(header().string(HttpHeaders.EXPIRES, "0"))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"));
+    }
+
+    @Test
     void expiredBearerTokenReturnsUnauthorized() throws Exception {
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
