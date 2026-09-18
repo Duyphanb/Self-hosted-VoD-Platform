@@ -1,6 +1,6 @@
 # Testing Docs
 
-Use this folder for Phase 4 testing and hardening artifacts.
+Use this folder for verification evidence and hardening guides.
 
 ## Planned Contents
 
@@ -13,6 +13,7 @@ Use this folder for Phase 4 testing and hardening artifacts.
 
 ## Current Hardening Guides
 
+- [Sprint 2 Auth closeout](SPRINT-2-CLOSEOUT.md)
 - [Dependency security](DEPENDENCY-SECURITY.md)
 
 ## Purpose
