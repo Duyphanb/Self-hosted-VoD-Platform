@@ -93,7 +93,11 @@ jobs:
         run: |
           cleanup() { docker compose --env-file /dev/null -f deploy/docker-compose.yml down --volumes; }
           trap cleanup EXIT
-          docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build postgres redis rabbitmq minio flyway minio-init backend frontend nginx
+          # Auth needs PostgreSQL and the edge, not the future media storage flow.
+          # Keep this fixture independent of the object-store lifecycle decision (#14).
+          docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build postgres redis rabbitmq frontend
+          docker compose --env-file /dev/null -f deploy/docker-compose.yml run --rm --no-deps flyway
+          docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build --no-deps backend nginx
           python3 deploy/tests/auth-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087
           # Assertion diagnostics can include response tokens. Keep only the exit status.
           if npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-2-auth.postman_collection.json -e docs/testing/postman/vod-platform-local.postman_environment.json --env-var baseUrl=http://127.0.0.1:18087 --silent; then

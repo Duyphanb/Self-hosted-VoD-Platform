@@ -45,11 +45,13 @@ Run the whole collection rather than starting in the middle because later reques
 From the repository root:
 
 ```bash
-npx --yes newman run docs/testing/postman/vod-platform-sprint-2-auth.postman_collection.json \
-  --environment docs/testing/postman/vod-platform-local.postman_environment.json
+npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-2-auth.postman_collection.json \
+  --environment docs/testing/postman/vod-platform-local.postman_environment.json --silent
 ```
 
-Newman exits nonzero when a request, assertion, or script fails. The command does not write runtime tokens back to the committed environment file unless an explicit export option is added.
+Newman exits nonzero when a request, assertion, or script fails. `--silent` prevents failed assertions from printing token-bearing response values. The command does not write runtime tokens back to the committed environment file unless an explicit export option is added.
+
+CI runs this collection after the PostgreSQL auth regression script against a unique, disposable Compose project and removes its volumes on exit. It starts only the Auth dependencies and Nginx/frontend; it does not verify object storage or the media pipeline. The object-store image availability and maintenance decision remains tracked in Issue #14.
 
 ## Test Data and Secret Safety
 
