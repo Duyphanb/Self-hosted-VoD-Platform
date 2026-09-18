@@ -82,6 +82,51 @@ class LoginIntegrationTests {
     }
 
     @Test
+    void legacyTruncationCannotAuthenticateOrReplaceTheStoredPassword() throws Exception {
+        String password = "a".repeat(72);
+        String legacyHash = new BCryptPasswordEncoder().encode(password);
+        UserEntity user = userRepository.findByEmail("viewer@example.com").orElseThrow();
+        user.updatePasswordHash(legacyHash);
+        userRepository.saveAndFlush(user);
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "email", user.getEmail(), "password", password + "wrong-suffix"))))
+                .andExpect(status().isUnauthorized());
+        assertThat(jdbcTemplate.queryForObject("SELECT password_hash FROM users WHERE id = ?",
+                String.class, user.getId())).isEqualTo(legacyHash);
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "email", user.getEmail(), "password", password))))
+                .andExpect(status().isOk());
+        userRepository.flush();
+        assertThat(jdbcTemplate.queryForObject("SELECT password_hash FROM users WHERE id = ?",
+                String.class, user.getId())).startsWith("{bcrypt-sha256}$2");
+    }
+
+    @Test
+    void emailIdentityIsCaseInsensitiveWithoutCollapsingPlusTags() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "email", "VIEWER@EXAMPLE.COM", "password", "strong-password"))))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "email", "VIEWER@EXAMPLE.COM", "password", "strong-password",
+                                "displayName", "Duplicate"))))
+                .andExpect(status().isConflict());
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "email", "viewer+tag@example.com", "password", "strong-password",
+                                "displayName", "Distinct"))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     void legacyDirectBcryptLoginReturnsTokensAndUpgradesPasswordHash() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -41,6 +41,27 @@ class RefreshTokenRotationServiceTest {
     );
 
     @Test
+    void rejectsTokenThatExpiresWhileWaitingForItsDatabaseLock() {
+        Clock clock = mock(Clock.class);
+        java.util.concurrent.atomic.AtomicBoolean lockAcquired = new java.util.concurrent.atomic.AtomicBoolean();
+        when(clock.instant()).thenAnswer(ignored -> lockAcquired.get() ? NOW.plusSeconds(2) : NOW);
+        RefreshTokenEntity token = new RefreshTokenEntity(UUID.randomUUID(), activeUser(),
+                "stored-hash", NOW.plusSeconds(1), NOW.minusSeconds(60));
+        when(refreshTokenService.hash("raw-token")).thenReturn("stored-hash");
+        when(refreshTokenRepository.findByTokenHash("stored-hash")).thenAnswer(ignored -> {
+            lockAcquired.set(true);
+            return Optional.of(token);
+        });
+        RefreshTokenRotationService delayedService = new RefreshTokenRotationService(
+                refreshTokenRepository, refreshTokenService, jwtAccessTokenService, userProfileMapper, clock);
+        assertThatThrownBy(() -> delayedService.rotate(new RefreshRequest("raw-token")))
+                .isInstanceOf(InvalidRefreshTokenException.class);
+        assertThat(token.getRevokedAt()).isNull();
+        verify(refreshTokenService, never()).issue(any());
+        verifyNoInteractions(jwtAccessTokenService);
+    }
+
+    @Test
     void validTokenIsRevokedAndReplacedInOneRotationResult() {
         UserEntity user = activeUser();
         RefreshTokenEntity token = new RefreshTokenEntity(

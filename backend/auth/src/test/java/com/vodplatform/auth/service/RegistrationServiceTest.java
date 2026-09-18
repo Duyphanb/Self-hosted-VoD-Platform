@@ -103,8 +103,9 @@ class RegistrationServiceTest {
         verify(userRepository, never()).saveAndFlush(any());
     }
 
-    @Test
-    void mapsUniqueConstraintRaceToDuplicateEmailConflict() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"ux_users_email", "ux_users_email_identity"})
+    void mapsUniqueConstraintRaceToDuplicateEmailConflict(String constraint) {
         RegisterRequest request = new RegisterRequest(
                 "viewer@example.com",
                 "strong-password",
@@ -118,7 +119,7 @@ class RegistrationServiceTest {
                         new ConstraintViolationException(
                                 "duplicate email",
                                 new SQLException("duplicate email"),
-                                "ux_users_email"
+                                constraint
                         )
                 ));
 
