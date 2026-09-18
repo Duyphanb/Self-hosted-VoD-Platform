@@ -55,6 +55,8 @@ jobs:
   skeleton:
     name: Skeleton build checks
     runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROJECT_NAME: vod-auth-audit-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout
@@ -82,6 +84,24 @@ jobs:
 
       - name: Build compose application images
         run: docker compose -f deploy/docker-compose.yml build backend worker frontend
+
+      - name: Verify auth against PostgreSQL and Nginx
+        env:
+          NGINX_HTTP_PORT: 127.0.0.1:18087
+          JWT_SECRET: ci-audit-only-signing-key-not-for-production-0917
+          CORS_ALLOWED_ORIGINS: http://localhost:18087
+        run: |
+          cleanup() { docker compose --env-file /dev/null -f deploy/docker-compose.yml down --volumes; }
+          trap cleanup EXIT
+          docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build postgres redis rabbitmq minio flyway minio-init backend frontend nginx
+          python3 deploy/tests/auth-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087
+          # Assertion diagnostics can include response tokens. Keep only the exit status.
+          if npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-2-auth.postman_collection.json -e docs/testing/postman/vod-platform-local.postman_environment.json --env-var baseUrl=http://127.0.0.1:18087 --silent; then
+            echo "PASS Newman Sprint 2 auth collection"
+          else
+            echo "FAIL Newman Sprint 2 auth collection (response details withheld)"
+            exit 1
+          fi
 
   frontend-build:
     name: Frontend build
@@ -154,7 +174,10 @@ jobs:
             docker run --rm --network host -e PGPASSWORD=vod postgres:16-alpine psql -h localhost -U vod -d vod -Atc "$1"
           }
           test "$(query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> 'flyway_schema_history';")" = "15"
-          test "$(query "SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname ~ '^(ux|ix)_';")" = "30"
+          test "$(query "SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname ~ '^(ux|ix)_';")" = "31"
           test "$(query "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'public' AND t.relname IN ('users', 'roles', 'user_roles', 'refresh_tokens', 'movies', 'genres', 'movie_genres', 'people', 'movie_credits', 'video_assets', 'encoding_jobs', 'playback_progress', 'watchlist_items', 'watch_history', 'ratings');")" = "53"
           test "$(query "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'public' AND c.contype = 'f' AND t.relname IN ('users', 'roles', 'user_roles', 'refresh_tokens', 'movies', 'genres', 'movie_genres', 'people', 'movie_credits', 'video_assets', 'encoding_jobs', 'playback_progress', 'watchlist_items', 'watch_history', 'ratings');")" = "17"
           test "$(query "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'public' AND c.contype = 'c' AND t.relname IN ('users', 'roles', 'user_roles', 'refresh_tokens', 'movies', 'genres', 'movie_genres', 'people', 'movie_credits', 'video_assets', 'encoding_jobs', 'playback_progress', 'watchlist_items', 'watch_history', 'ratings');")" = "9"
+
+      - name: Verify email migration collision safety
+        run: sh deploy/tests/email-migration-smoke.sh

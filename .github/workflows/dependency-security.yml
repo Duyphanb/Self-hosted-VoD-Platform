@@ -4,23 +4,7 @@ name: Dependency security
   push:
     branches:
       - main
-    paths:
-      - "backend/**/pom.xml"
-      - "worker/**/pom.xml"
-      - frontend/package.json
-      - frontend/package-lock.json
-      - .github/workflows/ci.yml
-      - .github/workflows/dependency-security.yml
-      - .github/dependabot.yml
   pull_request:
-    paths:
-      - "backend/**/pom.xml"
-      - "worker/**/pom.xml"
-      - frontend/package.json
-      - frontend/package-lock.json
-      - .github/workflows/ci.yml
-      - .github/workflows/dependency-security.yml
-      - .github/dependabot.yml
   schedule:
     - cron: "17 20 * * 1"
   workflow_dispatch:
