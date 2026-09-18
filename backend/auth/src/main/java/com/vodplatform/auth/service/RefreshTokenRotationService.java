@@ -37,10 +37,11 @@ public class RefreshTokenRotationService {
 
     @Transactional
     public AuthResponse rotate(RefreshRequest request) {
-        Instant now = clock.instant();
         String tokenHash = refreshTokenService.hash(request.refreshToken());
         RefreshTokenEntity currentToken = refreshTokenRepository.findByTokenHash(tokenHash)
                 .orElseThrow(InvalidRefreshTokenException::new);
+        // A competing rotation/logout can hold the row lock until after expiration.
+        Instant now = clock.instant();
         UserEntity user = currentToken.getUser();
 
         if (currentToken.getRevokedAt() != null

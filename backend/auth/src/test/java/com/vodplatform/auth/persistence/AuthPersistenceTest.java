@@ -51,6 +51,9 @@ class AuthPersistenceTest {
         assertThat(persisted.getStatus()).isEqualTo(UserStatus.ACTIVE);
         assertThat(persisted.getRoles()).extracting(RoleEntity::getName).containsExactly("ROLE_USER");
         assertThat(userRepository.existsByEmail("viewer@example.com")).isTrue();
+        assertThat(userRepository.existsByEmail("VIEWER@EXAMPLE.COM")).isTrue();
+        assertThat(userRepository.findByEmail("VIEWER@EXAMPLE.COM").orElseThrow().getId())
+                .isEqualTo(user.getId());
     }
 
     @Test

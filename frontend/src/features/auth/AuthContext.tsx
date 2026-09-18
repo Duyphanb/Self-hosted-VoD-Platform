@@ -215,7 +215,7 @@ export function AuthProvider({
     );
     const refreshPromise = withAuthSessionLock(async () => {
       if (readAuthGeneration(storage) !== startingGeneration) {
-        clearMemorySession();
+        if (sessionRef.current?.authGeneration === startingGeneration) clearMemorySession();
         throw new AuthenticationSupersededError();
       }
       if (sessionRevisionRef.current !== startingRevision) {
@@ -248,7 +248,7 @@ export function AuthProvider({
         );
       } catch (failure) {
         if (readAuthGeneration(storage) !== startingGeneration) {
-          clearMemorySession();
+          if (sessionRef.current?.authGeneration === startingGeneration) clearMemorySession();
           throw new AuthenticationSupersededError();
         }
         if (sessionRevisionRef.current !== startingRevision) {
@@ -300,7 +300,7 @@ export function AuthProvider({
         commitSession(nextSession, startingGeneration);
       } catch (failure) {
         if (readAuthGeneration(storage) !== startingGeneration) {
-          clearMemorySession();
+          if (sessionRef.current?.authGeneration === startingGeneration) clearMemorySession();
         }
         await revokeUnusedRefreshToken(apiClient, response.refreshToken);
         throw failure;
@@ -331,7 +331,9 @@ export function AuthProvider({
     try {
       await performRefresh();
     } catch (failure) {
-      handleAuthenticationFailure(failure);
+      if (!(failure instanceof AuthenticationSupersededError)) {
+        handleAuthenticationFailure(failure);
+      }
       throw failure;
     } finally {
       finishOperation();
@@ -401,7 +403,7 @@ export function AuthProvider({
         });
       } catch (failure) {
         if (readAuthGeneration(storage) !== operationGeneration) {
-          clearMemorySession();
+          if (sessionRef.current?.authGeneration === operationGeneration) clearMemorySession();
         }
         await revokeUnusedRefreshToken(apiClient, response.refreshToken);
         throw failure;

@@ -33,4 +33,4 @@ cd frontend
 npm audit --package-lock-only --omit=dev --audit-level=high
 ```
 
-The Trivy gate is defined in `.github/workflows/dependency-security.yml` and scans the executable Maven artifacts produced by the same Java 21 build used in CI. It runs when dependency manifests or security automation change and on a weekly schedule, so unrelated source-only pull requests do not repeat external advisory downloads.
+The Trivy gate is defined in `.github/workflows/dependency-security.yml` and scans the executable Maven artifacts produced by the same Java 21 build used in CI. It runs on every pull request and push to `main`, on a weekly schedule, and on manual dispatch. There are no path filters: the check must be available on every pull request before it can safely be required by branch protection.
