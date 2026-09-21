@@ -59,6 +59,6 @@ All ten Sprint 2 checklist entries in [BACKLOG.md](../requirements/BACKLOG.md#sp
 | Before public production | [#57](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/57) | Nginx upstream re-resolution after backend recreation; local workaround is restarting Nginx with the backend. |
 | Non-blocking tracked debt | [#53](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/53), [#56](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/56) | Stronger reserved-route assertions and reviewed moderate React Router advisories; revisit applicability before public deployment. No scanner threshold was weakened. |
 
-Additional Auth deployment-decision notes were retained locally for the owner; publishing their dedicated follow-up issue requires the owner's pending publication approval. This pending tracking action does not change the tested Sprint 2 behavior or authorize a different security model.
+The owner approved public follow-up tracking on 2026-09-21. [Issue #72](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/72) now owns the remaining Auth lifecycle, browser deployment controls and applicable legacy-account recovery decisions before public production. It does not block Sprint 3, reopen Sprint 2, or authorize a different security model.
 
 Issue [#55](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/55) is delivered by PR #70. Google/OAuth, MFA, email verification, password-reset features, Boot 4 and media-pipeline implementation remain outside this audit.
