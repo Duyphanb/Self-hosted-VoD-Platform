@@ -34,6 +34,8 @@ See `AGENTS.md` for repository rules and `docs/INDEX.md` for the source-of-truth
 
 Run all commands from the repository root.
 
+**Fresh-machine limitation (verified 2026-09-21):** the current `minio/minio:latest` reference returns a registry access error. A cached image can make an existing local stack work, but does not prove that a clean machine can start the full stack. Track the storage decision and recovery in [Issue #14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14); do not substitute an unreviewed image or delete existing volumes. The PostgreSQL-backed Auth CI fixture does not exercise MinIO or the media pipeline. This limitation does not reopen Sprint 2 or block Sprint 3 catalog development against the verified Auth/database baseline.
+
 ### 1. Create the local environment file
 
 PowerShell:

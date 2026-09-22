@@ -1,5 +1,6 @@
 package com.vodplatform.auth.security;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
@@ -34,6 +35,14 @@ public final class VersionedBcryptPasswordEncoder implements PasswordEncoder {
 
     @Override
     public boolean matches(CharSequence rawPassword, String encodedPassword) {
+        if (rawPassword != null && encodedPassword != null
+                && (encodedPassword.startsWith("$2") || encodedPassword.startsWith("{bcrypt}"))
+                && rawPassword.toString().getBytes(StandardCharsets.UTF_8).length > 72) {
+            // Legacy BCrypt cannot authenticate the suffix. Never upgrade a truncated match.
+            // Still pay the hash verification cost, as for an ordinary wrong password.
+            delegate.matches("invalid-legacy-password-input", encodedPassword);
+            return false;
+        }
         return delegate.matches(rawPassword, encodedPassword);
     }
 

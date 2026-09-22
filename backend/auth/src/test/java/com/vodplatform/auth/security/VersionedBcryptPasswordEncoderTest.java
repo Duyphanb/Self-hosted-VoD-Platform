@@ -11,6 +11,14 @@ class VersionedBcryptPasswordEncoderTest {
             new VersionedBcryptPasswordEncoder();
 
     @Test
+    void rejectsOversizedLegacyPasswordWithoutThrowingOrTruncating() {
+        String prefix = "a".repeat(72);
+        String legacyHash = new BCryptPasswordEncoder().encode(prefix);
+        assertThat(passwordEncoder.matches(prefix + "x", legacyHash)).isFalse();
+        assertThat(passwordEncoder.matches("密".repeat(72), legacyHash)).isFalse();
+    }
+
+    @Test
     void authenticatesLegacyDirectBcryptHashesAndMarksThemForUpgrade() {
         String password = "legacy-password";
         String legacyHash = new BCryptPasswordEncoder().encode(password);

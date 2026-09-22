@@ -324,16 +324,18 @@ Implement route guards that redirect unauthenticated users to login. Add admin r
 
 ### Sprint 2 Definition of Done
 
-- [ ] User can register, login, logout through API and UI
-- [ ] JWT authentication works on protected backend endpoints
-- [ ] RBAC enforces admin-only endpoints
-- [ ] Frontend auth state persists and refreshes correctly
-- [ ] Protected routes redirect unauthenticated users
-- [ ] Admin routes are hidden/blocked for regular users
-- [ ] User profile endpoints work with ownership checks
-- [ ] Unit and integration tests cover auth service, security filter, and RBAC
-- [ ] Postman collection includes auth endpoints
-- [ ] No passwords or secrets logged or exposed in responses
+- [x] User can register, login, logout through API and UI
+- [x] JWT authentication works on protected backend endpoints
+- [x] RBAC enforces admin-only endpoints
+- [x] Frontend auth state persists and refreshes correctly
+- [x] Protected routes redirect unauthenticated users
+- [x] Admin routes are hidden/blocked for regular users
+- [x] User profile endpoints work with ownership checks
+- [x] Unit and integration tests cover auth service, security filter, and RBAC
+- [x] Postman collection includes auth endpoints
+- [x] No passwords or secrets logged or exposed in responses
+
+Verified against merged implementation `b6ad022507108079d182b2d9941cdc1c0e38625e` on 2026-09-18; see [Sprint 2 closeout evidence](../testing/SPRINT-2-CLOSEOUT.md) for the acceptance mapping, CI/runtime/browser results, and limits. RBAC is verified through real Spring method security with a test-only admin operation; later production admin endpoints still require their own enforcement tests. Auth token responses follow the frozen API contract.
 
 ---
 

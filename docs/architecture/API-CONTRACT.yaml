@@ -727,6 +727,7 @@ components:
           type: string
           format: email
           maxLength: 320
+          description: Case-insensitive identity using database lower(email); original spelling retained, dots and plus tags remain significant.
         password:
           type: string
           minLength: 8
@@ -744,6 +745,7 @@ components:
           type: string
           format: email
           maxLength: 320
+          description: Case-insensitive identity using database lower(email); original spelling retained, dots and plus tags remain significant.
         password:
           type: string
 

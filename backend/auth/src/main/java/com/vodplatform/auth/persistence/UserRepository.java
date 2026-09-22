@@ -4,15 +4,19 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface UserRepository extends JpaRepository<UserEntity, UUID> {
 
-    boolean existsByEmail(String email);
+    @Query("select count(u) > 0 from UserEntity u where lower(u.email) = lower(:email)")
+    boolean existsByEmail(@Param("email") String email);
 
     @Override
     @EntityGraph(attributePaths = "roles")
     Optional<UserEntity> findById(UUID id);
 
     @EntityGraph(attributePaths = "roles")
-    Optional<UserEntity> findByEmail(String email);
+    @Query("select u from UserEntity u where lower(u.email) = lower(:email)")
+    Optional<UserEntity> findByEmail(@Param("email") String email);
 }

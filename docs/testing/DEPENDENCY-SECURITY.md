@@ -26,6 +26,13 @@ Dependabot updates the SHA-pinned action references, but it does not own the exp
 
 The Dependency Review action is intentionally absent until a repository administrator enables and verifies the GitHub Dependency Graph and its dependency-review API. Dependabot alerts and security updates are separate recommended repository settings, not technical prerequisites for the action. Adding a review action before the graph/API prerequisite is available would create a misleading or permanently failing check.
 
+## Follow-up ownership
+
+- [Issue #73](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/73) owns administrator verification of alerting, API availability and monitoring ownership. Record sensitive administrative diagnostics privately; do not interpret an unavailable API as an empty alert inventory.
+- [Issue #50](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/50) owns the supported Spring platform decision. The parent-only Boot 4 PRs #66/#68 were closed without merging: they fail compilation and conflict with frozen ADR-002. Their dependency-audit jobs stop during packaging, before scanning; a red job in that case does not prove a new vulnerability finding. Future major upgrades require the explicit platform decision and a complete migration.
+- [Issue #54](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/54) owns maintained non-MinIO images, immutable artifacts, runtime users and container OS scan coverage. The existing JAR/npm gates do not certify container OS packages, broker or object-store maintenance.
+- [Issue #74](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/74) owns the RabbitMQ support/upgrade decision; [Issue #14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14) retains MinIO ownership. Resolve these runtime decisions before public production, without treating them as authorization for a platform migration during feature work.
+
 ## Local Checks
 
 ```bash
@@ -33,4 +40,4 @@ cd frontend
 npm audit --package-lock-only --omit=dev --audit-level=high
 ```
 
-The Trivy gate is defined in `.github/workflows/dependency-security.yml` and scans the executable Maven artifacts produced by the same Java 21 build used in CI. It runs when dependency manifests or security automation change and on a weekly schedule, so unrelated source-only pull requests do not repeat external advisory downloads.
+The Trivy gate is defined in `.github/workflows/dependency-security.yml` and scans the executable Maven artifacts produced by the same Java 21 build used in CI. It runs on every pull request and push to `main`, on a weekly schedule, and on manual dispatch. There are no path filters: the check must be available on every pull request before it can safely be required by branch protection.

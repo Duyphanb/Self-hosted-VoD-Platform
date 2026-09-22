@@ -8,6 +8,7 @@ import {
   advanceAuthGeneration,
   clearAuthSession,
   createAuthSession,
+  readAuthSession,
   writeAuthSession
 } from './authStorage';
 import type { AuthResponse, UserProfile } from '../../lib/api/types';
@@ -301,6 +302,51 @@ describe('AuthProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(result.current.isAuthenticated).toBe(false);
     expect(window.localStorage.getItem(AUTH_SESSION_STORAGE_KEY)).toBeNull();
+  });
+
+  it('preserves a new login after logout while an old refresh failure is pending', async () => {
+    writeAuthSession(createAuthSession(authResponse), window.localStorage);
+    let resolveRefresh!: (response: Response) => void;
+    const pendingRefresh = new Promise<Response>((resolve) => { resolveRefresh = resolve; });
+    const nextResponse = { ...authResponse, accessToken: 'new-access', refreshToken: 'new-refresh' };
+    fetchMock.mockImplementation((input) => {
+      if (String(input).endsWith('/auth/refresh')) return pendingRefresh;
+      if (String(input).endsWith('/auth/logout')) return Promise.resolve(new Response(null, { status: 204 }));
+      return Promise.resolve(jsonResponse(nextResponse));
+    });
+    const redirectToLogin = vi.fn();
+    const { result } = renderHook(() => useAuth(), { wrapper: createWrapper({ redirectToLogin }) });
+    await waitFor(() => expect(result.current.isInitializing).toBe(false));
+    let refresh!: Promise<void>;
+    act(() => { refresh = result.current.refreshTokens().catch(() => undefined); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => { await result.current.logout(); });
+    await act(async () => { await result.current.login({ email: user.email, password: 'strong-password' }); });
+    await act(async () => { resolveRefresh(jsonResponse({}, 401)); await refresh; });
+    expect(result.current.refreshToken).toBe('new-refresh');
+    expect(readAuthSession(window.localStorage)?.refreshToken).toBe('new-refresh');
+    expect(redirectToLogin).not.toHaveBeenCalled();
+  });
+
+  it('preserves a new login when a pre-logout login response arrives late', async () => {
+    let resolveOldLogin!: (response: Response) => void;
+    const pendingLogin = new Promise<Response>((resolve) => { resolveOldLogin = resolve; });
+    const nextResponse = { ...authResponse, accessToken: 'new-access', refreshToken: 'new-refresh' };
+    let loginCount = 0;
+    fetchMock.mockImplementation((input) => {
+      if (String(input).endsWith('/auth/logout')) return Promise.resolve(new Response(null, { status: 204 }));
+      return ++loginCount === 1 ? pendingLogin : Promise.resolve(jsonResponse(nextResponse));
+    });
+    const { result } = renderHook(() => useAuth(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isInitializing).toBe(false));
+    let oldLogin!: Promise<unknown>;
+    act(() => { oldLogin = result.current.login({ email: user.email, password: 'strong-password' }).catch(() => undefined); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => { await result.current.logout(); });
+    await act(async () => { await result.current.login({ email: user.email, password: 'strong-password' }); });
+    await act(async () => { resolveOldLogin(jsonResponse(authResponse)); await oldLogin; });
+    expect(result.current.refreshToken).toBe('new-refresh');
+    expect(readAuthSession(window.localStorage)?.refreshToken).toBe('new-refresh');
   });
 
   it('does not let a stale refresh failure clear a newer login session', async () => {
