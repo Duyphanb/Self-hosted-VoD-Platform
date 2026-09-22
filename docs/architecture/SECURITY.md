@@ -23,6 +23,7 @@ MVP uses bearer JWT access tokens plus persisted refresh tokens.
 - `POST /api/v1/auth/logout` revokes the submitted refresh token when present; the frontend also clears local auth state.
 - Passwords are hashed with BCrypt.
 - Login failures return a generic authentication error.
+- Email identities are case-insensitive through PostgreSQL `lower(email)` for both lookup and uniqueness. Preserve stored spelling and do not collapse dots or plus tags. Existing identity collisions block migration rather than merging accounts; see [ADR-008](adr/ADR-008.md).
 
 ## RBAC Model
 

@@ -90,6 +90,7 @@ See `BACKLOG.md` for detailed sprint backlog with issues, acceptance criteria, d
 Phase 3 - Feature Development is active.
 
 - Sprint 1 - Foundation and Sprint 2 - Auth are complete.
+- Sprint 2 acceptance criteria and DoD were independently verified on merged `main`; see [closeout evidence](../testing/SPRINT-2-CLOSEOUT.md). The fresh-machine full-stack MinIO limitation in Issue #14 remains separate from the verified Auth/catalog prerequisites.
 - Resolve open P0/P1 security or repository-governance gates that explicitly block the selected feature batch before starting that batch.
 - Pre-production support, architecture, and deployment gates may remain tracked while feature development continues on the approved baseline, but must be resolved before public deployment. Priority alone does not make an issue a feature-development blocker.
 - Select the next dependency-safe implementation issue from `BACKLOG.md`.

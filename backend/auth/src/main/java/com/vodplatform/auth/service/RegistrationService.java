@@ -62,7 +62,8 @@ public class RegistrationService {
             UserEntity savedUser = userRepository.saveAndFlush(user);
             return userProfileMapper.toProfile(savedUser);
         } catch (DataIntegrityViolationException exception) {
-            if (hasConstraint(exception, "ux_users_email")) {
+            if (hasConstraint(exception, "ux_users_email")
+                    || hasConstraint(exception, "ux_users_email_identity")) {
                 throw new EmailAlreadyExistsException();
             }
             throw exception;

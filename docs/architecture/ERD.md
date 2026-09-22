@@ -79,6 +79,7 @@ erDiagram
 Indexes:
 
 - unique `ux_users_email` on `email`
+- unique `ux_users_email_identity` on `lower(email)` using the database collation; lookup uses the identical expression. Original spelling is retained. No dot/plus-tag folding. See [ADR-008](adr/ADR-008.md).
 - `ix_users_status` on `status`
 
 ### `roles`

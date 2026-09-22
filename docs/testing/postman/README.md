@@ -45,11 +45,13 @@ Run the whole collection rather than starting in the middle because later reques
 From the repository root:
 
 ```bash
-npx --yes newman run docs/testing/postman/vod-platform-sprint-2-auth.postman_collection.json \
-  --environment docs/testing/postman/vod-platform-local.postman_environment.json
+npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-2-auth.postman_collection.json \
+  --environment docs/testing/postman/vod-platform-local.postman_environment.json --silent
 ```
 
-Newman exits nonzero when a request, assertion, or script fails. The command does not write runtime tokens back to the committed environment file unless an explicit export option is added.
+Newman exits nonzero when a request, assertion, or script fails. `--silent` prevents failed assertions from printing token-bearing response values. The command does not write runtime tokens back to the committed environment file unless an explicit export option is added.
+
+CI runs this collection after the PostgreSQL auth regression script against a unique, disposable Compose project and removes its volumes on exit. It starts only the Auth dependencies and Nginx/frontend; it does not verify object storage or the media pipeline. The object-store image availability and maintenance decision remains tracked in Issue #14.
 
 ## Test Data and Secret Safety
 
@@ -65,5 +67,7 @@ Newman exits nonzero when a request, assertion, or script fails. The command doe
 The frozen OpenAPI contract lists logout as unauthenticated with an optional body and documents both `204` and `401`. Sprint 2 Issue 2.4 and the current implementation are more specific: logout is public and idempotently returns `204` whether the submitted token is active, revoked, unknown, or omitted. This collection verifies the implemented Sprint 2 behavior without changing the frozen architecture documents.
 
 The `ApiError.code` checks are implementation regression evidence. The frozen schema requires a string code but does not define those values as an enum.
+
+The login/refresh/logout response lists also omit validation `400` responses produced by the existing request-validation layer. This is non-blocking contract-documentation clarification for a future reviewed contract update; it does not authorize changing runtime validation or reopening Sprint 2.
 
 No test-only RBAC probe is included. Production admin business endpoints belong to later sprints, and frontend route guards are not a backend authorization boundary.

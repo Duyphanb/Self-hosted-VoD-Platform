@@ -4,7 +4,9 @@ Status: Frozen for MVP implementation
 
 Use this folder for Phase 2 architecture and design.
 
-## Read Order
+## Document Map
+
+Choose the contract sections relevant to the task; this list is not a required reading order. Use [the documentation index](../INDEX.md) for task-based routing.
 
 1. `SYSTEM-ARCHITECTURE.md`
 2. `ERD.md`
@@ -26,4 +28,4 @@ Use this folder for Phase 2 architecture and design.
 
 ## Boundary
 
-Do not add implementation code here. If architecture changes after implementation starts, update the relevant ADR and affected docs in the same bounded task.
+Do not add implementation code here. Changes to frozen decisions require explicit authorization; a feature request alone is not authorization to redesign its contract. For an authorized architecture change, update the relevant ADR and affected docs in the same bounded task.
