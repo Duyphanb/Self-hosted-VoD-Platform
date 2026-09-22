@@ -68,4 +68,6 @@ The frozen OpenAPI contract lists logout as unauthenticated with an optional bod
 
 The `ApiError.code` checks are implementation regression evidence. The frozen schema requires a string code but does not define those values as an enum.
 
+The login/refresh/logout response lists also omit validation `400` responses produced by the existing request-validation layer. This is non-blocking contract-documentation clarification for a future reviewed contract update; it does not authorize changing runtime validation or reopening Sprint 2.
+
 No test-only RBAC probe is included. Production admin business endpoints belong to later sprints, and frontend route guards are not a backend authorization boundary.
