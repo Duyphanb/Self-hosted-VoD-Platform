@@ -16,6 +16,7 @@ Frozen requirements and architecture govern implementation. Planning/status docu
 | Tables, fields, constraints, migrations | [ERD.md](architecture/ERD.md); use frozen names such as `people`, `movie_credits`, `watchlist_items` |
 | HTTP methods, paths, payloads, status codes | [API-CONTRACT.yaml](architecture/API-CONTRACT.yaml), affected flow in [SEQUENCE-DIAGRAMS.md](architecture/SEQUENCE-DIAGRAMS.md) |
 | Authentication, authorization, uploads, HLS access | [SECURITY.md](architecture/SECURITY.md) plus the affected API/sequence |
+| Movie visibility, archive retention, catalog slugs and matching | [SECURITY.md](architecture/SECURITY.md#movie-visibility), [ADR-009](architecture/adr/ADR-009.md) |
 | Compose, network exposure, storage, environment configuration | [INFRASTRUCTURE.md](architecture/INFRASTRUCTURE.md); private buckets are `vod-raw`, `vod-hls`, `vod-thumbnails` |
 | Logs, health, metrics | [OBSERVABILITY.md](architecture/OBSERVABILITY.md) |
 

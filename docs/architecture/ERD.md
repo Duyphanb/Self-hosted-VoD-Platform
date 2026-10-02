@@ -127,10 +127,10 @@ Indexes:
 |---|---|---|---|
 | `id` | uuid | PK | Movie ID |
 | `title` | varchar(255) | not null | Movie title |
-| `slug` | varchar(255) | unique, not null | URL-safe identifier |
+| `slug` | varchar(255) | unique, not null | URL-safe identifier supplied by the admin; routes use `id` |
 | `description` | text | not null | Catalog description |
 | `release_year` | int | null | Release year |
-| `maturity_rating` | varchar(20) | null | Optional content rating |
+| `maturity_rating` | varchar(20) | null | Optional content rating; the API accepts `P`, `K`, `T13`, `T16`, `T18` (no DB check) |
 | `poster_object_key` | varchar(512) | null | Deferred thumbnail/poster object key |
 | `status` | varchar(20) | not null, check | `DRAFT`, `PUBLISHED`, `ARCHIVED` |
 | `search_vector` | tsvector | null | PostgreSQL FTS vector |
@@ -149,8 +149,8 @@ Indexes:
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | uuid | PK | Genre ID |
-| `name` | varchar(100) | unique, not null | Genre name |
-| `slug` | varchar(120) | unique, not null | URL-safe identifier |
+| `name` | varchar(100) | unique, not null | Genre name, trimmed with whitespace collapsed |
+| `slug` | varchar(120) | unique, not null | Derived from `name` with the slug rule in [ADR-009](adr/ADR-009.md); genre match key |
 
 Indexes:
 
@@ -173,8 +173,8 @@ Constraints:
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | uuid | PK | Person ID |
-| `name` | varchar(255) | not null | Actor or director name |
-| `slug` | varchar(255) | unique, not null | URL-safe identifier |
+| `name` | varchar(255) | not null | Actor or director name; not unique |
+| `slug` | varchar(255) | unique, not null | Server-generated from `name` with the slug rule (base at most 240 characters) and a `-2`, `-3`, ... suffix on collision |
 
 Indexes:
 
@@ -314,7 +314,7 @@ MVP uses PostgreSQL full-text search. The `movies.search_vector` column includes
 - actor names
 - director names
 
-The `search_vector` is rebuilt by application code on any metadata change that affects searchable fields. Database triggers are deferred to avoid hidden logic during the first implementation pass.
+The `search_vector` is rebuilt by application code on any metadata change that affects searchable fields. Database triggers are deferred to avoid hidden logic during the first implementation pass. Renaming a genre or person rebuilds the vectors of the movies that reference it. Movies created before the rebuild logic exists keep `search_vector` null and must be backfilled when it is introduced.
 
 ## Deletion Rules
 
@@ -323,3 +323,4 @@ The `search_vector` is rebuilt by application code on any metadata change that a
 - User-owned records are scoped by authenticated user ID.
 - Deleting a `users` row cascades to refresh tokens, playback progress, watchlist items, watch history, and ratings.
 - Media object cleanup is not automatic on movie archive.
+- Archiving a movie, or any non-`PUBLISHED` status, keeps the related watchlist items, watch history, playback progress, and ratings. They are hidden from user-facing lists and per-movie endpoints by the movie visibility rule in [SECURITY.md](SECURITY.md#movie-visibility), and reappear when the movie is restored.

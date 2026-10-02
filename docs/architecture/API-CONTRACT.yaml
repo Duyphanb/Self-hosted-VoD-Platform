@@ -166,27 +166,32 @@ paths:
     get:
       tags: [Movies]
       summary: List published movies
+      description: >
+        Returns PUBLISHED movies only, for every role including ROLE_ADMIN.
+        Admins list other statuses through GET /api/v1/admin/movies.
+        Invalid query values return 400 VALIDATION_ERROR.
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/Size"
         - name: genre
           in: query
           required: false
+          description: >
+            Genre name or slug. The value is normalized with the slug rule (see
+            UpsertGenreRequest) and matched against the genre slug. A value that is empty after
+            normalization returns 400; an unknown genre returns an empty page.
           schema:
             type: string
+            minLength: 1
+            maxLength: 120
         - name: year
           in: query
           required: false
           schema:
             type: integer
             minimum: 1888
-        - name: sort
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [latest, title]
-            default: latest
+            maximum: 2100
+        - $ref: "#/components/parameters/MovieSort"
       responses:
         "200":
           description: Movie page
@@ -194,6 +199,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MoviePageResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
     post:
@@ -215,8 +222,16 @@ paths:
                 $ref: "#/components/schemas/MovieDetail"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: MOVIE_SLUG_CONFLICT when the slug is already used by another movie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/v1/movies/{movieId}:
     parameters:
@@ -224,6 +239,10 @@ paths:
     get:
       tags: [Movies]
       summary: Get movie details
+      description: >
+        ROLE_ADMIN can read a movie in any status. For every other caller a movie
+        that is not PUBLISHED returns the same 404 MOVIE_NOT_FOUND response as a
+        missing movie. A movieId that is not a UUID returns 400 VALIDATION_ERROR.
       responses:
         "200":
           description: Movie detail
@@ -231,6 +250,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MovieDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -238,7 +259,10 @@ paths:
     put:
       tags: [Movies, Admin]
       summary: Update movie metadata
-      description: Requires ROLE_ADMIN.
+      description: >
+        Requires ROLE_ADMIN. Full replacement: omitted optional fields become null,
+        and genres and people replace the existing assignments. Any MovieStatus is
+        accepted; an archived movie is restored by setting DRAFT or PUBLISHED.
       requestBody:
         required: true
         content:
@@ -254,17 +278,235 @@ paths:
                 $ref: "#/components/schemas/MovieDetail"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: MOVIE_SLUG_CONFLICT when the slug is already used by another movie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
     delete:
       tags: [Movies, Admin]
       summary: Archive movie metadata
-      description: Requires ROLE_ADMIN. Archive-only; sets status to ARCHIVED. No hard delete endpoint is exposed.
+      description: >
+        Requires ROLE_ADMIN. Archive-only; sets status to ARCHIVED. No hard delete
+        endpoint is exposed. Idempotent: archiving an already archived movie
+        returns 204.
       responses:
         "204":
           description: Archived
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/admin/movies:
+    get:
+      tags: [Movies, Admin]
+      summary: List movies in any status for administration
+      description: Requires ROLE_ADMIN. Without status, movies in every status are returned.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/MovieStatus"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+        - $ref: "#/components/parameters/MovieSort"
+      responses:
+        "200":
+          description: Movie page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoviePageResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/admin/genres:
+    get:
+      tags: [Movies, Admin]
+      summary: List all genres
+      description: Requires ROLE_ADMIN. Returns every genre ordered by name, then id. Not paginated.
+      responses:
+        "200":
+          description: Genres
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GenreResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Movies, Admin]
+      summary: Create a genre
+      description: Requires ROLE_ADMIN.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertGenreRequest"
+      responses:
+        "201":
+          description: Created genre
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenreResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: GENRE_CONFLICT when another genre has the same name or slug
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/v1/admin/genres/{genreId}:
+    parameters:
+      - $ref: "#/components/parameters/GenreId"
+    put:
+      tags: [Movies, Admin]
+      summary: Rename a genre
+      description: Requires ROLE_ADMIN. The slug is recomputed from the new name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertGenreRequest"
+      responses:
+        "200":
+          description: Updated genre
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenreResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: GENRE_CONFLICT when another genre has the same name or slug
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/v1/admin/people:
+    get:
+      tags: [Movies, Admin]
+      summary: Search people for credit assignment
+      description: >
+        Requires ROLE_ADMIN. When q is present it is normalized with the slug rule
+        (see UpsertGenreRequest) and matched as a substring of the person slug, so
+        matching ignores case and diacritics. A q that is empty after normalization
+        is treated as absent. Results are ordered by name, then id.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Person page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonPageResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Movies, Admin]
+      summary: Create a person
+      description: >
+        Requires ROLE_ADMIN. Names are not unique. The server generates the slug
+        with the slug rule (see UpsertGenreRequest), truncating the base to at most
+        240 characters and removing a trailing hyphen, then appends -2, -3, ... on
+        collision. A name whose slug is empty uses the base person. People created
+        from name-only credits follow the same rule.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertPersonRequest"
+      responses:
+        "201":
+          description: Created person
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/admin/people/{personId}:
+    parameters:
+      - $ref: "#/components/parameters/PersonId"
+    put:
+      tags: [Movies, Admin]
+      summary: Rename a person
+      description: >
+        Requires ROLE_ADMIN. The slug is regenerated from the new name with the same
+        rule; the person being renamed is excluded from the collision check, so the
+        current slug is kept when its base is unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertPersonRequest"
+      responses:
+        "200":
+          description: Updated person
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
@@ -414,6 +656,8 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/movies/{movieId}/rating:
     parameters:
@@ -522,11 +766,16 @@ paths:
     delete:
       tags: [Watchlist]
       summary: Remove movie from watchlist
+      description: >
+        Idempotent for a published movie (204 whether or not it was in the
+        watchlist). A missing or non-published movie returns 404.
       responses:
         "204":
           description: Removed
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/me/history:
     get:
@@ -627,6 +876,31 @@ components:
       schema:
         type: string
         format: uuid
+    GenreId:
+      name: genreId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PersonId:
+      name: personId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MovieSort:
+      name: sort
+      in: query
+      required: false
+      description: >
+        latest orders by creation time descending, then id descending.
+        title orders by lower-cased title ascending, then id ascending.
+      schema:
+        type: string
+        enum: [latest, title]
+        default: latest
     Page:
       name: page
       in: query
@@ -634,6 +908,7 @@ components:
       schema:
         type: integer
         minimum: 0
+        maximum: 10000
         default: 0
     Size:
       name: size
@@ -703,6 +978,11 @@ components:
           type: integer
         code:
           type: string
+          description: >
+            Machine-readable error code. Known codes include VALIDATION_ERROR,
+            MALFORMED_REQUEST, UNAUTHORIZED, FORBIDDEN, MOVIE_NOT_FOUND,
+            GENRE_NOT_FOUND, PERSON_NOT_FOUND, MOVIE_SLUG_CONFLICT and
+            GENRE_CONFLICT. The list is not exhaustive.
         message:
           type: string
         requestId:
@@ -838,14 +1118,32 @@ components:
         status:
           $ref: "#/components/schemas/MovieStatus"
         videoStatus:
-          $ref: "#/components/schemas/VideoAssetStatus"
+          description: >
+            Latest video availability; null when the movie has no video asset, which
+            is always the case until video upload is implemented. Values match
+            VideoAssetStatus.
+          type: string
+          nullable: true
+          enum: [UPLOADED, QUEUED, PROCESSING, READY, FAILED, null]
+
+    MaturityRating:
+      description: >
+        Vietnamese film classification. P: all audiences; K: under 13 with a
+        guardian; T13, T16, T18: minimum viewer age. C (not permitted for
+        distribution) is intentionally excluded. Null means not classified.
+      type: string
+      nullable: true
+      enum: [P, K, T13, T16, T18, null]
 
     MovieDetail:
       allOf:
         - $ref: "#/components/schemas/MovieSummary"
         - type: object
           properties:
+            maturityRating:
+              $ref: "#/components/schemas/MaturityRating"
             people:
+              description: Credits in display order (sort_order).
               type: array
               items:
                 $ref: "#/components/schemas/MovieCredit"
@@ -855,7 +1153,9 @@ components:
             inWatchlist:
               type: boolean
             playbackProgress:
-              $ref: "#/components/schemas/ProgressResponse"
+              description: Omitted when the caller has no saved progress for the movie.
+              allOf:
+                - $ref: "#/components/schemas/ProgressResponse"
 
     MovieCredit:
       type: object
@@ -871,50 +1171,151 @@ components:
           enum: [ACTOR, DIRECTOR]
 
     MovieCreditInput:
+      description: >
+        Either personId or name is required. When personId is present it identifies
+        the person and name is ignored; an unknown personId returns 400 with field
+        people[i].personId. With name only, the name is normalized as in
+        UpsertPersonRequest and compared case-insensitively (diacritics significant)
+        against the stored names of all people: no match creates a person, exactly
+        one match reuses that person, and more than one match returns 400 asking for
+        a personId. A person may appear at most once per role in a request; a
+        duplicate (person, role) pair, after resolving personId or name, returns
+        400 VALIDATION_ERROR.
       type: object
-      required: [name, role]
+      required: [role]
       properties:
+        personId:
+          type: string
+          format: uuid
         name:
           type: string
           minLength: 1
+          maxLength: 255
         role:
           type: string
           enum: [ACTOR, DIRECTOR]
 
     UpsertMovieRequest:
       description: >
-        Admin movie metadata payload. Genre strings are matched by normalized name
-        or created by the backend when no existing genre matches.
+        Admin movie metadata payload. PUT is a full replacement: omitted optional
+        fields become null, and genres and people replace existing assignments.
+        All strings are trimmed; blank values and NUL or other control characters
+        (except line breaks and tabs in description) return 400 VALIDATION_ERROR.
+        Genre names are matched by genre slug and reused when a genre with that
+        slug exists (keeping its stored name); otherwise a genre is created. A genre
+        name whose slug is empty, or two genres with the same slug in one request,
+        return 400 VALIDATION_ERROR. The order of people
+        defines credit display order.
       type: object
-      required: [title, description, genres, status]
+      required: [title, slug, description, genres, people, status]
       properties:
         title:
           type: string
           minLength: 1
           maxLength: 255
+        slug:
+          description: >
+            URL-safe identifier, unique across movies. Clients may suggest it from
+            the title; the backend validates it and does not generate it. Routes use
+            the movie UUID, so the slug may change after publishing.
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
         description:
           type: string
           minLength: 1
+          maxLength: 5000
         releaseYear:
           type: integer
           minimum: 1888
+          maximum: 2100
           nullable: true
         maturityRating:
-          type: string
-          nullable: true
+          $ref: "#/components/schemas/MaturityRating"
         genres:
           description: Genre names, not genre IDs.
           type: array
           minItems: 1
+          maxItems: 10
           items:
             type: string
             minLength: 1
+            maxLength: 100
         people:
+          description: May be empty. Omitting it is a validation error so credits are never cleared by accident.
           type: array
+          maxItems: 50
           items:
             $ref: "#/components/schemas/MovieCreditInput"
         status:
           $ref: "#/components/schemas/MovieStatus"
+
+    GenreResponse:
+      type: object
+      required: [id, name, slug]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+
+    UpsertGenreRequest:
+      description: >
+        The name is trimmed and internal whitespace collapsed. Slug rule, used for
+        genre and person slugs and for genre and people search input: decompose
+        Unicode (NFD), remove combining marks, map đ/Đ to d, lower-case, replace
+        every run of characters other than a-z and 0-9 with a hyphen, and trim
+        leading and trailing hyphens. A genre name whose slug is empty, a blank
+        name, or a name containing NUL or other control characters returns 400
+        VALIDATION_ERROR.
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    PersonResponse:
+      type: object
+      required: [id, name, slug]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+
+    UpsertPersonRequest:
+      description: >
+        The name is trimmed and internal whitespace collapsed before storage; the
+        stored value is what name-only credit matching compares against. Blank
+        names and names containing NUL or other control characters return 400
+        VALIDATION_ERROR.
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+
+    PersonPageResponse:
+      type: object
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PersonResponse"
+        page:
+          $ref: "#/components/schemas/PageMeta"
 
     MoviePageResponse:
       type: object

@@ -36,7 +36,9 @@ Backend enforcement:
 
 - Public endpoints: register, login, refresh.
 - Authenticated user endpoints: profile, movies, playback, HLS, progress, watchlist, history, rating, search.
-- Admin endpoints: movie mutation, upload, video asset listing, encoding retry.
+- Admin endpoints: movie mutation, admin movie listing, genre and people management, upload, video asset listing, encoding retry.
+
+Admin endpoints are enforced by URL authorization rules (`/api/v1/admin/**`, `POST /api/v1/movies`, and `PUT`/`DELETE /api/v1/movies/{movieId}`; user sub-resources such as `/api/v1/movies/{movieId}/progress` are not admin endpoints) before request validation runs, with method-level `@PreAuthorize` as a second layer. A `ROLE_USER` request to an admin endpoint returns 403 even when its body is invalid or the target does not exist.
 
 Frontend route guards are UX only. Backend authorization is the security boundary.
 
@@ -51,6 +53,16 @@ User-owned data must always be scoped by authenticated user ID:
 - ratings
 
 Users must not read or modify another user's records.
+
+## Movie Visibility
+
+Movie visibility is the catalog access rule referenced by playback and HLS checks. See [ADR-009](adr/ADR-009.md).
+
+- A caller without `ROLE_ADMIN` can see only `PUBLISHED` movies.
+- Except for the admin operations listed below, every endpoint that takes a `movieId`, read or write (detail, playback, HLS, progress, rating, watchlist), returns the same 404 for a `DRAFT` or `ARCHIVED` movie as for a missing movie. The response must not reveal that the movie exists.
+- User-facing lists (movies, search, suggestions, watchlist, history, continue watching) contain only `PUBLISHED` movies, for every role.
+- `ROLE_ADMIN` sees and manages every status on `GET`, `PUT`, and `DELETE /api/v1/movies/{movieId}` and under `/api/v1/admin/**`; these are the only exceptions to the 404 rule. For admins, playback, HLS, progress, rating, and watchlist on non-published movies still return 404 unless a later decision changes this rule.
+- The catalog module owns one visibility check that other modules reuse; modules must not re-implement the status rule.
 
 ## HLS Access Control
 
@@ -165,6 +177,7 @@ Minimum security evidence:
 
 - anonymous requests rejected for protected endpoints
 - user requests rejected for admin endpoints
+- non-admin requests for a non-published movie return the same 404 as a missing movie
 - user-owned resources cannot be accessed by another user
 - HLS requests without bearer token are rejected
 - upload rejects invalid MIME type and oversize files
