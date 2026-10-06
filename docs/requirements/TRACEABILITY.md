@@ -12,9 +12,9 @@ This is the planned Phase 1 traceability baseline. Test evidence names are expec
 | F-002 | Login and JWT authentication | US-002 | backend, frontend | Auth service tests; security filter tests; login API Postman tests |
 | F-003 | Logout session handling | US-003 | frontend, backend | Frontend logout flow test; protected route manual test |
 | F-004 | RBAC | US-004 | backend, frontend | Admin endpoint authorization tests; role guard UI tests |
-| F-005 | Movie browsing | US-005 | backend, frontend | Movie list service tests; pagination API tests; list page UI tests |
-| F-006 | Movie detail | US-006 | backend, frontend | Movie detail API tests; not-found API test; detail page UI test |
-| F-007 | Movie metadata management | US-007 | backend, frontend | Movie service unit tests; admin CRUD Postman tests; admin form tests |
+| F-005 | Movie browsing | US-005 | backend, frontend | Movie list service tests; pagination and visibility API tests; catalog PostgreSQL runtime smoke; catalog Newman collection; list page UI tests |
+| F-006 | Movie detail | US-006 | backend, frontend | Movie detail API tests; not-found and non-published 404 API tests; catalog PostgreSQL runtime smoke; catalog Newman collection; detail page UI test |
+| F-007 | Movie metadata management | US-007 | backend, frontend | Movie, genre, and people service unit tests; admin authorization tests; catalog PostgreSQL runtime smoke; catalog Newman collection (admin CRUD); admin form tests. Related video asset metadata is delivered with F-008 and F-020. |
 | F-008 | Admin video upload | US-008 | backend, frontend, MinIO | Upload validation tests; MinIO integration test or manual evidence; admin upload flow test |
 | F-009 | Queue publishing | US-008 | backend, RabbitMQ | Queue publisher unit test; API-to-queue integration evidence |
 | F-010 | Encoding worker | US-009 | worker, RabbitMQ, MinIO | Worker command construction tests; job status transition tests; failed-job test |

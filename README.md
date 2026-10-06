@@ -77,7 +77,9 @@ Expected result:
 
 ### 4. Verify the public routes
 
-The commands below assume the default `NGINX_HTTP_PORT=80`. If you configure another host port, include it in each URL, for example `http://localhost:8088/`.
+The commands below assume the default `NGINX_HTTP_PORT=80`. If you configure another host port, include it in each URL, for example `http://localhost:8088/`. Also add that origin to `CORS_ALLOWED_ORIGINS` (for example `CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8088`): the backend does not yet apply forwarded host and port headers, so it treats same-origin browser `POST`, `PUT`, and `DELETE` requests on a non-80 edge port as cross-origin and rejects them with 403.
+
+To use admin features locally, register an account and promote it with the [first administrator procedure](docs/deployment/README.md#first-administrator).
 
 ```bash
 curl --fail http://localhost/
