@@ -9,10 +9,17 @@ name: CI
 permissions:
   contents: read
 
+# Pull request runs share a group per pull request so superseded runs are cancelled.
+# Every push to main gets its own group so each merged commit keeps a CI result.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || format('ci-push-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   backend-build:
     name: Backend Maven build and test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -35,6 +42,7 @@ jobs:
   worker-build:
     name: Worker Maven build and test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -57,6 +65,7 @@ jobs:
   skeleton:
     name: Skeleton build checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       COMPOSE_PROJECT_NAME: vod-auth-audit-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -112,6 +121,7 @@ jobs:
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -141,6 +151,7 @@ jobs:
   schema-migration:
     name: Flyway schema migration
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       postgres:
