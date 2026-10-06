@@ -80,10 +80,14 @@ See `BACKLOG.md` for detailed sprint backlog with issues, acceptance criteria, d
 
 ## GitHub Task Workflow
 
-- Each task should map to a GitHub Issue when possible.
-- Commit and PR messages should use conventional commits.
-- If a task fully completes an issue, include a closing keyword such as `closes #5`.
-- If a task only contributes to an issue, reference the issue without closing it.
+- Each task maps to a GitHub Issue created before its branch, labeled with one `type:`, one `priority:`, and at least one `area:` label, and assigned to the sprint milestone or `Pre-production gate`.
+- Branches are named `{type}/{issue-number}-{short-desc}` with the types listed in `AGENTS.md`.
+- Commit messages and pull request titles use conventional commits; pull requests follow `.github/pull_request_template.md`.
+- Branches are refreshed with GitHub's Update branch, not manual sync commits.
+- If a pull request fully completes an issue, its body includes a closing keyword such as `Closes #5`; if it only contributes, it references the issue without closing it.
+- `main` accepts squash merges only, after required checks pass, an independent AI review is posted on the pull request, and the owner reads the diff.
+- Before an issue closes, its acceptance criteria are ticked or a closeout comment links the evidence.
+- A sprint is complete when its milestone has no open issues and its Definition of Done evidence is recorded.
 
 ## Current Next Step
 

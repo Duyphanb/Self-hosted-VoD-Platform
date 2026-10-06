@@ -77,3 +77,32 @@ jobs:
           exit-code: "1"
           format: table
           timeout: 10m
+
+  report-scheduled-failure:
+    name: Report scheduled audit failure
+    needs: dependency-audit
+    # Alert the owner through an issue instead of relying on personal Actions
+    # notification settings. Pull request and push failures already block merges.
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+
+    steps:
+      - name: Open or update the dependency alert issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Scheduled dependency audit failed on main"
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "The scheduled audit failed again: $RUN_URL"
+          else
+            gh issue create --title "$title" --assignee "$OWNER" --label "type:security,priority:P0" \
+              --body "The scheduled Production dependency vulnerability audit failed: $RUN_URL. Triage the findings, open a focused fix pull request, and close this issue once the audit passes on main. See docs/testing/DEPENDENCY-SECURITY.md."
+          fi
