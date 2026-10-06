@@ -1,0 +1,35 @@
+name: Backlog item
+description: Track one issue from docs/requirements/BACKLOG.md (Issue N.M).
+title: "Issue N.M: "
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Copy the description and acceptance criteria from `docs/requirements/BACKLOG.md`.
+        After creating the issue, add one `priority:` label, at least one `area:` label,
+        and the sprint milestone.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: One checkbox per verifiable outcome.
+      value: "- [ ] "
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Implementation notes
+      description: Frozen contracts, ADRs, and constraints that apply.
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: "One line per blocker, for example: Blocked by #80 (Issue 3.2)."

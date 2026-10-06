@@ -1,0 +1,32 @@
+name: Fix or finding
+description: Track a verified defect, security finding, or hardening task.
+labels: ["type:fix"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Start the title with the priority, for example `P1: ...`, and add the matching
+        `priority:` and `area:` labels. Use `type:security` instead of `type:fix` for
+        vulnerabilities. Never include secrets, tokens, or sensitive diagnostics.
+  - type: textarea
+    id: finding
+    attributes:
+      label: Verified finding
+      description: What is wrong, with evidence (file and line, command output summary, or run link).
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: "- [ ] "
+    validations:
+      required: true
+  - type: textarea
+    id: related
+    attributes:
+      label: Related issues and non-goals
