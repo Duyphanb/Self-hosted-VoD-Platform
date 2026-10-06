@@ -1,0 +1,7 @@
+# Reviewed, time-boxed Trivy suppressions. Each entry needs a dedicated issue
+# with evidence that the advisory does not apply (docs/testing/DEPENDENCY-SECURITY.md).
+
+# CVE-2026-47884 / GHSA-pc63-qcmh-9cmg (spring-webmvc XsltView), issue #96.
+# Not applicable: no XsltView, view resolver, or template rendering; all web
+# endpoints are @RestController. No open-source 6.2.x fix; 7.0.9 needs #50.
+CVE-2026-47884 exp:2026-12-31

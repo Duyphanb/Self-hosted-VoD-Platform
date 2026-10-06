@@ -18,6 +18,8 @@ As of 2026-08-29, `npm audit --omit=dev` reports two moderate advisories through
 
 They remain visible and tracked by GitHub Issue #56. The available npm remediation is a forced React Router 7 major upgrade, so this hardening batch does not apply it automatically. High and critical findings still fail CI.
 
+As of 2026-10-06, Trivy reports CVE-2026-47884 / GHSA-pc63-qcmh-9cmg (critical) in `spring-webmvc` 6.2.19 in both executable JARs. The advisory requires `XsltView` with a `/**` mapping that renders a view without an explicit view name. This repository renders no views: there is no `XsltView`, view resolver, `ModelAndView`, or template engine, and every web endpoint is a `@RestController`. No open-source fix exists on the Spring Framework 6.2 line, and the 7.0.9 fix depends on the platform decision in Issue #50. The advisory is suppressed in `.trivyignore` until 2026-12-31 under Issue #96. Revisit it at that date, or earlier if any view rendering, XSLT, or template engine is introduced. No other finding is suppressed.
+
 ## Automated Update Visibility
 
 Dependabot checks backend Maven, worker Maven, frontend npm, and GitHub Actions weekly. Each ecosystem is limited to one open version-update pull request, and no auto-merge is configured.

@@ -73,6 +73,7 @@ jobs:
           vuln-type: library
           severity: HIGH,CRITICAL
           ignore-unfixed: false
+          trivyignores: .trivyignore
           exit-code: "1"
           format: table
           timeout: 10m

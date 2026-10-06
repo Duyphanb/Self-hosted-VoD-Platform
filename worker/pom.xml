@@ -30,5 +30,6 @@
         <java.version>21</java.version>
         <tomcat.version>10.1.59</tomcat.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <jackson-bom.version>2.21.7</jackson-bom.version>
     </properties>
 </project>
