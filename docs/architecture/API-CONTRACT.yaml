@@ -1178,9 +1178,11 @@ components:
         UpsertPersonRequest and compared case-insensitively (diacritics significant)
         against the stored names of all people: no match creates a person, exactly
         one match reuses that person, and more than one match returns 400 asking for
-        a personId. A person may appear at most once per role in a request; a
-        duplicate (person, role) pair, after resolving personId or name, returns
-        400 VALIDATION_ERROR.
+        a personId. Within one request, name-only entries with equal normalized
+        names resolve to the same person, which is created at most once. A person
+        may appear at most once per role in a request; a duplicate (person, role)
+        pair, checked after resolving personId and name, returns 400
+        VALIDATION_ERROR.
       type: object
       required: [role]
       properties:

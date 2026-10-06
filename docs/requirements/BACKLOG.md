@@ -467,19 +467,21 @@ Create movie detail page showing title, description, release year, genres, cast,
 ### Issue 3.8: Frontend Admin Movie CRUD UI
 
 **Description:**  
-Create admin pages for movie create, edit, archive. Include genre and people assignment. Forms validate required fields.
+Create admin pages for movie listing, create, edit, archive, and restore. Include genre and people assignment. Forms validate required fields.
 
 **Acceptance Criteria:**
+- Admin movie list page uses `GET /api/v1/admin/movies` with a status filter and links to edit
 - Admin movie create form includes title, slug, description, release_year, maturity_rating, status
 - Slug is suggested from the title and remains editable
 - Admin movie edit form pre-fills existing data
 - Admin can assign genres and credits
-- Admin can archive movie (soft delete)
+- Admin can archive movie (soft delete) and restore an archived movie by setting status DRAFT or PUBLISHED
+- Credit assignment searches people through `GET /api/v1/admin/people` and sends `personId` for an existing person
 - Form validation matches backend rules
 - Success and error feedback displayed
 - Admin routes are protected with `ROLE_ADMIN` guard
 
-**Dependencies:** Issue 3.5, Issue 2.10
+**Dependencies:** Issue 3.3, Issue 3.4, Issue 3.5, Issue 2.10
 
 ---
 
