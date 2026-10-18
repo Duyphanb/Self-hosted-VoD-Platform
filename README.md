@@ -83,10 +83,12 @@ Upload, encoding and playback need MinIO and the worker, so they are not availab
 docker compose --env-file .env -f deploy/docker-compose.yml ps -a
 ```
 
-Expected result:
+Expected result for the full stack:
 
 - `postgres`, `redis`, `rabbitmq`, `minio`, `backend`, `worker`, `frontend`, and `nginx` are running and healthy.
 - `flyway` and `minio-init` have exited successfully with status code 0.
+
+Expected result for the auth-only stack: `postgres`, `redis`, `rabbitmq`, `frontend`, `backend`, and `nginx` are running and healthy, and `flyway` has exited with status code 0. `minio`, `minio-init`, and `worker` are not started in this mode.
 
 ### 4. Verify the public routes
 
