@@ -92,7 +92,7 @@ Expected result for the auth-only stack: `postgres`, `redis`, `rabbitmq`, `front
 
 ### 4. Verify the public routes
 
-The commands below assume the default `NGINX_HTTP_PORT=80`. If you configure another host port, include it in each URL, for example `http://localhost:8088/`. Also add that origin to `CORS_ALLOWED_ORIGINS` (for example `CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8088`): the backend does not yet apply forwarded host and port headers, so it treats same-origin browser `POST`, `PUT`, and `DELETE` requests on a non-80 edge port as cross-origin and rejects them with 403.
+The commands below assume the default `NGINX_HTTP_PORT=127.0.0.1:80`, which publishes the edge on host port 80 of the loopback interface only: `http://localhost/` works from the same machine, but other devices cannot reach it (see [LAN access for a demo](#lan-access-for-a-demo)). If you configure another host port, keep the loopback address and include the port in each URL; for example, `NGINX_HTTP_PORT=127.0.0.1:8088` serves `http://localhost:8088/`. Also add that origin to `CORS_ALLOWED_ORIGINS` (for example `CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8088`): the backend does not yet apply forwarded host and port headers, so it treats same-origin browser `POST`, `PUT`, and `DELETE` requests on a non-80 edge port as cross-origin and rejects them with 403.
 
 To use admin features locally, register an account and promote it with the [first administrator procedure](docs/deployment/README.md#first-administrator).
 
@@ -105,14 +105,14 @@ On Windows PowerShell, use `curl.exe` instead of the `curl` alias. The API healt
 
 ## Local Ports and Routes
 
-Nginx is the only service published to the host by the local Compose file.
+Nginx is the only service published to the host by the local Compose file, and by default only on the loopback interface (`127.0.0.1`).
 
 | Host URL or port | Destination | Purpose |
 |---|---|---|
 | `http://localhost/` | frontend:80 | Frontend single-page app |
 | `http://localhost/api/v1/*` | backend:8080 | Public API route |
 | `http://localhost/hls/*` | backend:8080 | Authenticated HLS proxy route |
-| `${NGINX_HTTP_PORT:-80}` | nginx:80 | Configurable host HTTP port |
+| `${NGINX_HTTP_PORT:-127.0.0.1:80}` | nginx:80 | Configurable host HTTP address and port, loopback only by default |
 
 These service ports are available only inside the `vod_internal` Docker network:
 
@@ -126,6 +126,22 @@ These service ports are available only inside the `vod_internal` Docker network:
 | Backend | 8080 |
 | Worker | 8081 |
 | Frontend | 80 |
+
+### LAN access for a demo
+
+The edge stays on loopback by default because the local `JWT_SECRET` in `.env.example` is a public placeholder: anyone who can reach the edge could sign their own access tokens for any user, including administrators. To let other devices on a trusted network reach the stack:
+
+1. In `.env`, replace `JWT_SECRET` with a random value of at least 32 bytes that is not the placeholder, for example the output of `openssl rand -base64 48` (available in Git Bash and WSL). Also replace the other placeholders listed in [step 1](#1-create-the-local-environment-file).
+2. In `.env`, publish the edge on the network: `NGINX_HTTP_PORT=80` listens on every interface, and `NGINX_HTTP_PORT=192.168.1.20:80` (your machine's LAN address) listens on that address only. If you choose a host port other than 80, apply the `CORS_ALLOWED_ORIGINS` note from [step 4](#4-verify-the-public-routes) to that origin.
+3. Recreate the affected containers. Tokens signed with the previous secret stop working, so sign in again.
+
+   ```bash
+   docker compose --env-file .env -f deploy/docker-compose.yml up -d
+   ```
+
+4. Open `http://<your-LAN-address>/` from the other device. The host firewall may need to allow inbound connections on that port.
+
+Set `NGINX_HTTP_PORT` back to `127.0.0.1:80` when the demo ends. Production sets `NGINX_HTTP_PORT=80` explicitly; see [Edge Port Binding](docs/deployment/README.md#edge-port-binding).
 
 ## Logs and Shutdown
 
