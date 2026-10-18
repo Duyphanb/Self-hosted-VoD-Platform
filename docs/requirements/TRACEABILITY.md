@@ -2,16 +2,16 @@
 
 ## Status
 
-This is the planned Phase 1 traceability baseline. Test evidence names are expected evidence targets until implementation exists.
+Updated 2026-10-18. Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented.
 
 ## Feature Traceability
 
 | Feature ID | Feature | User Stories | Primary Module(s) | Planned Test Evidence |
 |---|---|---|---|---|
-| F-001 | Account registration | US-001 | backend, frontend | Auth service unit tests; registration API Postman tests; frontend auth flow test |
-| F-002 | Login and JWT authentication | US-002 | backend, frontend | Auth service tests; security filter tests; login API Postman tests |
-| F-003 | Logout session handling | US-003 | frontend, backend | Frontend logout flow test; protected route manual test |
-| F-004 | RBAC | US-004 | backend, frontend | Admin endpoint authorization tests; role guard UI tests |
+| F-001 | Account registration | US-001 | backend, frontend | Auth service unit tests; registration API Postman tests; frontend auth flow test. Verified: [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md) |
+| F-002 | Login and JWT authentication | US-002 | backend, frontend | Auth service tests; security filter tests; login API Postman tests. Verified: [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md) |
+| F-003 | Logout session handling | US-003 | frontend, backend | Frontend logout flow test; protected route manual test. Verified: [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md) |
+| F-004 | RBAC | US-004 | backend, frontend | Admin endpoint authorization tests; role guard UI tests. Verified: [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md) |
 | F-005 | Movie browsing | US-005 | backend, frontend | Movie list service tests; pagination and visibility API tests; catalog PostgreSQL runtime smoke; catalog Newman collection; list page UI tests |
 | F-006 | Movie detail | US-006 | backend, frontend | Movie detail API tests; not-found and non-published 404 API tests; catalog PostgreSQL runtime smoke; catalog Newman collection; detail page UI test |
 | F-007 | Movie metadata management | US-007 | backend, frontend | Movie, genre, and people service unit tests; admin authorization tests; catalog PostgreSQL runtime smoke; catalog Newman collection (admin CRUD); admin form tests. Related video asset metadata is delivered with F-008 and F-020. |
@@ -30,7 +30,7 @@ This is the planned Phase 1 traceability baseline. Test evidence names are expec
 | F-020 | Encoding status and retry | US-016 | backend, worker, frontend, RabbitMQ | Retry API authorization test; failed-to-queued transition test; admin dashboard test |
 | F-021 | Local Docker runtime | US-017 | deploy, backend, worker, frontend | Docker Compose smoke test; health check evidence |
 | F-022 | VPS demo deployment | US-018 | deploy, docs/deployment | Deployment runbook; HTTPS smoke test; backup/rollback checklist |
-| F-023 | Profile update | US-019 | backend, frontend | Profile update API tests; current-user ownership test; profile UI mutation test |
+| F-023 | Profile update | US-019 | backend, frontend | Profile update API tests; current-user ownership test; profile UI mutation test. Backend verified: [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md); profile UI tracked in #131 |
 
 ## NFR Traceability
 
