@@ -8,6 +8,7 @@ temp_directory=$(mktemp -d)
 log_file="$temp_directory/output.log"
 env_file="$temp_directory/production.env"
 config_json="$temp_directory/compose.json"
+empty_env_file="$temp_directory/empty.env"
 compose_project="vod-production-config-test-$$"
 
 set_synthetic_values() {
@@ -18,6 +19,7 @@ set_synthetic_values() {
   minio_access_key_value="ci_minio_access_key"
   minio_secret_key_value="ci-minio-secret-key-46"
   jwt_secret_value="ci-jwt-signing-secret-with-at-least-thirty-two-bytes"
+  nginx_http_port_value="80"
 }
 
 set_published_defaults() {
@@ -28,6 +30,7 @@ set_published_defaults() {
   minio_access_key_value="vod_minio"
   minio_secret_key_value="change-me"
   jwt_secret_value="change-me-use-a-long-random-secret"
+  nginx_http_port_value="127.0.0.1:80"
 }
 
 value_for() {
@@ -39,6 +42,7 @@ value_for() {
     MINIO_ACCESS_KEY) printf '%s' "$minio_access_key_value" ;;
     MINIO_SECRET_KEY) printf '%s' "$minio_secret_key_value" ;;
     JWT_SECRET) printf '%s' "$jwt_secret_value" ;;
+    NGINX_HTTP_PORT) printf '%s' "$nginx_http_port_value" ;;
     *) printf '%s\n' "Unknown test variable: $1" >&2; exit 1 ;;
   esac
 }
@@ -55,7 +59,8 @@ write_env_file() {
     RABBITMQ_PASSWORD \
     MINIO_ACCESS_KEY \
     MINIO_SECRET_KEY \
-    JWT_SECRET
+    JWT_SECRET \
+    NGINX_HTTP_PORT
   do
     [ "$credential_name" = "$omitted_variable" ] && continue
     if [ "$credential_name" = "$empty_variable" ]; then
@@ -74,6 +79,7 @@ run_check() {
   MINIO_ACCESS_KEY="$minio_access_key_value" \
   MINIO_SECRET_KEY="$minio_secret_key_value" \
   JWT_SECRET="$jwt_secret_value" \
+  NGINX_HTTP_PORT="$nginx_http_port_value" \
     sh "$check_script"
 }
 
@@ -85,6 +91,7 @@ run_production_compose() {
   MINIO_ACCESS_KEY="$minio_access_key_value" \
   MINIO_SECRET_KEY="$minio_secret_key_value" \
   JWT_SECRET="$jwt_secret_value" \
+  NGINX_HTTP_PORT="$nginx_http_port_value" \
   CORS_ALLOWED_ORIGINS= \
     docker compose \
       -p "$compose_project" \
@@ -102,6 +109,7 @@ run_production_compose_from_file() {
     -u MINIO_ACCESS_KEY \
     -u MINIO_SECRET_KEY \
     -u JWT_SECRET \
+    -u NGINX_HTTP_PORT \
     -u CORS_ALLOWED_ORIGINS \
     docker compose \
       --env-file "$env_file" \
@@ -158,14 +166,52 @@ expect_default_rejection() {
   fi
 }
 
+expect_edge_rejection() {
+  nginx_http_port="$1"
+  expected_reason="$2"
+
+  set_synthetic_values
+  nginx_http_port_value="$nginx_http_port"
+
+  : > "$log_file"
+  if run_check > "$log_file" 2>&1; then
+    printf '%s\n' "NGINX_HTTP_PORT '$nginx_http_port' was accepted" >&2
+    exit 1
+  fi
+
+  assert_log_contains \
+    "Production configuration rejected: NGINX_HTTP_PORT $expected_reason"
+}
+
+assert_local_edge_on_loopback() {
+  python3 - "$config_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as config_file:
+    ports = json.load(config_file)["services"]["nginx"]["ports"]
+
+edge_ports = [(port.get("host_ip", ""), port["published"], port["target"]) for port in ports]
+assert edge_ports == [("127.0.0.1", "80", 80)], edge_ports
+PY
+}
+
 trap cleanup EXIT
 
 cd "$repository_root"
 
-docker compose \
+env -u NGINX_HTTP_PORT docker compose \
   --env-file .env.example \
   -f deploy/docker-compose.yml \
-  config --quiet
+  config --format json > "$config_json"
+assert_local_edge_on_loopback
+
+: > "$empty_env_file"
+env -u NGINX_HTTP_PORT docker compose \
+  --env-file "$empty_env_file" \
+  -f deploy/docker-compose.yml \
+  config --format json > "$config_json"
+assert_local_edge_on_loopback
 printf '%s\n' "Local Compose configuration passed"
 
 set_synthetic_values
@@ -180,6 +226,18 @@ expect_default_rejection "MINIO_SECRET_KEY" "change-me"
 expect_default_rejection "JWT_SECRET" "change-me-use-a-long-random-secret"
 printf '%s\n' "Published-default rejection checks passed"
 
+expect_edge_rejection "" "must be set explicitly"
+expect_edge_rejection "127.0.0.1:80" "must not bind the production edge to loopback"
+expect_edge_rejection "127.0.0.1:18087" "must not bind the production edge to loopback"
+expect_edge_rejection "[::1]:80" "must not bind the production edge to loopback"
+for nginx_http_port in 80 0.0.0.0:80
+do
+  set_synthetic_values
+  nginx_http_port_value="$nginx_http_port"
+  run_check >/dev/null
+done
+printf '%s\n' "Production edge publication checks passed"
+
 for variable_name in \
   POSTGRES_USER \
   POSTGRES_PASSWORD \
@@ -187,7 +245,8 @@ for variable_name in \
   RABBITMQ_PASSWORD \
   MINIO_ACCESS_KEY \
   MINIO_SECRET_KEY \
-  JWT_SECRET
+  JWT_SECRET \
+  NGINX_HTTP_PORT
 do
   set_synthetic_values
   write_env_file "$variable_name" ""
@@ -219,6 +278,19 @@ fi
 assert_log_contains \
   "Production configuration rejected: POSTGRES_USER uses a published development default"
 
+set_synthetic_values
+nginx_http_port_value="127.0.0.1:80"
+: > "$log_file"
+if run_production_compose run --rm --no-deps production-config-check \
+  > "$log_file" 2>&1
+then
+  printf '%s\n' "Production preflight accepted a loopback-bound edge" >&2
+  exit 1
+fi
+assert_log_contains \
+  "Production configuration rejected: NGINX_HTTP_PORT must not bind the production edge to loopback"
+
+set_published_defaults
 : > "$log_file"
 if run_production_compose up --no-build --wait --wait-timeout 30 \
   postgres rabbitmq minio > "$log_file" 2>&1
@@ -254,6 +326,7 @@ expected = {
         "MINIO_ACCESS_KEY": "ci_minio_access_key",
         "MINIO_SECRET_KEY": "ci-minio-secret-key-46",
         "JWT_SECRET": "ci-jwt-signing-secret-with-at-least-thirty-two-bytes",
+        "NGINX_HTTP_PORT": "80",
     },
     "postgres": {"POSTGRES_USER": "ci_postgres_user", "POSTGRES_PASSWORD": "ci-postgres-password-46"},
     "rabbitmq": {"RABBITMQ_DEFAULT_USER": "ci_rabbitmq_user", "RABBITMQ_DEFAULT_PASS": "ci-rabbitmq-password-46"},
@@ -285,9 +358,15 @@ for service_name, environment in expected.items():
     for variable_name, expected_value in environment.items():
         assert actual_environment[variable_name] == expected_value, (service_name, variable_name)
 
-for service_name in ("postgres", "rabbitmq", "minio", "flyway", "minio-init"):
+for service_name in ("postgres", "rabbitmq", "minio", "flyway", "minio-init", "nginx"):
     dependency = services[service_name]["depends_on"]["production-config-check"]
     assert dependency["condition"] == "service_completed_successfully", service_name
+
+edge_ports = sorted(
+    (port.get("host_ip", ""), port["published"], port["target"])
+    for port in services["nginx"]["ports"]
+)
+assert edge_ports == [("", "443", 443), ("", "80", 80)], edge_ports
 PY
 printf '%s\n' "Canonical credential alignment checks passed"
 

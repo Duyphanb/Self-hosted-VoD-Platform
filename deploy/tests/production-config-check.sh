@@ -20,6 +20,21 @@ reject_published_default() {
     || fail "$variable_name uses a published development default"
 }
 
+# The local default publishes the edge on loopback only. Production must opt in
+# explicitly, or the VPS edge would be unreachable.
+reject_unpublished_edge() {
+  value="$1"
+
+  case "$value" in
+    *[![:space:]]*) ;;
+    *) fail "NGINX_HTTP_PORT must be set explicitly, for example to 80" ;;
+  esac
+  case "$value" in
+    127.*|localhost:*|::1:*|\[::1\]:*)
+      fail "NGINX_HTTP_PORT must not bind the production edge to loopback" ;;
+  esac
+}
+
 reject_published_default "POSTGRES_USER" "${POSTGRES_USER:-}" "vod_app"
 reject_published_default "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD:-}" "change-me"
 reject_published_default "RABBITMQ_USERNAME" "${RABBITMQ_USERNAME:-}" "vod_app"
@@ -30,5 +45,6 @@ reject_published_default \
   "JWT_SECRET" \
   "${JWT_SECRET:-}" \
   "change-me-use-a-long-random-secret"
+reject_unpublished_edge "${NGINX_HTTP_PORT:-}"
 
-printf '%s\n' "Production credential preflight passed"
+printf '%s\n' "Production configuration preflight passed"
