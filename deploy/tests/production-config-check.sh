@@ -29,8 +29,14 @@ reject_unpublished_edge() {
     *[![:space:]]*) ;;
     *) fail "NGINX_HTTP_PORT must be set explicitly, for example to 80" ;;
   esac
+  # Accept only PORT or IPv4:PORT. Hostnames and IPv6 in any spelling are
+  # rejected, so loopback cannot pass through an alternative notation.
   case "$value" in
-    127.*|localhost:*|::1:*|\[::1\]:*)
+    *[!0-9.:]*|*:*:*|:*|*:)
+      fail "NGINX_HTTP_PORT must be a port or IPv4:port, for example 80" ;;
+  esac
+  case "$value" in
+    127.*)
       fail "NGINX_HTTP_PORT must not bind the production edge to loopback" ;;
   esac
 }

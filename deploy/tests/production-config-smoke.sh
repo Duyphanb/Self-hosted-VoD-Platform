@@ -229,7 +229,10 @@ printf '%s\n' "Published-default rejection checks passed"
 expect_edge_rejection "" "must be set explicitly"
 expect_edge_rejection "127.0.0.1:80" "must not bind the production edge to loopback"
 expect_edge_rejection "127.0.0.1:18087" "must not bind the production edge to loopback"
-expect_edge_rejection "[::1]:80" "must not bind the production edge to loopback"
+expect_edge_rejection "[::1]:80" "must be a port or IPv4:port"
+expect_edge_rejection "[0:0:0:0:0:0:0:1]:80" "must be a port or IPv4:port"
+expect_edge_rejection "::1:80" "must be a port or IPv4:port"
+expect_edge_rejection "localhost:80" "must be a port or IPv4:port"
 for nginx_http_port in 80 0.0.0.0:80
 do
   set_synthetic_values

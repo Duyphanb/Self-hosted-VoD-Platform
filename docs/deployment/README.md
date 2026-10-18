@@ -79,8 +79,9 @@ Return to `127.0.0.1:80` when the demo ends.
 Production publishes the edge on the public interface, so `.env.production`
 must set `NGINX_HTTP_PORT=80` explicitly. The production overlay fails during
 configuration when the value is missing or empty, and the
-`production-config-check` service rejects a loopback binding (`127.*`, `::1`,
-or `localhost`) before Nginx or the infrastructure services start. HTTPS keeps
+`production-config-check` service accepts only a port or `IPv4:port` and
+rejects a loopback binding (`127.*`), hostnames such as `localhost`, and IPv6
+in any notation before Nginx or the infrastructure services start. HTTPS keeps
 the `NGINX_HTTPS_PORT` default of `443`.
 
 ## Production Credential Preflight
