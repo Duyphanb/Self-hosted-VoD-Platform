@@ -3,6 +3,7 @@ package com.vodplatform.common;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -159,6 +160,33 @@ class UserProfileIntegrationTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"displayName\":\"Updated Viewer\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void mapsValidTokenForInactiveUserToUnauthorizedApiError() throws Exception {
+        Instant now = Instant.now();
+        UserEntity disabledUser = new UserEntity(
+                UUID.randomUUID(),
+                "disabled@example.com",
+                "disabled-password-hash",
+                "Disabled Viewer",
+                UserStatus.DISABLED,
+                now,
+                now
+        );
+        disabledUser.addRole(roleRepository.findByName("ROLE_USER").orElseThrow());
+        userRepository.saveAndFlush(disabledUser);
+
+        // The token itself is valid, so the 401 comes from the auth exception advice applied to
+        // the user controller, not from the security entry point (which adds WWW-Authenticate).
+        mockMvc.perform(get("/api/v1/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor(disabledUser)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().doesNotExist(HttpHeaders.WWW_AUTHENTICATE))
+                .andExpect(jsonPath("$.timestamp").exists())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+                .andExpect(jsonPath("$.message").value("Authentication required or invalid token"));
     }
 
     private String tokenFor(UserEntity user) {

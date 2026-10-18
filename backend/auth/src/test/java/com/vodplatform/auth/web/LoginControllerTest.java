@@ -12,6 +12,9 @@ import com.vodplatform.auth.dto.UserProfile;
 import com.vodplatform.auth.exception.AuthExceptionHandler;
 import com.vodplatform.auth.exception.InvalidCredentialsException;
 import com.vodplatform.auth.service.LoginService;
+import com.vodplatform.shared.error.ApiErrorFactory;
+import com.vodplatform.shared.error.ApiExceptionHandler;
+import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -38,9 +41,13 @@ class LoginControllerTest {
     void setUp() {
         validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
+        ApiErrorFactory apiErrorFactory = new ApiErrorFactory(Clock.systemUTC());
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new LoginController(loginService))
-                .setControllerAdvice(new AuthExceptionHandler())
+                .setControllerAdvice(
+                        new AuthExceptionHandler(apiErrorFactory),
+                        new ApiExceptionHandler(apiErrorFactory)
+                )
                 .setValidator(validator)
                 .build();
     }

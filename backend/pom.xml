@@ -18,6 +18,7 @@
     <name>vod-backend</name>
 
     <modules>
+        <module>shared</module>
         <module>auth</module>
         <module>user</module>
         <module>catalog</module>

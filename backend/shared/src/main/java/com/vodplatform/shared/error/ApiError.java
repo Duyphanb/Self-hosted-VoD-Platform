@@ -1,4 +1,4 @@
-package com.vodplatform.auth.exception;
+package com.vodplatform.shared.error;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;

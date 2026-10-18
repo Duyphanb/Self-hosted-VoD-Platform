@@ -1,36 +1,30 @@
 package com.vodplatform.auth.exception;
 
-import java.time.Instant;
-import java.util.Comparator;
+import com.vodplatform.shared.error.ApiError;
+import com.vodplatform.shared.error.ApiErrorFactory;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+/**
+ * Maps the auth exception types only. It is intentionally not restricted to auth controllers,
+ * because other modules (such as {@code user}) throw {@link CurrentUserUnavailableException}.
+ * Generic mappings live in {@code com.vodplatform.shared.error.ApiExceptionHandler}.
+ */
 @RestControllerAdvice
 public class AuthExceptionHandler {
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException exception) {
-        List<ApiFieldError> fieldErrors = exception.getBindingResult().getFieldErrors().stream()
-                .map(error -> new ApiFieldError(error.getField(), error.getDefaultMessage()))
-                .sorted(Comparator.comparing(ApiFieldError::field))
-                .toList();
+    private final ApiErrorFactory apiErrorFactory;
 
-        return buildResponse(
-                HttpStatus.BAD_REQUEST,
-                "VALIDATION_ERROR",
-                "Request validation failed",
-                fieldErrors
-        );
+    public AuthExceptionHandler(ApiErrorFactory apiErrorFactory) {
+        this.apiErrorFactory = apiErrorFactory;
     }
 
     @ExceptionHandler(EmailAlreadyExistsException.class)
     ResponseEntity<ApiError> handleDuplicateEmail(EmailAlreadyExistsException exception) {
-        return buildResponse(
+        return apiErrorFactory.response(
                 HttpStatus.CONFLICT,
                 "EMAIL_ALREADY_EXISTS",
                 exception.getMessage(),
@@ -40,7 +34,7 @@ public class AuthExceptionHandler {
 
     @ExceptionHandler(InvalidCredentialsException.class)
     ResponseEntity<ApiError> handleInvalidCredentials(InvalidCredentialsException exception) {
-        return buildResponse(
+        return apiErrorFactory.response(
                 HttpStatus.UNAUTHORIZED,
                 "INVALID_CREDENTIALS",
                 exception.getMessage(),
@@ -50,7 +44,7 @@ public class AuthExceptionHandler {
 
     @ExceptionHandler(InvalidRefreshTokenException.class)
     ResponseEntity<ApiError> handleInvalidRefreshToken(InvalidRefreshTokenException exception) {
-        return buildResponse(
+        return apiErrorFactory.response(
                 HttpStatus.UNAUTHORIZED,
                 "INVALID_REFRESH_TOKEN",
                 exception.getMessage(),
@@ -60,37 +54,11 @@ public class AuthExceptionHandler {
 
     @ExceptionHandler(CurrentUserUnavailableException.class)
     ResponseEntity<ApiError> handleCurrentUserUnavailable(CurrentUserUnavailableException exception) {
-        return buildResponse(
+        return apiErrorFactory.response(
                 HttpStatus.UNAUTHORIZED,
                 "UNAUTHORIZED",
                 exception.getMessage(),
                 List.of()
         );
-    }
-
-    @ExceptionHandler(HttpMessageNotReadableException.class)
-    ResponseEntity<ApiError> handleUnreadableRequest() {
-        return buildResponse(
-                HttpStatus.BAD_REQUEST,
-                "MALFORMED_REQUEST",
-                "Request body is missing or malformed",
-                List.of()
-        );
-    }
-
-    private ResponseEntity<ApiError> buildResponse(
-            HttpStatus status,
-            String code,
-            String message,
-            List<ApiFieldError> fieldErrors
-    ) {
-        ApiError error = new ApiError(
-                Instant.now(),
-                status.value(),
-                code,
-                message,
-                fieldErrors
-        );
-        return ResponseEntity.status(status).body(error);
     }
 }

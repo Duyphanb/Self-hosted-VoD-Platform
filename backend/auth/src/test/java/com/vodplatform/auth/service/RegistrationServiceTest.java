@@ -17,6 +17,9 @@ import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
 import com.vodplatform.auth.security.VersionedBcryptPasswordEncoder;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +33,8 @@ import org.hibernate.exception.ConstraintViolationException;
 
 @ExtendWith(MockitoExtension.class)
 class RegistrationServiceTest {
+
+    private static final Instant NOW = Instant.parse("2026-10-18T09:15:30Z");
 
     @Mock
     private UserRepository userRepository;
@@ -52,7 +57,8 @@ class RegistrationServiceTest {
                 userRepository,
                 roleRepository,
                 passwordEncoder,
-                userProfileMapper
+                userProfileMapper,
+                Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
 
@@ -81,6 +87,7 @@ class RegistrationServiceTest {
         assertThat(savedUser.getPasswordHash()).isNotEqualTo(request.password());
         assertThat(savedUser.getPasswordHash()).startsWith("{bcrypt-sha256}$2");
         assertThat(passwordEncoder.matches(request.password(), savedUser.getPasswordHash())).isTrue();
+        assertThat(savedUser.getUpdatedAt()).isEqualTo(NOW);
         assertThat(profile.id()).isEqualTo(savedUser.getId());
         assertThat(profile.email()).isEqualTo(request.email());
         assertThat(profile.displayName()).isEqualTo(request.displayName());
