@@ -8,6 +8,7 @@ import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 import org.hibernate.exception.ConstraintViolationException;
@@ -25,17 +26,20 @@ public class RegistrationService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserProfileMapper userProfileMapper;
+    private final Clock clock;
 
     public RegistrationService(
             UserRepository userRepository,
             RoleRepository roleRepository,
             PasswordEncoder passwordEncoder,
-            UserProfileMapper userProfileMapper
+            UserProfileMapper userProfileMapper,
+            Clock clock
     ) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.userProfileMapper = userProfileMapper;
+        this.clock = clock;
     }
 
     @Transactional
@@ -46,7 +50,7 @@ public class RegistrationService {
 
         RoleEntity role = roleRepository.findByName(DEFAULT_ROLE)
                 .orElseThrow(() -> new IllegalStateException("Required role is not configured"));
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         UserEntity user = new UserEntity(
                 UUID.randomUUID(),
                 request.email(),

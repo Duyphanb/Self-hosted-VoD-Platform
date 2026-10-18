@@ -11,6 +11,9 @@ import com.vodplatform.auth.dto.UserProfile;
 import com.vodplatform.auth.exception.EmailAlreadyExistsException;
 import com.vodplatform.auth.exception.AuthExceptionHandler;
 import com.vodplatform.auth.service.RegistrationService;
+import com.vodplatform.shared.error.ApiErrorFactory;
+import com.vodplatform.shared.error.ApiExceptionHandler;
+import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -37,9 +40,13 @@ class RegistrationControllerTest {
     void setUp() {
         validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
+        ApiErrorFactory apiErrorFactory = new ApiErrorFactory(Clock.systemUTC());
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new RegistrationController(registrationService))
-                .setControllerAdvice(new AuthExceptionHandler())
+                .setControllerAdvice(
+                        new AuthExceptionHandler(apiErrorFactory),
+                        new ApiExceptionHandler(apiErrorFactory)
+                )
                 .setValidator(validator)
                 .build();
     }

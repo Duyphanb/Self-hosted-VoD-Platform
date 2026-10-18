@@ -1,6 +1,6 @@
 package com.vodplatform.auth.security;
 
-import com.vodplatform.auth.exception.ApiError;
+import com.vodplatform.shared.error.ApiError;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
