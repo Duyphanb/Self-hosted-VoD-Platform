@@ -5,8 +5,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vodplatform.auth.persistence.RefreshTokenEntity;
 import com.vodplatform.auth.persistence.RefreshTokenRepository;
 import com.vodplatform.auth.persistence.RoleEntity;
@@ -22,13 +20,15 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(
         properties = {
@@ -109,7 +109,7 @@ class RefreshTokenIntegrationTests {
 
         String rotatedRefreshToken = objectMapper.readTree(result.getResponse().getContentAsByteArray())
                 .path("refreshToken")
-                .asText();
+                .asString();
         assertThat(rotatedRefreshToken).isNotEqualTo(originalRefreshToken);
 
         List<RefreshTokenEntity> storedTokens = refreshTokenRepository.findAll();
@@ -190,6 +190,6 @@ class RefreshTokenIntegrationTests {
                 .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsByteArray())
                 .path("refreshToken")
-                .asText();
+                .asString();
     }
 }
