@@ -14,7 +14,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
@@ -110,10 +110,10 @@ public class SecurityConfiguration {
     }
 
     private static RequestMatcher get(String pattern) {
-        return new AntPathRequestMatcher(pattern, HttpMethod.GET.name());
+        return PathPatternRequestMatcher.pathPattern(HttpMethod.GET, pattern);
     }
 
     private static RequestMatcher post(String pattern) {
-        return new AntPathRequestMatcher(pattern, HttpMethod.POST.name());
+        return PathPatternRequestMatcher.pathPattern(HttpMethod.POST, pattern);
     }
 }

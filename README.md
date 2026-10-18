@@ -6,7 +6,7 @@ Current status: Phase 3 implementation. The Sprint 1 foundation provides buildab
 
 ## Stack
 
-- Java 21, Spring Boot 3.x, Maven multi-module
+- Java 21, Spring Boot 4.x, Maven multi-module
 - React 18, TypeScript, Vite, Tailwind CSS, TanStack Query
 - PostgreSQL, Redis, RabbitMQ, MinIO
 - FFmpeg, FFprobe, HLS, Nginx
