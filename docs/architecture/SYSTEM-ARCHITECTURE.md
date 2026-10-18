@@ -87,7 +87,10 @@ Planned backend modules:
 - `progress`: progress buffering and persistence orchestration
 - `library`: watchlist, watch history, rating
 - `search`: PostgreSQL full-text search and suggestions
-- `common`: errors, validation, response models, security helpers
+- `shared`: API error model and `ApiException`, generic API exception handling, the single app-wide `Clock`, reusable validation constraints; no JPA or security; feature modules may depend on it, and it depends on no feature module
+- `common`: Spring Boot assembly module: application entry point, configuration, Flyway migration scripts, health endpoints and full-context integration tests; it depends on each implemented backend module
+
+The `shared` module and the assembly role of `common` were approved by the repository owner on 2026-10-18 (#113).
 
 ## Worker Internal Modules
 
