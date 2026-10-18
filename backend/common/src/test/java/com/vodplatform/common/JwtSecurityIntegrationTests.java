@@ -6,8 +6,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vodplatform.auth.persistence.RefreshTokenRepository;
 import com.vodplatform.auth.persistence.RoleEntity;
 import com.vodplatform.auth.persistence.RoleRepository;
@@ -21,8 +19,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -39,6 +37,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(
         properties = {
@@ -108,12 +108,12 @@ class JwtSecurityIntegrationTests {
     void anonymousMalformedAndTamperedBearerTokensReturnGenericUnauthorized() throws Exception {
         assertUnauthorized(null);
         assertUnauthorized("Bearer not-a-jwt");
-        assertUnauthorized("Bearer " + tamperSignature(loginAndReadTokens().path("accessToken").asText()));
+        assertUnauthorized("Bearer " + tamperSignature(loginAndReadTokens().path("accessToken").asString()));
     }
 
     @Test
     void validBearerTokenPopulatesUserAndRolesInSecurityContext() throws Exception {
-        String accessToken = loginAndReadTokens().path("accessToken").asText();
+        String accessToken = loginAndReadTokens().path("accessToken").asString();
 
         mockMvc.perform(get("/test/security-context")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
@@ -136,7 +136,7 @@ class JwtSecurityIntegrationTests {
                 .andExpect(header().string(HttpHeaders.EXPIRES, "0"))
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"));
 
-        String accessToken = loginAndReadTokens().path("accessToken").asText();
+        String accessToken = loginAndReadTokens().path("accessToken").asString();
 
         mockMvc.perform(get("/test/security-context")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
@@ -228,13 +228,13 @@ class JwtSecurityIntegrationTests {
         JsonNode login = loginAndReadTokens(invalidAuthorization);
         JsonNode refresh = performAuthRequest(
                 "/api/v1/auth/refresh",
-                objectMapper.createObjectNode().put("refreshToken", login.path("refreshToken").asText()),
+                objectMapper.createObjectNode().put("refreshToken", login.path("refreshToken").asString()),
                 invalidAuthorization,
                 200
         );
         performAuthRequest(
                 "/api/v1/auth/logout",
-                objectMapper.createObjectNode().put("refreshToken", refresh.path("refreshToken").asText()),
+                objectMapper.createObjectNode().put("refreshToken", refresh.path("refreshToken").asString()),
                 invalidAuthorization,
                 204
         );

@@ -4,31 +4,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.test.web.servlet.client.EntityExchangeResult;
+import org.springframework.test.web.servlet.client.RestTestClient;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureRestTestClient
 class VodWorkerApplicationTests {
 
-    private final TestRestTemplate restTemplate;
+    private final RestTestClient restTestClient;
     private final int port;
 
     @Autowired
-    VodWorkerApplicationTests(TestRestTemplate restTemplate, @LocalServerPort int port) {
-        this.restTemplate = restTemplate;
+    VodWorkerApplicationTests(RestTestClient restTestClient, @LocalServerPort int port) {
+        this.restTestClient = restTestClient;
         this.port = port;
     }
 
     @Test
     void actuatorHealthReturnsOk() {
-        ResponseEntity<String> response = restTemplate.getForEntity(
-                "http://localhost:%d/actuator/health".formatted(port),
-                String.class
-        );
+        EntityExchangeResult<String> response = restTestClient.get()
+                .uri("http://localhost:%d/actuator/health".formatted(port))
+                .exchange()
+                .expectBody(String.class)
+                .returnResult();
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
     }
 }

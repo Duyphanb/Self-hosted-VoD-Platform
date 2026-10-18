@@ -8,11 +8,22 @@ These retain the repository's engineering conventions. Frozen contracts govern b
 
 ### Backend
 
-- Java 21, Spring Boot 3.x, Maven multi-module; the backend owns core business workflows.
+- Java 21, Spring Boot 4.x, Maven multi-module; the backend owns core business workflows.
 - Constructor injection only. Keep controllers thin and business logic in services.
 - Use request/response DTOs, never exposed JPA entities; Spring Validation and centralized `@RestControllerAdvice` handle validation/errors.
 - Use SLF4J, not `System.out.println`. Keep OpenAPI behavior synchronized with the frozen API contract.
-- Use JUnit 5 and Mockito by default. Persistence, queue, and storage changes need appropriate boundary integration coverage.
+- Use JUnit Jupiter and Mockito by default, at the versions managed by Spring Boot (do not override them). Persistence, queue, and storage changes need appropriate boundary integration coverage.
+
+### Spring Boot 4 conventions
+
+Backend and worker use Spring Boot 4.x ([ADR-002](docs/architecture/adr/ADR-002.md)). Do not copy Spring Boot 3 names from older examples:
+
+- Starters: `spring-boot-starter-webmvc`, not `spring-boot-starter-web`; `spring-boot-starter-security-oauth2-resource-server`; and the matching `*-test` starter for each technology under test, such as `spring-boot-starter-webmvc-test` or `spring-boot-starter-data-jpa-test`.
+- Jackson 3: import `ObjectMapper`, `JsonNode`, and other core/databind types from `tools.jackson.*`, not `com.fasterxml.jackson.*`; `JsonNode.asText()` becomes `asString()`. Jackson annotations stay in `com.fasterxml.jackson.annotation`.
+- Security: build request matchers with `PathPatternRequestMatcher`; `AntPathRequestMatcher` no longer exists.
+- HTTP tests against a running server: `RestTestClient` with `@AutoConfigureRestTestClient` (`org.springframework.boot.resttestclient.autoconfigure`), not `TestRestTemplate`.
+- Test annotation packages: `@DataJpaTest` in `org.springframework.boot.data.jpa.test.autoconfigure`, `@AutoConfigureMockMvc` in `org.springframework.boot.webmvc.test.autoconfigure`, `@AutoConfigureTestDatabase` in `org.springframework.boot.jdbc.test.autoconfigure`. `@EntityScan` is in `org.springframework.boot.persistence.autoconfigure`.
+- Mock beans: `@MockitoBean` and `@MockitoSpyBean` from `org.springframework.test.context.bean.override.mockito`; `@MockBean` and `@SpyBean` were removed.
 
 ### Frontend
 

@@ -47,7 +47,7 @@ Sprint 10 (Polish)
 ### Issue 1.1: Initialize Backend Maven Multi-Module Structure
 
 **Description:**  
-Create the backend as a Maven multi-module project with Spring Boot 3.x, Java 21. Include parent POM, common module, and placeholder modules for auth, catalog, upload, encoding, playback, stream, progress, library, search. Add Spring Boot Actuator health endpoint.
+Create the backend as a Maven multi-module project with Spring Boot 4.x, Java 21. Include parent POM, common module, and placeholder modules for auth, catalog, upload, encoding, playback, stream, progress, library, search. Add Spring Boot Actuator health endpoint.
 
 **Acceptance Criteria:**
 - Maven multi-module builds successfully
@@ -63,7 +63,7 @@ Create the backend as a Maven multi-module project with Spring Boot 3.x, Java 21
 ### Issue 1.2: Initialize Worker Spring Boot Structure
 
 **Description:**  
-Create the worker as a standalone Spring Boot 3.x application with Java 21. Include placeholder modules for queue, probe, transcode, storage, status, cleanup. Worker should start cleanly but not consume queues yet.
+Create the worker as a standalone Spring Boot 4.x application with Java 21. Include placeholder modules for queue, probe, transcode, storage, status, cleanup. Worker should start cleanly but not consume queues yet.
 
 **Acceptance Criteria:**
 - Worker Spring Boot application builds successfully
@@ -1557,7 +1557,7 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 
 ## Assumptions
 
-1. Backend and worker use Spring Boot 3.x with Java 21; frontend uses React 18 with TypeScript.
+1. Backend and worker use Spring Boot 4.x with Java 21 (ADR-002, amended 2026-10-18); frontend uses React 18 with TypeScript.
 2. Docker Compose is used for local and VPS deployment; no Kubernetes.
 3. Single-quality HLS output (e.g., 720p) is sufficient for MVP; multi-quality deferred.
 4. PostgreSQL full-text search is sufficient; Elasticsearch deferred.
@@ -1611,6 +1611,7 @@ After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening
 | Date | Version | Change |
 |---|---|---|
 | 2026-07-05 | 1.0 | Initial backlog created from PROJECTPLAN.md, USERSTORIES.md, NFR.md, TRACEABILITY.md |
+| 2026-10-18 | 1.1 | Platform statements in Issues 1.1 and 1.2 and Assumption 1 changed from Spring Boot 3.x to Spring Boot 4.x after the ADR-002 amendment (Issue #50) |
 
 ---
 
