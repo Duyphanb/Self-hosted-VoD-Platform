@@ -2,7 +2,7 @@
 
 This repository contains the foundation for a self-hosted Video-on-Demand platform built as a modular monolith plus a dedicated video-processing worker.
 
-Current status: Phase 3 implementation. The Sprint 1 foundation provides buildable backend, worker, and frontend skeletons, a Flyway baseline schema, and Docker Compose orchestration. Business features are implemented in later bounded sprint issues.
+Current status: Phase 3 implementation. Sprint 1 (foundation) and Sprint 2 (authentication: registration, login, refresh-token rotation, logout, role-based access and profile endpoints, with the frontend auth pages) are delivered; see the [Sprint 2 closeout evidence](docs/testing/SPRINT-2-CLOSEOUT.md) and the `v0.1.0` and `v0.2.0` releases. Sprint 3 (movie catalog) is next. Upload, encoding and playback are not implemented yet.
 
 ## Stack
 
@@ -64,16 +64,31 @@ docker compose --env-file .env -f deploy/docker-compose.yml up --build -d
 
 The first start builds the backend, worker, and frontend images; applies the Flyway migration; creates the three private MinIO buckets; and starts the long-lived services.
 
+#### Fresh machine: auth-only stack
+
+The full stack needs the MinIO images, which a clean machine currently cannot pull ([Issue #14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14)). Until #14 is resolved, start only the services that authentication and the catalog need, in the same order as the CI auth check:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml build backend frontend
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --wait postgres redis rabbitmq frontend
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm --no-deps flyway
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --wait --no-deps backend nginx
+```
+
+Upload, encoding and playback need MinIO and the worker, so they are not available in this mode.
+
 ### 3. Check service status
 
 ```bash
 docker compose --env-file .env -f deploy/docker-compose.yml ps -a
 ```
 
-Expected result:
+Expected result for the full stack:
 
 - `postgres`, `redis`, `rabbitmq`, `minio`, `backend`, `worker`, `frontend`, and `nginx` are running and healthy.
 - `flyway` and `minio-init` have exited successfully with status code 0.
+
+Expected result for the auth-only stack: `postgres`, `redis`, `rabbitmq`, `frontend`, `backend`, and `nginx` are running and healthy, and `flyway` has exited with status code 0. `minio`, `minio-init`, and `worker` are not started in this mode.
 
 ### 4. Verify the public routes
 
@@ -94,7 +109,7 @@ Nginx is the only service published to the host by the local Compose file, and b
 
 | Host URL or port | Destination | Purpose |
 |---|---|---|
-| `http://localhost/` | frontend:80 | Frontend placeholder |
+| `http://localhost/` | frontend:80 | Frontend single-page app |
 | `http://localhost/api/v1/*` | backend:8080 | Public API route |
 | `http://localhost/hls/*` | backend:8080 | Authenticated HLS proxy route |
 | `${NGINX_HTTP_PORT:-127.0.0.1:80}` | nginx:80 | Configurable host HTTP address and port, loopback only by default |

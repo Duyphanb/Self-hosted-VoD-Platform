@@ -93,6 +93,8 @@ See `BACKLOG.md` for detailed sprint backlog with issues, acceptance criteria, d
 
 Phase 3 - Feature Development is active.
 
+- This is a personal, open-ended project with no external deadline. Sprints run in `BACKLOG.md` order with the full MVP scope, and progress is measured by each sprint's Definition of Done, not by issue counts.
+
 - Sprint 1 - Foundation and Sprint 2 - Auth are complete.
 - Sprint 2 acceptance criteria and DoD were independently verified on merged `main`; see [closeout evidence](../testing/SPRINT-2-CLOSEOUT.md). The fresh-machine full-stack MinIO limitation in Issue #14 remains separate from the verified Auth/catalog prerequisites.
 - Resolve open P0/P1 security or repository-governance gates that explicitly block the selected feature batch before starting that batch.

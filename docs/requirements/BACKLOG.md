@@ -1611,6 +1611,10 @@ After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening
 | Date | Version | Change |
 |---|---|---|
 | 2026-07-05 | 1.0 | Initial backlog created from PROJECTPLAN.md, USERSTORIES.md, NFR.md, TRACEABILITY.md |
+| 2026-08-08 | 1.0 | Sprint 1 Definition of Done marked complete |
+| 2026-08-11 | 1.0 | Registration contract aligned with the Sprint 2 scope |
+| 2026-09-18 | 1.0 | Verified Sprint 2 auth closeout recorded |
+| 2026-10-06 | 1.0 | Sprint 3 catalog contract frozen (#95): Issues 3.2-3.5, 3.8 and 7.2 updated |
 | 2026-10-18 | 1.1 | Platform statements in Issues 1.1 and 1.2 and Assumption 1 changed from Spring Boot 3.x to Spring Boot 4.x after the ADR-002 amendment (Issue #50) |
 
 ---
