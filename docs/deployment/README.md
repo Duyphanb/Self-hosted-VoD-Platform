@@ -60,6 +60,30 @@ refresh tokens (`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = ..
 AND revoked_at IS NULL`). An access token already issued stays valid until it
 expires (60 minutes by default); the accepted delay is tracked in issue #72.
 
+## Edge Port Binding
+
+`NGINX_HTTP_PORT` sets the host address and port that publish the Nginx edge.
+The base Compose file and `.env.example` default to `127.0.0.1:80`, so a local
+stack is reachable only from the same machine at `http://localhost/`. The local
+`JWT_SECRET` in `.env.example` is a public placeholder, and anyone who can
+reach an edge that uses it can sign access tokens for any account, including
+`ROLE_ADMIN`.
+
+To show a local stack to other devices on a trusted network, first replace
+`JWT_SECRET` in `.env` with a random value of at least 32 bytes that is not the
+placeholder. Then set `NGINX_HTTP_PORT=80` (every interface) or
+`NGINX_HTTP_PORT=<LAN address>:80` and recreate the stack. The README section
+[LAN access for a demo](../../README.md#lan-access-for-a-demo) lists the steps.
+Return to `127.0.0.1:80` when the demo ends.
+
+Production publishes the edge on the public interface, so `.env.production`
+must set `NGINX_HTTP_PORT=80` explicitly. The production overlay fails during
+configuration when the value is missing or empty, and the
+`production-config-check` service accepts only a port or `IPv4:port` and
+rejects a loopback binding (`127.*`), hostnames such as `localhost`, and IPv6
+in any notation before Nginx or the infrastructure services start. HTTPS keeps
+the `NGINX_HTTPS_PORT` default of `443`.
+
 ## Production Credential Preflight
 
 The production overlay must be supplied together with the local baseline:
@@ -86,12 +110,15 @@ provide non-empty, non-default values for:
 - `MINIO_SECRET_KEY`
 - `JWT_SECRET`
 
+It must also set `NGINX_HTTP_PORT=80`, as described in
+[Edge Port Binding](#edge-port-binding).
+
 The production-only `production-config-check` service rejects the published
-development placeholders before PostgreSQL, RabbitMQ, or MinIO can start. It
-reports only the rejected variable name and never its value. Backend, worker,
-Flyway, and initialization services consume the same canonical credentials.
-Starting production with `--no-deps` is unsupported because that option
-explicitly bypasses dependency gates.
+development placeholders and a loopback-bound edge before PostgreSQL,
+RabbitMQ, MinIO, or Nginx can start. It reports only the rejected variable name
+and never its value. Backend, worker, Flyway, and initialization services
+consume the same canonical credentials. Starting production with `--no-deps` is
+unsupported because that option explicitly bypasses dependency gates.
 
 The preflight validates the configuration being supplied; it does not rotate
 credentials already stored in initialized service volumes. PostgreSQL and
@@ -105,6 +132,6 @@ sh deploy/tests/production-config-smoke.sh
 ```
 
 The script uses synthetic test-only values. It verifies that local Compose
-still accepts its development defaults, missing production values fail during
-configuration, published defaults fail the runtime preflight, and non-default
-values pass.
+still accepts its development defaults and publishes the edge on loopback only,
+missing production values fail during configuration, published defaults and a
+loopback-bound edge fail the runtime preflight, and non-default values pass.

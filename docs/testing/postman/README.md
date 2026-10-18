@@ -15,7 +15,7 @@ Start the local Compose stack through the Nginx edge by following the repository
 http://localhost
 ```
 
-If `NGINX_HTTP_PORT` is not `80`, change `baseUrl` in the imported environment, for example to `http://localhost:8088`.
+If `NGINX_HTTP_PORT` uses a host port other than `80`, change `baseUrl` in the imported environment; for example, `NGINX_HTTP_PORT=127.0.0.1:8088` needs `http://localhost:8088`.
 
 ## Run in Postman
 
