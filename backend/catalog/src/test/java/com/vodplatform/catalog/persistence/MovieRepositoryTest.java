@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import com.vodplatform.catalog.config.CatalogConfiguration;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -98,6 +99,98 @@ class MovieRepositoryTest {
 
         assertThatIllegalArgumentException().isThrownBy(() -> movie.addCredit(person, CreditRole.DIRECTOR, 1));
         assertThat(movie.getCredits()).hasSize(1);
+    }
+
+    @Test
+    void findForUpdateLoadsTheMovieWithAPessimisticWriteLock() {
+        persist(movie(1, "Phim A", MovieStatus.ARCHIVED, T0));
+        flushAndClear();
+
+        Movie locked = movieRepository.findForUpdateById(uuid(1)).orElseThrow();
+
+        assertThat(locked.getStatus()).isEqualTo(MovieStatus.ARCHIVED);
+        assertThat(entityManager.getLockMode(locked)).isEqualTo(LockModeType.PESSIMISTIC_WRITE);
+        assertThat(movieRepository.findForUpdateById(uuid(2))).isEmpty();
+    }
+
+    @Test
+    void replacingCreditsKeepsRowsForUnchangedPairsAndReordersThem() {
+        Person first = persist(new Person(uuid(201), "Người Một", "nguoi-mot"));
+        Person second = persist(new Person(uuid(202), "Người Hai", "nguoi-hai"));
+        Person third = persist(new Person(uuid(203), "Người Ba", "nguoi-ba"));
+        Movie movie = movie(1, "Phim", MovieStatus.DRAFT, T0);
+        movie.addCredit(first, CreditRole.ACTOR, 0);
+        movie.addCredit(second, CreditRole.DIRECTOR, 1);
+        persist(movie);
+        flushAndClear();
+
+        // Same primary keys in a new order plus one new pair, in one flush: no delete and
+        // re-insert of the same key, which would violate the primary key.
+        Movie loaded = movieRepository.findById(uuid(1)).orElseThrow();
+        loaded.replaceCredits(List.of(
+                new CreditAssignment(entityManager.find(Person.class, uuid(202)), CreditRole.DIRECTOR),
+                new CreditAssignment(entityManager.find(Person.class, uuid(203)), CreditRole.ACTOR),
+                new CreditAssignment(entityManager.find(Person.class, uuid(201)), CreditRole.ACTOR)
+        ));
+        flushAndClear();
+
+        assertThat(movieRepository.findById(uuid(1)).orElseThrow().getCredits())
+                .extracting(credit -> credit.getPerson().getId(), MovieCredit::getRole, MovieCredit::getSortOrder)
+                .containsExactly(
+                        tuple(second.getId(), CreditRole.DIRECTOR, 0),
+                        tuple(third.getId(), CreditRole.ACTOR, 1),
+                        tuple(first.getId(), CreditRole.ACTOR, 2)
+                );
+        assertThat(countRows("movie_credits")).isEqualTo(3);
+    }
+
+    @Test
+    void replacingCreditsRejectsARepeatedPairWithoutChangingTheMovie() {
+        Person person = new Person(uuid(201), "Trấn Thành", "tran-thanh");
+        Movie movie = new Movie(uuid(1), "Bố Già", "bo-gia", "Mô tả", 2021, null, MovieStatus.DRAFT, T0);
+        movie.addCredit(person, CreditRole.DIRECTOR, 0);
+
+        assertThatIllegalArgumentException().isThrownBy(() -> movie.replaceCredits(List.of(
+                new CreditAssignment(person, CreditRole.ACTOR),
+                new CreditAssignment(person, CreditRole.ACTOR)
+        )));
+        assertThat(movie.getCredits()).extracting(MovieCredit::getRole, MovieCredit::getSortOrder)
+                .containsExactly(tuple(CreditRole.DIRECTOR, 0));
+    }
+
+    @Test
+    void replacingGenresKeepsAssignedGenresAndRemovesTheRest() {
+        Genre comedy = persist(new Genre(uuid(101), "Hài", "hai"));
+        Genre drama = persist(new Genre(uuid(102), "Tâm Lý", "tam-ly"));
+        persist(new Genre(uuid(103), "Kinh Dị", "kinh-di"));
+        Movie movie = movie(1, "Phim", MovieStatus.DRAFT, T0);
+        movie.addGenre(comedy);
+        movie.addGenre(drama);
+        persist(movie);
+        flushAndClear();
+
+        Movie loaded = movieRepository.findById(uuid(1)).orElseThrow();
+        loaded.replaceGenres(List.of(
+                entityManager.find(Genre.class, uuid(103)),
+                new Genre(uuid(101), "Hài", "hai")
+        ));
+        flushAndClear();
+
+        assertThat(movieRepository.findById(uuid(1)).orElseThrow().getGenres())
+                .extracting(Genre::getSlug)
+                .containsExactlyInAnyOrder("hai", "kinh-di");
+        assertThat(countRows("movie_genres")).isEqualTo(2);
+    }
+
+    @Test
+    void archivingIsIdempotentAndKeepsTheFirstArchiveTime() {
+        Movie movie = movie(1, "Phim", MovieStatus.PUBLISHED, T0);
+
+        movie.archive(T0.plusSeconds(60));
+        movie.archive(T0.plusSeconds(120));
+
+        assertThat(movie.getStatus()).isEqualTo(MovieStatus.ARCHIVED);
+        assertThat(movie.getUpdatedAt()).isEqualTo(T0.plusSeconds(60));
     }
 
     @Test

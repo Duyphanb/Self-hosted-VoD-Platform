@@ -17,9 +17,13 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -141,6 +145,88 @@ public class Movie {
             throw new IllegalArgumentException("The person already has this credit role in the movie");
         }
         credits.add(new MovieCredit(this, person, role, sortOrder));
+    }
+
+    /**
+     * Replaces the metadata of a full update. Optional values the update omits are passed as
+     * null; the poster and the creation time are not part of the update and stay unchanged.
+     */
+    public void update(
+            String title,
+            String slug,
+            String description,
+            Integer releaseYear,
+            MaturityRating maturityRating,
+            MovieStatus status,
+            Instant updatedAt
+    ) {
+        this.title = Objects.requireNonNull(title, "title");
+        this.slug = Objects.requireNonNull(slug, "slug");
+        this.description = Objects.requireNonNull(description, "description");
+        this.releaseYear = releaseYear;
+        this.maturityRating = maturityRating;
+        this.status = Objects.requireNonNull(status, "status");
+        this.updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
+    }
+
+    /**
+     * Archives the movie (soft delete). Archiving an archived movie changes nothing, including
+     * the update time.
+     */
+    public void archive(Instant archivedAt) {
+        Objects.requireNonNull(archivedAt, "archivedAt");
+        if (status != MovieStatus.ARCHIVED) {
+            status = MovieStatus.ARCHIVED;
+            updatedAt = archivedAt;
+        }
+    }
+
+    /**
+     * Makes the given genres the movie's only genre assignments. Assignments that remain keep
+     * their {@code movie_genres} row; only removed and added genres change rows.
+     */
+    public void replaceGenres(Collection<Genre> replacement) {
+        Set<UUID> replacementIds = new HashSet<>();
+        replacement.forEach(genre -> replacementIds.add(Objects.requireNonNull(genre, "genre").getId()));
+        genres.removeIf(genre -> !replacementIds.contains(genre.getId()));
+        replacement.forEach(this::addGenre);
+    }
+
+    /**
+     * Makes the given credits the movie's only credits, in display order: the credit at index
+     * {@code i} gets {@code sort_order = i}.
+     *
+     * <p>A (person, role) pair the movie already has keeps its existing row and only its sort
+     * order changes. Hibernate inserts new rows before it deletes orphans, so deleting and
+     * re-inserting the same primary key in one flush would fail; reusing the row avoids that.
+     *
+     * @throws IllegalArgumentException if a (person, role) pair appears more than once
+     */
+    public void replaceCredits(List<CreditAssignment> replacement) {
+        List<MovieCreditId> keys = new ArrayList<>(replacement.size());
+        Set<MovieCreditId> distinctKeys = new HashSet<>();
+        for (CreditAssignment assignment : replacement) {
+            MovieCreditId key = new MovieCreditId(id, assignment.person().getId(), assignment.role());
+            if (!distinctKeys.add(key)) {
+                throw new IllegalArgumentException("The person already has this credit role in the movie");
+            }
+            keys.add(key);
+        }
+        Map<MovieCreditId, MovieCredit> current = new HashMap<>();
+        credits.forEach(credit -> current.put(credit.getId(), credit));
+        List<MovieCredit> replaced = new ArrayList<>(replacement.size());
+        for (int index = 0; index < replacement.size(); index++) {
+            CreditAssignment assignment = replacement.get(index);
+            MovieCredit credit = current.get(keys.get(index));
+            if (credit == null) {
+                credit = new MovieCredit(this, assignment.person(), assignment.role(), index);
+            } else {
+                credit.changeSortOrder(index);
+            }
+            replaced.add(credit);
+        }
+        credits.clear();
+        credits.addAll(replaced);
     }
 
     public UUID getId() {

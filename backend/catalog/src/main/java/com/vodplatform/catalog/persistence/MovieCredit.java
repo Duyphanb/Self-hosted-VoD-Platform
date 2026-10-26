@@ -12,7 +12,7 @@ import jakarta.persistence.Table;
 
 /**
  * Row of {@code movie_credits}, keyed by (movie, person, credit role). Created through
- * {@link Movie#addCredit(Person, CreditRole, Integer)}.
+ * {@link Movie#addCredit(Person, CreditRole, Integer)} or {@link Movie#replaceCredits(java.util.List)}.
  */
 @Entity
 @Table(
@@ -47,6 +47,14 @@ public class MovieCredit {
         this.id = new MovieCreditId(movie.getId(), person.getId(), role);
         this.movie = movie;
         this.person = person;
+        this.sortOrder = sortOrder;
+    }
+
+    MovieCreditId getId() {
+        return id;
+    }
+
+    void changeSortOrder(Integer sortOrder) {
         this.sortOrder = sortOrder;
     }
 
