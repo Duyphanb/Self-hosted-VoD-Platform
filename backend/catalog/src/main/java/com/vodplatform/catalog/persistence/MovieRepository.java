@@ -1,19 +1,35 @@
 package com.vodplatform.catalog.persistence;
 
+import jakarta.persistence.LockModeType;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 
 /**
  * Movie persistence. Callers pass a {@link MovieSort} order in the {@link Pageable}. Routes use
  * the movie id (ADR-009), so slugs are only checked for uniqueness, never used to load a movie.
  */
 public interface MovieRepository extends JpaRepository<Movie, UUID>, JpaSpecificationExecutor<Movie> {
+
+    /**
+     * Loads a movie for update or archive with a {@code PESSIMISTIC_WRITE} row lock, held until the
+     * transaction ends. Hibernate renders it as {@code FOR NO KEY UPDATE} on PostgreSQL, which
+     * conflicts with another writer's lock but not with the key-share locks taken when rows that
+     * reference the movie are inserted, and as {@code FOR UPDATE} on H2. Concurrent writes to the
+     * same movie run one after another, each on the state the previous one committed, so the last
+     * write wins and replacing genres and credits never races. Call it before anything else loads
+     * the movie in the transaction: an instance already in the persistence context is returned
+     * without its state being reread.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Movie> findForUpdateById(UUID id);
 
     /**
      * Slug pre-check on create. The {@code ux_movies_slug} constraint remains the final guard.
