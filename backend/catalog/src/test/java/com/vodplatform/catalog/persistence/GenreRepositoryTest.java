@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vodplatform.catalog.config.CatalogConfiguration;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -56,6 +57,35 @@ class GenreRepositoryTest {
         assertThat(genreRepository.findAllByOrderByNameAscIdAsc())
                 .extracting(Genre::getName)
                 .containsExactly("Action", "Comedy", "Drama", "Hành Động Hài");
+    }
+
+    @Test
+    void insertIfAbsentSkipsAGenreWhoseNameOrSlugExists() {
+        assertThat(genreRepository.insertIfAbsent(uuid(5), "Kinh Dị", "kinh-di")).isEqualTo(1);
+        assertThat(genreRepository.insertIfAbsent(uuid(6), "Kinh Dị Mới", "kinh-di")).isZero();
+        // No conflict target: the name constraint arbitrates too.
+        assertThat(genreRepository.insertIfAbsent(uuid(7), "Action", "action-2")).isZero();
+        entityManager.clear();
+
+        assertThat(genreRepository.findBySlug("kinh-di").orElseThrow().getId()).isEqualTo(uuid(5));
+        assertThat(genreRepository.findBySlug("action-2")).isEmpty();
+        assertThat(genreRepository.count()).isEqualTo(5);
+    }
+
+    @Test
+    void findForUpdateLoadsTheGenreWithAPessimisticWriteLock() {
+        Genre locked = genreRepository.findForUpdateById(uuid(4)).orElseThrow();
+
+        assertThat(locked.getSlug()).isEqualTo("hanh-dong-hai");
+        assertThat(entityManager.getLockMode(locked)).isEqualTo(LockModeType.PESSIMISTIC_WRITE);
+        assertThat(genreRepository.findForUpdateById(uuid(9))).isEmpty();
+    }
+
+    @Test
+    void checksWhetherAnotherGenreUsesASlug() {
+        assertThat(genreRepository.existsBySlugAndIdNot("drama", uuid(1))).isTrue();
+        assertThat(genreRepository.existsBySlugAndIdNot("drama", uuid(3))).isFalse();
+        assertThat(genreRepository.existsBySlugAndIdNot("kinh-di", uuid(1))).isFalse();
     }
 
     private static UUID uuid(int value) {

@@ -56,7 +56,8 @@ class MovieServiceUnitTest {
 
     @BeforeEach
     void createService() {
-        movieService = new MovieService(movieRepository, assignmentResolver, clock);
+        movieService = new MovieService(
+                movieRepository, assignmentResolver, clock, new CatalogWriteRetry(new NoOpTransactionManager()));
     }
 
     @Test

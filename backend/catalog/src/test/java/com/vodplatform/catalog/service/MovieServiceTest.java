@@ -13,6 +13,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import com.vodplatform.catalog.config.CatalogConfiguration;
 import com.vodplatform.catalog.dto.CreditedPerson;
@@ -33,6 +35,7 @@ import com.vodplatform.catalog.persistence.MovieSort;
 import com.vodplatform.catalog.persistence.MovieStatus;
 import com.vodplatform.catalog.persistence.Person;
 import com.vodplatform.catalog.persistence.PersonRepository;
+import com.vodplatform.catalog.service.ValidatedMovie.GenreInput;
 import com.vodplatform.catalog.text.SlugNormalizer;
 import com.vodplatform.shared.error.ApiException;
 import com.vodplatform.shared.error.ApiFieldError;
@@ -40,12 +43,19 @@ import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.stream.Stream;
+import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.AdditionalAnswers;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.context.annotation.Bean;
@@ -65,6 +75,7 @@ import org.springframework.test.context.ContextConfiguration;
         CatalogConfiguration.class,
         MovieService.class,
         MovieAssignmentResolver.class,
+        CatalogWriteRetry.class,
         MovieServiceTest.ClockConfiguration.class
 })
 class MovieServiceTest {
@@ -88,6 +99,9 @@ class MovieServiceTest {
 
     @Autowired
     private MutableClock clock;
+
+    @Autowired
+    private CatalogWriteRetry writeRetry;
 
     @BeforeEach
     void resetClock() {
@@ -208,6 +222,32 @@ class MovieServiceTest {
         assertSlugConflict(conflict);
     }
 
+    static Stream<List<String>> newGenreRequestOrders() {
+        return Stream.of(
+                List.of("Tâm Lý", "Hài", "Kinh Dị", "Gia Đình"),
+                List.of("Gia Đình", "Kinh Dị", "Hài", "Tâm Lý")
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("newGenreRequestOrders")
+    void newGenresAreInsertedInSlugOrderButReturnedInRequestOrder(List<String> names) {
+        persist(new Genre(uuid(101), "Hài", "hai"));
+        flushAndClear();
+        GenreRepository genres = mock(GenreRepository.class, AdditionalAnswers.delegatesTo(genreRepository));
+        List<GenreInput> inputs = names.stream().map(name -> new GenreInput(name, SlugNormalizer.slugify(name))).toList();
+
+        List<Genre> resolved = new MovieAssignmentResolver(genres, personRepository).resolveGenres(inputs);
+
+        // Every request inserts the same new genres in the same order, so two requests never wait
+        // for each other's genres in opposite orders.
+        ArgumentCaptor<String> insertedSlugs = ArgumentCaptor.forClass(String.class);
+        verify(genres, times(3)).insertIfAbsent(any(), any(), insertedSlugs.capture());
+        assertThat(insertedSlugs.getAllValues()).containsExactly("gia-dinh", "kinh-di", "tam-ly");
+        assertThat(resolved).extracting(Genre::getSlug)
+                .containsExactlyElementsOf(inputs.stream().map(GenreInput::slug).toList());
+    }
+
     @Test
     void invalidRequestsAreRejectedBeforeAnythingIsWritten() {
         CatalogValidationException invalid = catchThrowableOfType(
@@ -262,18 +302,238 @@ class MovieServiceTest {
     }
 
     @Test
-    void nameOnlyCreditsAskForAPersonIdUntilNameMatchingIsImplemented() {
+    void aNameOnlyCreditWithoutAMatchCreatesThePersonWithAGeneratedSlug() {
+        MovieDetail created = movieService.create(new MovieRequestBuilder()
+                .people(List.of(byName("  Trấn   Thành ", ACTOR)))
+                .build());
+        flushAndClear();
+
+        Person person = personRepository.findAll().getFirst();
+        assertThat(personRepository.count()).isEqualTo(1);
+        assertThat(person.getName()).isEqualTo("Trấn Thành");
+        assertThat(person.getSlug()).isEqualTo("tran-thanh");
+        assertThat(created.people()).containsExactly(new CreditedPerson(person.getId(), "Trấn Thành", ACTOR));
+    }
+
+    @Test
+    void aNameOnlyCreditWithOneMatchReusesThatPersonIgnoringCaseButNotDiacritics() {
+        persist(person(201, "Trấn Thành"));
+        persist(new Person(uuid(202), "Tran Thanh", "tran-thanh-2"));
+        flushAndClear();
+
+        MovieDetail created = movieService.create(new MovieRequestBuilder()
+                .people(List.of(byName("TRẤN THÀNH", ACTOR), byName("tran thanh", DIRECTOR)))
+                .build());
+
+        assertThat(created.people()).containsExactly(
+                new CreditedPerson(uuid(201), "Trấn Thành", ACTOR),
+                new CreditedPerson(uuid(202), "Tran Thanh", DIRECTOR)
+        );
+        assertThat(personRepository.count()).isEqualTo(2);
+    }
+
+    @Test
+    void aNameOnlyCreditMatchingSeveralPeopleAsksForAPersonIdAndWritesNothing() {
+        persist(new Person(uuid(201), "Ngô Thanh Vân", "ngo-thanh-van"));
+        persist(new Person(uuid(202), "Ngô Thanh Vân", "ngo-thanh-van-2"));
+        flushAndClear();
+
         CatalogValidationException invalid = catchThrowableOfType(
                 CatalogValidationException.class,
                 () -> movieService.create(new MovieRequestBuilder()
-                        .people(List.of(new MovieCreditInput(null, "Trấn Thành", ACTOR)))
+                        .people(List.of(byName("Lý Hải", DIRECTOR), byName("ngô thanh vân", ACTOR)))
                         .build())
         );
 
         assertThat(invalid.getFieldErrors())
                 .extracting(ApiFieldError::field, ApiFieldError::message)
-                .containsExactly(tuple("people[0].personId", "is required; name-only credits are not supported yet"));
-        assertThat(personRepository.count()).isZero();
+                .containsExactly(tuple("people[1].personId", "is required because more than one person has this name"));
+        assertThat(movieRepository.count()).isZero();
+        assertThat(personRepository.count()).isEqualTo(2);
+    }
+
+    @Test
+    void namesEqualAfterNormalizationInOneRequestResolveToOnePersonCreatedOnce() {
+        RecordingStatementInspector.clear();
+
+        MovieDetail created = movieService.create(new MovieRequestBuilder()
+                .people(List.of(byName("Lý Hải", DIRECTOR), byName(" lý   HẢI ", ACTOR)))
+                .build());
+        flushAndClear();
+
+        Person person = personRepository.findAll().getFirst();
+        assertThat(personRepository.count()).isEqualTo(1);
+        // The person is created under the first entry's normalized name.
+        assertThat(person.getName()).isEqualTo("Lý Hải");
+        assertThat(person.getSlug()).isEqualTo("ly-hai");
+        assertThat(created.people()).containsExactly(
+                new CreditedPerson(person.getId(), "Lý Hải", DIRECTOR),
+                new CreditedPerson(person.getId(), "Lý Hải", ACTOR)
+        );
+        assertThat(statementsStartingWith("insert into people ")).hasSize(1);
+    }
+
+    @Test
+    void theDuplicateCreditCheckRunsAfterNamesAreResolved() {
+        Person known = persist(person(201, "Trấn Thành"));
+        flushAndClear();
+
+        CatalogValidationException sameNewPerson = catchThrowableOfType(
+                CatalogValidationException.class,
+                () -> movieService.create(new MovieRequestBuilder()
+                        .people(List.of(byName("Lý Hải", ACTOR), byName("LÝ HẢI", ACTOR)))
+                        .build())
+        );
+        CatalogValidationException idAndName = catchThrowableOfType(
+                CatalogValidationException.class,
+                () -> movieService.create(new MovieRequestBuilder()
+                        .people(List.of(credit(known, ACTOR), byName("trấn thành", DIRECTOR), byName("trấn thành", ACTOR)))
+                        .build())
+        );
+
+        assertThat(sameNewPerson.getFieldErrors())
+                .extracting(ApiFieldError::field, ApiFieldError::message)
+                .containsExactly(tuple("people[1]", "must not repeat the person and role of another entry"));
+        assertThat(idAndName.getFieldErrors())
+                .extracting(ApiFieldError::field, ApiFieldError::message)
+                .containsExactly(tuple("people[2]", "must not repeat the person and role of another entry"));
+        assertThat(movieRepository.count()).isZero();
+        assertThat(personRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void aPersonIdIdentifiesThePersonAndItsEntryNameIsIgnored() {
+        Person known = persist(person(201, "Trấn Thành"));
+        flushAndClear();
+
+        MovieDetail created = movieService.create(new MovieRequestBuilder()
+                .people(List.of(new MovieCreditInput(known.getId(), "Người Khác", ACTOR)))
+                .build());
+
+        assertThat(created.people()).containsExactly(new CreditedPerson(uuid(201), "Trấn Thành", ACTOR));
+        assertThat(personRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void aNameOnlyCreditCreatesThePersonWithTheNextFreeSlugSuffix() {
+        // Diacritics are significant for name matching, so "Lý Hải" is a new person, but its slug
+        // base is taken.
+        persist(new Person(uuid(201), "Ly Hai", "ly-hai"));
+        persist(new Person(uuid(202), "Ly Hai", "ly-hai-2"));
+        flushAndClear();
+
+        MovieDetail created = movieService.create(new MovieRequestBuilder().people(List.of(byName("Lý Hải", DIRECTOR))).build());
+        MovieDetail reused = movieService.create(new MovieRequestBuilder().slug("phim-2").people(List.of(byName("lý hải", ACTOR))).build());
+        flushAndClear();
+
+        UUID createdId = created.people().getFirst().personId();
+        assertThat(personRepository.findById(createdId).orElseThrow().getSlug()).isEqualTo("ly-hai-3");
+        // A later movie reuses the person a name-only credit created.
+        assertThat(reused.people()).containsExactly(new CreditedPerson(createdId, "Lý Hải", ACTOR));
+        assertThat(personRepository.count()).isEqualTo(3);
+    }
+
+    @Test
+    void createWritesTheMovieRowBeforeCreatingAPerson() {
+        RecordingStatementInspector.clear();
+
+        movieService.create(new MovieRequestBuilder().slug("phim-moi").people(List.of(byName("Lý Hải", ACTOR))).build());
+
+        assertFirstRunsBefore("insert into movies ", "insert into people ");
+    }
+
+    @Test
+    void updateWritesTheMovieRowBeforeCreatingAPerson() {
+        persist(movie(1, "phim-cu", PUBLISHED));
+        flushAndClear();
+        RecordingStatementInspector.clear();
+
+        movieService.update(uuid(1), new MovieRequestBuilder().slug("phim-moi").people(List.of(byName("Lý Hải", ACTOR))).build());
+
+        assertFirstRunsBefore("update movies ", "insert into people ");
+    }
+
+    @Test
+    void aDuplicateSlugIsReportedBeforeAnyPersonIsCreated() {
+        persist(movie(1, "dat-rung", DRAFT));
+        flushAndClear();
+        RecordingStatementInspector.clear();
+
+        MovieSlugConflictException conflict = catchThrowableOfType(
+                MovieSlugConflictException.class,
+                () -> serviceWithStaleSlugCheck()
+                        .create(new MovieRequestBuilder().slug("dat-rung").people(List.of(byName("Lý Hải", ACTOR))).build())
+        );
+
+        assertSlugConflict(conflict);
+        assertThat(statementsStartingWith("insert into people ")).isEmpty();
+    }
+
+    @Test
+    void reorderingCreditsGivenByNameChangesOnlyTheirSortOrder() {
+        Person p1 = persist(person(201, "Người Một"));
+        Person p2 = persist(person(202, "Người Hai"));
+        Movie movie = movie(1, "phim", PUBLISHED);
+        movie.addCredit(p1, ACTOR, 0);
+        movie.addCredit(p2, DIRECTOR, 1);
+        persist(movie);
+        flushAndClear();
+
+        movieService.update(uuid(1), new MovieRequestBuilder().slug("phim")
+                .people(List.of(byName("người hai", DIRECTOR), credit(p1, DIRECTOR), byName("NGƯỜI MỘT", ACTOR)))
+                .build());
+        flushAndClear();
+
+        assertThat(movieRepository.findById(uuid(1)).orElseThrow().getCredits())
+                .extracting(entry -> entry.getPerson().getId(), MovieCredit::getRole, MovieCredit::getSortOrder)
+                .containsExactly(tuple(uuid(202), DIRECTOR, 0), tuple(uuid(201), DIRECTOR, 1), tuple(uuid(201), ACTOR, 2));
+        assertThat(countRows("movie_credits")).isEqualTo(3);
+        assertThat(personRepository.count()).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void newPeopleAreInsertedInSlugOrderWhileCreditsKeepTheRequestOrder(boolean reversed) {
+        Person known = persist(person(201, "Ngô Thanh Vân"));
+        flushAndClear();
+        List<MovieCreditInput> credits = new ArrayList<>(List.of(
+                byName("Trấn Thành", ACTOR),
+                credit(known, DIRECTOR),
+                byName("Lý Hải", DIRECTOR),
+                byName("Ly Hai", ACTOR),
+                byName("An Nhiên", ACTOR)
+        ));
+        if (reversed) {
+            Collections.reverse(credits);
+        }
+        PersonRepository people = mock(PersonRepository.class, AdditionalAnswers.delegatesTo(personRepository));
+        MovieService service = new MovieService(
+                movieRepository, new MovieAssignmentResolver(genreRepository, people), clock, writeRetry);
+
+        MovieDetail created = service.create(new MovieRequestBuilder().people(credits).build());
+        flushAndClear();
+
+        // Every request inserts the same new people in the same order: by slug base, then name, so
+        // "Ly Hai" comes before "Lý Hải", which shares its base and gets the next suffix.
+        ArgumentCaptor<String> insertedSlugs = ArgumentCaptor.forClass(String.class);
+        verify(people, times(4)).insertIfSlugFree(any(), any(), insertedSlugs.capture());
+        assertThat(insertedSlugs.getAllValues()).containsExactly("an-nhien", "ly-hai", "ly-hai-2", "tran-thanh");
+        assertThat(personRepository.findAll()).extracting(Person::getName, Person::getSlug).containsExactlyInAnyOrder(
+                tuple("Ngô Thanh Vân", "ngo-thanh-van"),
+                tuple("An Nhiên", "an-nhien"),
+                tuple("Ly Hai", "ly-hai"),
+                tuple("Lý Hải", "ly-hai-2"),
+                tuple("Trấn Thành", "tran-thanh")
+        );
+        // The credits, and their sort_order, still follow the request.
+        List<Tuple> expected = new ArrayList<>();
+        for (int index = 0; index < credits.size(); index++) {
+            MovieCreditInput input = credits.get(index);
+            expected.add(tuple(input.personId() != null ? known.getName() : input.name(), input.role(), index));
+        }
+        assertThat(movieRepository.findById(created.id()).orElseThrow().getCredits())
+                .extracting(entry -> entry.getPerson().getName(), MovieCredit::getRole, MovieCredit::getSortOrder)
+                .containsExactlyElementsOf(expected);
     }
 
     // ---- update ----
@@ -654,6 +914,13 @@ class MovieServiceTest {
         assertThat(firstIndex).as("'%s' before '%s' in %s", first, then, statements).isLessThan(thenIndex);
     }
 
+    private static List<String> statementsStartingWith(String prefix) {
+        return RecordingStatementInspector.statements().stream()
+                .map(sql -> sql.toLowerCase(Locale.ROOT))
+                .filter(sql -> sql.startsWith(prefix))
+                .toList();
+    }
+
     private static int indexOfFirstStartingWith(List<String> statements, String prefix) {
         for (int index = 0; index < statements.size(); index++) {
             if (statements.get(index).startsWith(prefix)) {
@@ -684,7 +951,7 @@ class MovieServiceTest {
         MovieRepository stale = mock(MovieRepository.class, AdditionalAnswers.delegatesTo(movieRepository));
         doReturn(false).when(stale).existsBySlug(anyString());
         doReturn(false).when(stale).existsBySlugAndIdNot(anyString(), any());
-        return new MovieService(stale, new MovieAssignmentResolver(genres, personRepository), clock);
+        return new MovieService(stale, new MovieAssignmentResolver(genres, personRepository), clock, writeRetry);
     }
 
     private static void assertSlugConflict(MovieSlugConflictException conflict) {
@@ -717,6 +984,10 @@ class MovieServiceTest {
 
     private static MovieCreditInput credit(Person person, CreditRole role) {
         return new MovieCreditInput(person.getId(), null, role);
+    }
+
+    private static MovieCreditInput byName(String name, CreditRole role) {
+        return new MovieCreditInput(null, name, role);
     }
 
     private static Person person(int id, String name) {
