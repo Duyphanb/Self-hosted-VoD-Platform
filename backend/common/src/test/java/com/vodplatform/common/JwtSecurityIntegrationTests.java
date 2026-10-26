@@ -1,5 +1,6 @@
 package com.vodplatform.common;
 
+import static com.vodplatform.common.contract.ContractValidation.offContract;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -35,6 +36,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
@@ -115,7 +117,7 @@ class JwtSecurityIntegrationTests {
     void validBearerTokenPopulatesUserAndRolesInSecurityContext() throws Exception {
         String accessToken = loginAndReadTokens().path("accessToken").asString();
 
-        mockMvc.perform(get("/test/security-context")
+        mockMvc.perform(securityContextProbe()
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.principal.userId").value(userId.toString()))
@@ -126,7 +128,7 @@ class JwtSecurityIntegrationTests {
 
     @Test
     void securityHeadersAreWrittenForCommittedUnauthorizedAndSuccessfulResponses() throws Exception {
-        mockMvc.perform(get("/test/security-context"))
+        mockMvc.perform(securityContextProbe())
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string(
                         HttpHeaders.CACHE_CONTROL,
@@ -138,7 +140,7 @@ class JwtSecurityIntegrationTests {
 
         String accessToken = loginAndReadTokens().path("accessToken").asString();
 
-        mockMvc.perform(get("/test/security-context")
+        mockMvc.perform(securityContextProbe()
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
                 .andExpect(status().isOk())
                 .andExpect(header().string(
@@ -241,7 +243,7 @@ class JwtSecurityIntegrationTests {
     }
 
     private void assertUnauthorized(String authorization) throws Exception {
-        var request = get("/test/security-context");
+        var request = securityContextProbe();
         if (authorization != null) {
             request.header(HttpHeaders.AUTHORIZATION, authorization);
         }
@@ -251,6 +253,11 @@ class JwtSecurityIntegrationTests {
                 .andExpect(jsonPath("$.status").value(401))
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
                 .andExpect(jsonPath("$.message").value("Authentication required or invalid token"));
+    }
+
+    private static MockHttpServletRequestBuilder securityContextProbe() {
+        return get("/test/security-context").with(offContract(
+                "test-only probe controller exposing the security context; /test/security-context is not an API operation"));
     }
 
     private JsonNode loginAndReadTokens() throws Exception {

@@ -1,5 +1,6 @@
 package com.vodplatform.common;
 
+import static com.vodplatform.common.contract.ContractValidation.offContract;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -173,7 +174,9 @@ class GenreAdminApiIntegrationTests {
 
     @Test
     void genresCannotBeDeleted() throws Exception {
-        perform(delete(GENRES + "/" + UUID.randomUUID()), bearerToken("ROLE_ADMIN"))
+        perform(delete(GENRES + "/" + UUID.randomUUID())
+                        .with(offContract("the contract declares no DELETE; the test proves the method is rejected")),
+                bearerToken("ROLE_ADMIN"))
                 .andExpect(status().isMethodNotAllowed());
     }
 

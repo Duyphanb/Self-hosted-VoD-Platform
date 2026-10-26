@@ -1,5 +1,6 @@
 package com.vodplatform.common;
 
+import static com.vodplatform.common.contract.ContractValidation.offContract;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
@@ -15,6 +16,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 @SpringBootTest(
         properties = {
@@ -36,6 +38,10 @@ class CorsSecurityIntegrationTests {
             "DELETE",
             "OPTIONS"
     );
+    private static final RequestPostProcessor PREFLIGHT = offContract(
+            "CORS preflight is answered by the security filter chain; OpenAPI does not describe it");
+    private static final RequestPostProcessor ACTUATOR = offContract(
+            "/actuator/health is the internal health endpoint, not part of the public API contract");
 
     @Autowired
     private MockMvc mockMvc;
@@ -108,7 +114,7 @@ class CorsSecurityIntegrationTests {
                 .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"))
                 .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
 
-        mockMvc.perform(get("/actuator/health")
+        mockMvc.perform(get("/actuator/health").with(ACTUATOR)
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
                 .andExpect(status().isOk())
                 .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
@@ -119,7 +125,7 @@ class CorsSecurityIntegrationTests {
             String method,
             List<String> requestedHeaders
     ) throws Exception {
-        MvcResult result = mockMvc.perform(options(path)
+        MvcResult result = mockMvc.perform(options(path).with(PREFLIGHT)
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, method)
                         .header(
@@ -147,7 +153,7 @@ class CorsSecurityIntegrationTests {
             String method,
             String requestedHeaders
     ) throws Exception {
-        mockMvc.perform(options(path)
+        mockMvc.perform(options(path).with(PREFLIGHT)
                         .header(HttpHeaders.ORIGIN, origin)
                         .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, method)
                         .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, requestedHeaders))
