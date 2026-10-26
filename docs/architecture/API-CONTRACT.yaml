@@ -87,6 +87,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -108,6 +110,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -125,6 +129,8 @@ paths:
       responses:
         "204":
           description: Logged out
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
 

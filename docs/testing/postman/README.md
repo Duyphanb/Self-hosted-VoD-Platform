@@ -64,10 +64,10 @@ CI runs this collection after the PostgreSQL auth regression script against a un
 
 ## Contract Notes
 
-The frozen OpenAPI contract lists logout as unauthenticated with an optional body and documents both `204` and `401`. Sprint 2 Issue 2.4 and the current implementation are more specific: logout is public and idempotently returns `204` whether the submitted token is active, revoked, unknown, or omitted. This collection verifies the implemented Sprint 2 behavior without changing the frozen architecture documents.
+The frozen OpenAPI contract lists logout as unauthenticated with an optional body and documents `204`, `400` and `401`. Sprint 2 Issue 2.4 and the current implementation are more specific: logout is public and idempotently returns `204` whether the submitted token is active, revoked, unknown, or omitted. This collection verifies the implemented Sprint 2 behavior without changing the frozen architecture documents.
 
 The `ApiError.code` checks are implementation regression evidence. The frozen schema requires a string code but does not define those values as an enum.
 
-The login/refresh/logout response lists also omit validation `400` responses produced by the existing request-validation layer. This is non-blocking contract-documentation clarification for a future reviewed contract update; it does not authorize changing runtime validation or reopening Sprint 2.
+The contract now also declares the validation `400` responses (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) that login, refresh and logout already returned through the existing request-validation layer (Issue #120). The runtime behavior did not change. The backend full-context tests validate these responses against `API-CONTRACT.yaml`; this collection does not exercise them.
 
 No test-only RBAC probe is included. Production admin business endpoints belong to later sprints, and frontend route guards are not a backend authorization boundary.
