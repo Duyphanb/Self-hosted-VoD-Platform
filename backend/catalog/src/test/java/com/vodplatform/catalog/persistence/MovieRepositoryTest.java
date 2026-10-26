@@ -168,17 +168,40 @@ class MovieRepositoryTest {
         Genre action = persist(new Genre(uuid(101), "Hành Động", "hanh-dong"));
         Genre comedy = persist(new Genre(uuid(102), "Hài", "hai"));
         Genre drama = persist(new Genre(uuid(103), "Tâm Lý", "tam-ly"));
-        Movie movie = movie(1, "Đa thể loại", MovieStatus.PUBLISHED, T0, 2024);
-        movie.addGenre(action);
+        Movie severalGenres = movie(1, "A nhiều thể loại", MovieStatus.PUBLISHED, T0, 2024);
+        severalGenres.addGenre(action);
+        severalGenres.addGenre(comedy);
+        severalGenres.addGenre(drama);
+        persist(severalGenres);
+        Movie comedyOnly = movie(2, "B chỉ hài", MovieStatus.PUBLISHED, T0, 2024);
+        comedyOnly.addGenre(comedy);
+        persist(comedyOnly);
+        flushAndClear();
+
+        // Page size 1 with two matches forces Spring Data to run the count query.
+        Page<Movie> first = movieRepository.findPublished("hai", null, PageRequest.of(0, 1, MovieSort.TITLE.sort()));
+        Page<Movie> second = movieRepository.findPublished("hai", null, PageRequest.of(1, 1, MovieSort.TITLE.sort()));
+
+        assertThat(first.getTotalElements()).isEqualTo(2);
+        assertThat(first.getTotalPages()).isEqualTo(2);
+        assertThat(first.getContent()).extracting(Movie::getId).containsExactly(uuid(1));
+        assertThat(second.getContent()).extracting(Movie::getId).containsExactly(uuid(2));
+    }
+
+    @Test
+    void addingAnotherInstanceOfAnAssignedGenreDoesNotDuplicateTheAssignment() {
+        Genre comedy = persist(new Genre(uuid(102), "Hài", "hai"));
+        flushAndClear();
+        Movie movie = movie(1, "Một phim", MovieStatus.PUBLISHED, T0, 2024);
         movie.addGenre(comedy);
-        movie.addGenre(drama);
+        movie.addGenre(new Genre(uuid(102), "Hài", "hai"));
+        assertThat(movie.getGenres()).hasSize(1);
+
         persist(movie);
         flushAndClear();
 
-        Page<Movie> page = movieRepository.findPublished("hai", null, PageRequest.of(0, 10, MovieSort.TITLE.sort()));
-
-        assertThat(page.getTotalElements()).isEqualTo(1);
-        assertThat(page.getContent()).extracting(Movie::getId).containsExactly(uuid(1));
+        assertThat(movieRepository.findPublished("hai", null, PageRequest.of(0, 10, MovieSort.TITLE.sort())).getTotalElements())
+                .isEqualTo(1);
     }
 
     @Test

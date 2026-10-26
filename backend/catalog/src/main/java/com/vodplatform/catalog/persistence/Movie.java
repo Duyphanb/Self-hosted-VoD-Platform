@@ -117,7 +117,13 @@ public class Movie {
      * Assigns a genre; assigning the same genre twice keeps one assignment.
      */
     public void addGenre(Genre genre) {
-        genres.add(Objects.requireNonNull(genre, "genre"));
+        Objects.requireNonNull(genre, "genre");
+        // Genre has no value equality, so deduplicate by id: a detached or reloaded instance of an
+        // assigned genre must not add a second movie_genres row.
+        boolean assigned = genres.stream().anyMatch(existing -> existing.getId().equals(genre.getId()));
+        if (!assigned) {
+            genres.add(genre);
+        }
     }
 
     /**
