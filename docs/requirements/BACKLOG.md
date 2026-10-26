@@ -1386,14 +1386,14 @@ Implement `@RestControllerAdvice` for centralized exception handling. Return con
 ### Issue 10.2: Backend OpenAPI/Swagger Documentation
 
 **Description:**  
-Review and update OpenAPI annotations across all controllers. Ensure API contract matches implementation. Generate Swagger UI endpoint.
+Serve the frozen `docs/architecture/API-CONTRACT.yaml` through Swagger UI. The contract stays the only API document (contract-first, Issue #120): do not generate a second, code-first document or add OpenAPI annotations to controllers. Review the contract against the implemented endpoints and close any gap through a reviewed contract update.
 
 **Acceptance Criteria:**
-- All endpoints documented with OpenAPI annotations
-- Request/response schemas defined
-- Auth requirements documented (@SecurityRequirement)
-- Swagger UI accessible at `/swagger-ui.html` or similar
-- API contract matches actual endpoint behavior
+- Swagger UI accessible at `/swagger-ui.html` or similar, showing `API-CONTRACT.yaml` unchanged
+- No code-first OpenAPI document or controller annotations
+- Request/response schemas and auth requirements come from the contract
+- API contract matches actual endpoint behavior; responses are validated in tests against `API-CONTRACT.yaml`
+- Swagger UI exposure follows `SECURITY.md` and `INFRASTRUCTURE.md`
 - Manual review confirms completeness
 
 **Dependencies:** Issue 10.1
@@ -1530,7 +1530,7 @@ Every sprint must satisfy:
 - [ ] Backend uses SLF4J logging, not System.out.println
 - [ ] Secrets externalized via environment variables
 - [ ] No secrets committed to repository
-- [ ] OpenAPI annotations added or updated for new endpoints
+- [ ] `API-CONTRACT.yaml` updated or confirmed; responses validated in tests
 - [ ] Frontend handles loading, error, empty, success states
 - [ ] Protected routes enforce authentication; admin routes enforce `ROLE_ADMIN`
 - [ ] Docs updated if behavior, config, or contracts change
@@ -1616,6 +1616,7 @@ After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening
 | 2026-09-18 | 1.0 | Verified Sprint 2 auth closeout recorded |
 | 2026-10-06 | 1.0 | Sprint 3 catalog contract frozen (#95): Issues 3.2-3.5, 3.8 and 7.2 updated |
 | 2026-10-18 | 1.1 | Platform statements in Issues 1.1 and 1.2 and Assumption 1 changed from Spring Boot 3.x to Spring Boot 4.x after the ADR-002 amendment (Issue #50) |
+| 2026-10-26 | 1.2 | Contract-first API documentation (Issue #120, owner decision 2026-10-18): the Global Definition of Done requires `API-CONTRACT.yaml` updated or confirmed with responses validated in tests instead of OpenAPI annotations, and Issue 10.2 serves the frozen contract in Swagger UI instead of generating a code-first document |
 
 ---
 
