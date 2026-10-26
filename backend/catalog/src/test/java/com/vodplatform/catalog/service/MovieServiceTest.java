@@ -75,6 +75,7 @@ import org.springframework.test.context.ContextConfiguration;
         CatalogConfiguration.class,
         MovieService.class,
         MovieAssignmentResolver.class,
+        CatalogWriteRetry.class,
         MovieServiceTest.ClockConfiguration.class
 })
 class MovieServiceTest {
@@ -98,6 +99,9 @@ class MovieServiceTest {
 
     @Autowired
     private MutableClock clock;
+
+    @Autowired
+    private CatalogWriteRetry writeRetry;
 
     @BeforeEach
     void resetClock() {
@@ -503,7 +507,8 @@ class MovieServiceTest {
             Collections.reverse(credits);
         }
         PersonRepository people = mock(PersonRepository.class, AdditionalAnswers.delegatesTo(personRepository));
-        MovieService service = new MovieService(movieRepository, new MovieAssignmentResolver(genreRepository, people), clock);
+        MovieService service = new MovieService(
+                movieRepository, new MovieAssignmentResolver(genreRepository, people), clock, writeRetry);
 
         MovieDetail created = service.create(new MovieRequestBuilder().people(credits).build());
         flushAndClear();
@@ -946,7 +951,7 @@ class MovieServiceTest {
         MovieRepository stale = mock(MovieRepository.class, AdditionalAnswers.delegatesTo(movieRepository));
         doReturn(false).when(stale).existsBySlug(anyString());
         doReturn(false).when(stale).existsBySlugAndIdNot(anyString(), any());
-        return new MovieService(stale, new MovieAssignmentResolver(genres, personRepository), clock);
+        return new MovieService(stale, new MovieAssignmentResolver(genres, personRepository), clock, writeRetry);
     }
 
     private static void assertSlugConflict(MovieSlugConflictException conflict) {

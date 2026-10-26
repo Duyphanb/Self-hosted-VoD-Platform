@@ -42,7 +42,7 @@ import org.springframework.test.context.ContextConfiguration;
  * {@link CatalogConcurrencyTest}.
  */
 @DataJpaTest
-@ContextConfiguration(classes = {CatalogConfiguration.class, PersonService.class})
+@ContextConfiguration(classes = {CatalogConfiguration.class, PersonService.class, CatalogWriteRetry.class})
 class PersonServiceTest {
 
     @Autowired
@@ -56,6 +56,9 @@ class PersonServiceTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private CatalogWriteRetry writeRetry;
 
     // ---- create ----
 
@@ -132,7 +135,7 @@ class PersonServiceTest {
         flushAndClear();
         // The first lookup misses the existing slug, as when another transaction commits it after
         // the lookup; the insert then does nothing and the second lookup sees it.
-        PersonService service = new PersonService(repositoryWithOneStaleSlugLookup());
+        PersonService service = new PersonService(repositoryWithOneStaleSlugLookup(), writeRetry);
 
         PersonResponse created = service.create(new UpsertPersonRequest("Trấn Thành"));
 
@@ -189,7 +192,7 @@ class PersonServiceTest {
         persist(1, "Trấn Thành", "tran-thanh");
         persist(2, "Lý Hải", "ly-hai");
         flushAndClear();
-        PersonService service = new PersonService(repositoryWithOneStaleSlugLookup());
+        PersonService service = new PersonService(repositoryWithOneStaleSlugLookup(), writeRetry);
 
         PersonResponse renamed = service.rename(uuid(2), new UpsertPersonRequest("Trấn Thành"));
         flushAndClear();

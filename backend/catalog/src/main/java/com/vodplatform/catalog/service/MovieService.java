@@ -50,6 +50,14 @@ import org.springframework.transaction.annotation.Transactional;
  * ({@link MovieAssignmentResolver}). Any other integrity violation is rethrown unchanged, never
  * reported as a slug conflict.
  *
+ * <p>Create and update run through {@link CatalogWriteRetry}: each attempt is a new transaction,
+ * and an attempt that the database aborts as a deadlock victim is run again from the validated
+ * request. The fixed insert order cannot prevent every deadlock (two writes whose people take
+ * crossed slug suffixes, or a movie write racing with an admin rename of a genre or person it
+ * references), and the retry turns the deadlocks that remain into a wait. Archive is not retried:
+ * it locks the movie row and then only updates that row, so it never waits while holding a lock
+ * another transaction needs, and cannot be part of a deadlock.
+ *
  * <p>{@code search_vector} is not mapped and therefore never written here; search (Issue 7.2)
  * owns it.
  */
@@ -65,11 +73,18 @@ public class MovieService {
     private final MovieRepository movieRepository;
     private final MovieAssignmentResolver assignmentResolver;
     private final Clock clock;
+    private final CatalogWriteRetry writeRetry;
 
-    MovieService(MovieRepository movieRepository, MovieAssignmentResolver assignmentResolver, Clock clock) {
+    MovieService(
+            MovieRepository movieRepository,
+            MovieAssignmentResolver assignmentResolver,
+            Clock clock,
+            CatalogWriteRetry writeRetry
+    ) {
         this.movieRepository = movieRepository;
         this.assignmentResolver = assignmentResolver;
         this.clock = clock;
+        this.writeRetry = writeRetry;
     }
 
     /**
@@ -78,9 +93,15 @@ public class MovieService {
      * @throws CatalogValidationException  400 {@code VALIDATION_ERROR}
      * @throws MovieSlugConflictException  409 {@code MOVIE_SLUG_CONFLICT}
      */
-    @Transactional
     public MovieDetail create(UpsertMovieRequest request) {
         ValidatedMovie input = MovieRequestValidator.validate(request);
+        return writeRetry.execute(() -> createMovie(input));
+    }
+
+    /**
+     * One create attempt, inside the transaction {@link CatalogWriteRetry} started.
+     */
+    private MovieDetail createMovie(ValidatedMovie input) {
         if (movieRepository.existsBySlug(input.slug())) {
             throw new MovieSlugConflictException();
         }
@@ -111,10 +132,16 @@ public class MovieService {
      * @throws MovieNotFoundException      404 {@code MOVIE_NOT_FOUND}
      * @throws MovieSlugConflictException  409 {@code MOVIE_SLUG_CONFLICT}
      */
-    @Transactional
     public MovieDetail update(UUID movieId, UpsertMovieRequest request) {
         Objects.requireNonNull(movieId, "movieId");
         ValidatedMovie input = MovieRequestValidator.validate(request);
+        return writeRetry.execute(() -> updateMovie(movieId, input));
+    }
+
+    /**
+     * One update attempt, inside the transaction {@link CatalogWriteRetry} started.
+     */
+    private MovieDetail updateMovie(UUID movieId, ValidatedMovie input) {
         Movie movie = movieRepository.findForUpdateById(movieId).orElseThrow(MovieNotFoundException::new);
         if (movieRepository.existsBySlugAndIdNot(input.slug(), movieId)) {
             throw new MovieSlugConflictException();

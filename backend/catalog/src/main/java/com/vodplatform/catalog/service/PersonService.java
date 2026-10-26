@@ -18,16 +18,23 @@ import org.springframework.transaction.annotation.Transactional;
  * Admin people management (Issue 3.3): search, create and rename; people are never deleted. Names
  * are normalized and not unique; the server generates the unique slug (ADR-009, see
  * {@link PersonWriter}). Returns DTOs only.
+ *
+ * <p>Create and rename run through {@link CatalogWriteRetry}, each attempt in a new transaction: a
+ * rename locks the person row and may then wait for a slug that a movie write holds, while that
+ * movie write waits for the same person row to reference it in a credit, and PostgreSQL aborts one
+ * of the two as a deadlock victim.
  */
 @Service
 public class PersonService {
 
     private final PersonRepository personRepository;
     private final PersonWriter personWriter;
+    private final CatalogWriteRetry writeRetry;
 
-    PersonService(PersonRepository personRepository) {
+    PersonService(PersonRepository personRepository, CatalogWriteRetry writeRetry) {
         this.personRepository = personRepository;
         this.personWriter = new PersonWriter(personRepository);
+        this.writeRetry = writeRetry;
     }
 
     /**
@@ -56,10 +63,9 @@ public class PersonService {
     /**
      * @throws CatalogValidationException 400 {@code VALIDATION_ERROR}
      */
-    @Transactional
     public PersonResponse create(UpsertPersonRequest request) {
         String name = NameRequestValidator.personName(request);
-        return toResponse(personWriter.create(name));
+        return writeRetry.execute(() -> toResponse(personWriter.create(name)));
     }
 
     /**
@@ -69,13 +75,14 @@ public class PersonService {
      * @throws CatalogValidationException 400 {@code VALIDATION_ERROR}
      * @throws PersonNotFoundException    404 {@code PERSON_NOT_FOUND}
      */
-    @Transactional
     public PersonResponse rename(UUID personId, UpsertPersonRequest request) {
         Objects.requireNonNull(personId, "personId");
         String name = NameRequestValidator.personName(request);
-        Person person = personRepository.findById(personId).orElseThrow(PersonNotFoundException::new);
-        personWriter.rename(person, name);
-        return toResponse(person);
+        return writeRetry.execute(() -> {
+            Person person = personRepository.findById(personId).orElseThrow(PersonNotFoundException::new);
+            personWriter.rename(person, name);
+            return toResponse(person);
+        });
     }
 
     private static PersonResponse toResponse(Person person) {

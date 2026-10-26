@@ -65,6 +65,7 @@ import org.springframework.transaction.support.TransactionTemplate;
         MovieAssignmentResolver.class,
         GenreService.class,
         PersonService.class,
+        CatalogWriteRetry.class,
         CatalogConcurrencyTest.ClockConfiguration.class
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)

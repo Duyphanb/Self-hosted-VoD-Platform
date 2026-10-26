@@ -55,7 +55,9 @@ import org.springframework.stereotype.Component;
  * and PostgreSQL would abort one of them as a deadlock. In the fixed order the later request waits
  * at the first row both insert, before it holds a row the earlier one still needs. The order of
  * the returned genres and assignments, and so the credit {@code sort_order}, still follows the
- * request.
+ * request. The order is by slug base, not by the slug finally written, so people whose suffixes
+ * cross can still deadlock, as can a movie write racing with an admin rename; the catalog write
+ * services run a write again after such an abort ({@link CatalogWriteRetry}).
  */
 @Component
 class MovieAssignmentResolver {

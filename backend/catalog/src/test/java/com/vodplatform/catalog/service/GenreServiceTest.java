@@ -36,7 +36,7 @@ import org.springframework.test.context.ContextConfiguration;
  * between two transactions is covered by {@link CatalogConcurrencyTest}.
  */
 @DataJpaTest
-@ContextConfiguration(classes = {CatalogConfiguration.class, GenreService.class})
+@ContextConfiguration(classes = {CatalogConfiguration.class, GenreService.class, CatalogWriteRetry.class})
 class GenreServiceTest {
 
     @Autowired
@@ -50,6 +50,9 @@ class GenreServiceTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private CatalogWriteRetry writeRetry;
 
     // ---- create ----
 
@@ -148,8 +151,9 @@ class GenreServiceTest {
         GenreRepository stale = mock(GenreRepository.class, AdditionalAnswers.delegatesTo(genreRepository));
         doReturn(false).when(stale).existsBySlugAndIdNot(anyString(), any());
 
+        GenreService service = new GenreService(stale, writeRetry);
         ApiException conflict = catchThrowableOfType(
-                ApiException.class, () -> new GenreService(stale).rename(uuid(1), new UpsertGenreRequest("Kinh Dị")));
+                ApiException.class, () -> service.rename(uuid(1), new UpsertGenreRequest("Kinh Dị")));
 
         assertGenreConflict(conflict);
     }
