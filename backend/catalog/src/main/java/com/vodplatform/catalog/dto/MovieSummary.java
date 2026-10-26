@@ -1,0 +1,27 @@
+package com.vodplatform.catalog.dto;
+
+import com.vodplatform.catalog.persistence.MovieStatus;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Catalog fields of a movie list item ({@code MovieSummary} in the API contract). Fields owned by
+ * other modules, such as the poster URL, average rating and video status, are added by the API
+ * layer.
+ *
+ * @param genres genre names ordered by genre slug
+ */
+public record MovieSummary(
+        UUID id,
+        String title,
+        String slug,
+        String description,
+        Integer releaseYear,
+        List<String> genres,
+        MovieStatus status
+) {
+
+    public MovieSummary {
+        genres = List.copyOf(genres);
+    }
+}
