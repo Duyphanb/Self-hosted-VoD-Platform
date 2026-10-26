@@ -52,11 +52,13 @@ public class SecurityConfiguration {
 
     /**
      * Admin operations are authorized by URL before argument resolution and validation run, so a
-     * non-admin caller gets 403 even for an invalid body or a missing target. {@code *} matches
-     * exactly one path segment: user sub-resources such as {@code /api/v1/movies/{movieId}/progress}
-     * are not admin endpoints. Method-level {@code @PreAuthorize} remains the second layer.
+     * non-admin caller gets 403 even for an invalid body or a missing target. The terminal {@code *}
+     * matches one segment, including an empty one: {@code PUT /api/v1/movies/} also requires admin,
+     * while deeper paths such as {@code /api/v1/movies/{movieId}/progress} (user sub-resources) and
+     * {@code /api/v1/movies/{movieId}/} do not match this rule. Method-level {@code @PreAuthorize}
+     * remains the second layer.
      */
-    private static final RequestMatcher ADMIN_ENDPOINTS = new OrRequestMatcher(
+    static final RequestMatcher ADMIN_ENDPOINTS = new OrRequestMatcher(
             PathPatternRequestMatcher.pathPattern("/api/v1/admin/**"),
             post("/api/v1/movies"),
             put("/api/v1/movies/*"),
