@@ -23,6 +23,8 @@ import com.vodplatform.shared.error.ApiException;
 import com.vodplatform.shared.error.ApiFieldError;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
+import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.AdditionalAnswers;
@@ -35,7 +37,8 @@ import org.springframework.test.context.ContextConfiguration;
  * Admin genre management on the entity-generated H2 schema (PostgreSQL mode). Concurrent creation
  * between two transactions is covered by {@link CatalogConcurrencyTest}.
  */
-@DataJpaTest
+@DataJpaTest(properties = "spring.jpa.properties.hibernate.session_factory.statement_inspector="
+        + "com.vodplatform.catalog.service.RecordingStatementInspector")
 @ContextConfiguration(classes = {CatalogConfiguration.class, GenreService.class, CatalogWriteRetry.class})
 class GenreServiceTest {
 
@@ -159,6 +162,21 @@ class GenreServiceTest {
     }
 
     @Test
+    void renameLocksTheGenreRowBeforeItsDuplicateCheckAndUpdate() {
+        entityManager.persist(new Genre(uuid(1), "Hai", "hai"));
+        flushAndClear();
+        RecordingStatementInspector.clear();
+
+        genreService.rename(uuid(1), new UpsertGenreRequest("Hài Hước"));
+
+        List<String> statements = genreStatements();
+        assertThat(statements).hasSize(3);
+        assertThat(statements.get(0)).startsWith("select").contains(" where ").contains(" for update");
+        assertThat(statements.get(1)).startsWith("select").doesNotContain(" for update");
+        assertThat(statements.get(2)).startsWith("update genres ");
+    }
+
+    @Test
     void renameOfAMissingGenreIsNotFoundButAnInvalidBodyIsReportedFirst() {
         ApiException missing = catchThrowableOfType(
                 ApiException.class, () -> genreService.rename(uuid(99), new UpsertGenreRequest("Hài")));
@@ -173,6 +191,17 @@ class GenreServiceTest {
     }
 
     // ---- helpers ----
+
+    /**
+     * Statements that read or write {@code genres}, lower-cased, in order. H2 renders the row lock
+     * as {@code FOR UPDATE}; PostgreSQL would use {@code FOR NO KEY UPDATE}.
+     */
+    private static List<String> genreStatements() {
+        return RecordingStatementInspector.statements().stream()
+                .map(sql -> sql.toLowerCase(Locale.ROOT))
+                .filter(sql -> sql.contains(" from genres ") || sql.startsWith("update genres "))
+                .toList();
+    }
 
     private void assertNameError(UpsertGenreRequest request, String message) {
         CatalogValidationException invalid = catchThrowableOfType(

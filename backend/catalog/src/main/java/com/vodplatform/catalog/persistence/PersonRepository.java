@@ -1,10 +1,13 @@
 package com.vodplatform.catalog.persistence;
 
+import jakarta.persistence.LockModeType;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,6 +20,20 @@ import org.springframework.data.repository.query.Param;
  * failed statement aborts the whole transaction and the caller could not try the next suffix.
  */
 public interface PersonRepository extends JpaRepository<Person, UUID>, PersonRenaming {
+
+    /**
+     * Loads a person for rename with a {@code PESSIMISTIC_WRITE} row lock, held until the
+     * transaction ends ({@code FOR NO KEY UPDATE} on PostgreSQL, {@code FOR UPDATE} on H2). A
+     * rename that waits for the lock reads the row as the previous rename committed it, so every
+     * slug decision starts from the person's current name and slug, and concurrent renames of the
+     * same person run one after another. On PostgreSQL the lock does not conflict with the
+     * key-share lock that a movie write takes to credit the person; only the update that changes
+     * the uniquely indexed slug does. Call it before anything else loads the person in the
+     * transaction: an instance already in the persistence context is returned without its state
+     * being reread.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Person> findForUpdateById(UUID id);
 
     /**
      * Admin people list without a search term, ordered by name, then id.

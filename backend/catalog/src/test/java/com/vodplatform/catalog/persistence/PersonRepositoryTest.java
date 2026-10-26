@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import com.vodplatform.catalog.config.CatalogConfiguration;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -107,6 +108,18 @@ class PersonRepositoryTest {
         assertThat(personRepository.findAllByNameIgnoringCase("trấn thành"))
                 .extracting(Person::getId, Person::getSlug)
                 .containsExactly(tuple(uuid(1), "tran-thanh"), tuple(uuid(3), "tran-thanh-2"));
+    }
+
+    @Test
+    void findForUpdateLoadsThePersonWithAPessimisticWriteLock() {
+        persist(1, "Lý Hải", "ly-hai");
+        flushAndClear();
+
+        Person locked = personRepository.findForUpdateById(uuid(1)).orElseThrow();
+
+        assertThat(locked.getSlug()).isEqualTo("ly-hai");
+        assertThat(entityManager.getLockMode(locked)).isEqualTo(LockModeType.PESSIMISTIC_WRITE);
+        assertThat(personRepository.findForUpdateById(uuid(2))).isEmpty();
     }
 
     @Test

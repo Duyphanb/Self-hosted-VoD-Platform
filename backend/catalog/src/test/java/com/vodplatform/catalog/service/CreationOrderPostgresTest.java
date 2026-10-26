@@ -28,6 +28,7 @@ import java.sql.SQLException;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -39,6 +40,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
@@ -75,6 +77,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  * admin rename of a person or genre it references. Those tests run the services as the API does,
  * with the retry, and check that exactly one attempt was aborted and run again, and that both
  * writes then finish.
+ *
+ * <p>A rename of a person or genre that another transaction is renaming waits for the row lock and
+ * then works on the row that transaction committed, in a single attempt. The other transaction is
+ * held uncommitted until the rename waits for a lock.
  *
  * <p>Skipped unless the system property {@value #URL_PROPERTY} or the environment variable
  * {@value #URL_VARIABLE} holds the JDBC URL, credentials included, of a PostgreSQL database
@@ -340,6 +346,83 @@ class CreationOrderPostgresTest {
                         new GenreResponse(genreId, newName, SlugNormalizer.slugify(newName))));
     }
 
+    // ---- renames that wait for the row lock ----
+
+    /**
+     * Person P "Foo" has the slug {@code foo}. Another transaction renames P to "Bar", creates
+     * person Q "Foo", which reclaims {@code foo}, and holds both uncommitted. The rename of P to
+     * "FOO" waits for P's row lock and then reads P as "Bar": the slug base changes, {@code foo}
+     * belongs to Q, and P takes {@code foo-2}. Read without the lock, P still looked like "Foo":
+     * the rename kept {@code foo} for the unchanged base, failed on {@code ux_people_slug} once the
+     * other transaction committed, and ended with a 500.
+     */
+    @Test
+    void aPersonRenameWaitingForAnotherRenameOfThePersonDecidesOnTheCommittedRow() throws Exception {
+        UUID personId = UUID.randomUUID();
+        String oldName = "Foo " + token;
+        String oldSlug = SlugNormalizer.personSlugBase(oldName);
+        inTransaction(() -> personRepository.insertIfSlugFree(personId, oldName, oldSlug));
+        String newName = oldName.toUpperCase(Locale.ROOT);
+        PersonService other = new PersonService(personRepository, writeRetry());
+        CountingTransactionManager renameTransactions = new CountingTransactionManager(transactionManager);
+        PersonService people = new PersonService(personRepository, new CatalogWriteRetry(renameTransactions));
+        AtomicReference<PersonResponse> reclaimed = new AtomicReference<>();
+        CountDownLatch release = new CountDownLatch(1);
+
+        Future<?> holder = holdUncommitted(() -> {
+            other.rename(personId, new UpsertPersonRequest("Bar " + token));
+            reclaimed.set(other.create(new UpsertPersonRequest(oldName)));
+        }, release);
+        Future<PersonResponse> rename = submit(() -> people.rename(personId, new UpsertPersonRequest(newName)));
+        boolean waited = awaitCondition(() -> lockWaiters() > 0);
+        release.countDown();
+        List<Object> outcomes = outcomes(rename, holder);
+
+        assertThat(waited).as("the rename waited for the row lock").isTrue();
+        assertThat(outcomes.get(0)).isEqualTo(new PersonResponse(personId, newName, oldSlug + "-2"));
+        assertThat(renameTransactions.begun.get()).as("rename attempts").isEqualTo(1);
+        assertThat(reclaimed.get().slug()).isEqualTo(oldSlug);
+        assertThat(jdbc.query("select id, name, slug from people where slug like ?",
+                (row, index) -> tuple(row.getObject(1, UUID.class), row.getString(2), row.getString(3)),
+                slugPattern()
+        )).containsExactlyInAnyOrder(
+                tuple(personId, newName, oldSlug + "-2"),
+                tuple(reclaimed.get().id(), oldName, oldSlug));
+    }
+
+    /**
+     * Another transaction renames genre G "Cũ" to "Đổi" and holds it uncommitted. The rename of G
+     * back to "Cũ" waits for G's row lock and then renames the committed row. Read without the
+     * lock, G still looked like "Cũ": the rename found nothing to change, did not wait, reported
+     * "Cũ", and G kept the other transaction's name.
+     */
+    @Test
+    void aGenreRenameWaitingForAnotherRenameOfTheGenreAppliesToTheCommittedRow() throws Exception {
+        UUID genreId = UUID.randomUUID();
+        String oldName = "Cũ " + token;
+        String oldSlug = SlugNormalizer.slugify(oldName);
+        inTransaction(() -> genreRepository.insertIfAbsent(genreId, oldName, oldSlug));
+        GenreService other = new GenreService(genreRepository, writeRetry());
+        CountingTransactionManager renameTransactions = new CountingTransactionManager(transactionManager);
+        GenreService genres = new GenreService(genreRepository, new CatalogWriteRetry(renameTransactions));
+        CountDownLatch release = new CountDownLatch(1);
+
+        Future<?> holder = holdUncommitted(
+                () -> other.rename(genreId, new UpsertGenreRequest("Đổi " + token)), release);
+        Future<GenreResponse> rename = submit(() -> genres.rename(genreId, new UpsertGenreRequest(oldName)));
+        boolean waited = awaitCondition(() -> lockWaiters() > 0);
+        release.countDown();
+        List<Object> outcomes = outcomes(rename, holder);
+
+        assertThat(waited).as("the rename waited for the row lock").isTrue();
+        assertThat(outcomes.get(0)).isEqualTo(new GenreResponse(genreId, oldName, oldSlug));
+        assertThat(renameTransactions.begun.get()).as("rename attempts").isEqualTo(1);
+        assertThat(jdbc.query("select name, slug from genres where id = ?",
+                (row, index) -> tuple(row.getString(1), row.getString(2)),
+                genreId
+        )).containsExactly(tuple(oldName, oldSlug));
+    }
+
     // ---- helpers ----
 
     private CatalogWriteRetry writeRetry() {
@@ -399,6 +482,42 @@ class CreationOrderPostgresTest {
 
     private void inTransaction(Runnable work) {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> work.run());
+    }
+
+    /**
+     * Runs the write in a transaction on another thread and returns once it is written; the
+     * transaction commits when {@code release} opens. Fails with the write's own failure when the
+     * write fails.
+     */
+    private Future<?> holdUncommitted(Runnable write, CountDownLatch release) throws Exception {
+        CountDownLatch written = new CountDownLatch(1);
+        Future<?> holder = submit(() -> {
+            inTransaction(() -> {
+                write.run();
+                written.countDown();
+                awaitRelease(release);
+            });
+            return null;
+        });
+        awaitCondition(() -> written.getCount() == 0 || holder.isDone());
+        if (written.getCount() != 0) {
+            if (holder.isDone()) {
+                holder.get();
+            }
+            throw new AssertionError("The holder transaction did not write its rows");
+        }
+        return holder;
+    }
+
+    private static void awaitRelease(CountDownLatch release) {
+        try {
+            if (!release.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("The holder transaction was never released");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
     }
 
     /**

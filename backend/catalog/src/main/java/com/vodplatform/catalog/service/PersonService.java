@@ -23,6 +23,12 @@ import org.springframework.transaction.annotation.Transactional;
  * rename locks the person row and may then wait for a slug that a movie write holds, while that
  * movie write waits for the same person row to reference it in a credit, and PostgreSQL aborts one
  * of the two as a deadlock victim.
+ *
+ * <p>Each rename attempt loads the person with a row lock ({@link PersonRepository#findForUpdateById})
+ * before it decides on the slug. A rename that read the person without the lock could decide on a
+ * name and slug that a concurrent rename had already replaced: it kept a slug the person no longer
+ * had, which another person could have taken by then, or excluded that slug from the collision
+ * check as the person's own.
  */
 @Service
 public class PersonService {
@@ -70,7 +76,8 @@ public class PersonService {
 
     /**
      * Renames a person and regenerates the slug from the new name; the slug is kept when its base
-     * is unchanged.
+     * is unchanged. A concurrent rename of the same person is waited for, and this one then starts
+     * from the name and slug it committed.
      *
      * @throws CatalogValidationException 400 {@code VALIDATION_ERROR}
      * @throws PersonNotFoundException    404 {@code PERSON_NOT_FOUND}
@@ -79,7 +86,8 @@ public class PersonService {
         Objects.requireNonNull(personId, "personId");
         String name = NameRequestValidator.personName(request);
         return writeRetry.execute(() -> {
-            Person person = personRepository.findById(personId).orElseThrow(PersonNotFoundException::new);
+            Person person = personRepository.findForUpdateById(personId)
+                    .orElseThrow(PersonNotFoundException::new);
             personWriter.rename(person, name);
             return toResponse(person);
         });

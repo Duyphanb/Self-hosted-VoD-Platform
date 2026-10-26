@@ -24,6 +24,11 @@ import java.util.UUID;
  */
 final class PersonWriter {
 
+    /**
+     * Slug writes per create, or per rename that regenerates the slug. Each failed write means that
+     * another transaction committed the chosen slug after this one read the slugs, so the next
+     * write reads them again and picks another.
+     */
     static final int MAX_ATTEMPTS = 10;
 
     private final PersonRepository personRepository;
@@ -56,17 +61,27 @@ final class PersonWriter {
      * the current name; otherwise the slug is regenerated, and the person's own slug does not count
      * as a collision.
      *
-     * @param person a person loaded in the current transaction; refreshed with the stored values
+     * <p>Both decisions use the person's name and slug, so the person must be locked. Otherwise a
+     * concurrent rename could replace them after they were read: the slug kept for an unchanged
+     * base could then belong to another person, and the slug excluded from the collision check
+     * could be another person's while the person's own slug counted as taken.
+     *
+     * @param person a person loaded with a row lock in the current transaction
+     *               ({@link PersonRepository#findForUpdateById}); refreshed with the stored values
      * @param name   the normalized new name
-     * @throws IllegalStateException if every attempt found its slug taken
+     * @throws IllegalStateException if every attempt found its slug taken, or if the person was
+     *                               not locked and another person has the slug it is to keep
      */
     void rename(Person person, String name) {
         Objects.requireNonNull(person, "person");
         Objects.requireNonNull(name, "name");
         String base = SlugNormalizer.personSlugBase(name);
         if (base.equals(SlugNormalizer.personSlugBase(person.getName()))) {
+            // The locked person still has this slug, and no other person can write a slug that
+            // this row holds, so keeping it cannot collide.
             if (!personRepository.renameIfSlugFree(person, name, person.getSlug())) {
-                throw new IllegalStateException("Another person has the slug of the person being renamed");
+                throw new IllegalStateException(
+                        "Another person has the slug of the person being renamed; it was not loaded with a row lock");
             }
             return;
         }

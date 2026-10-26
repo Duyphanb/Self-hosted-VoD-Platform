@@ -31,6 +31,12 @@ import org.springframework.transaction.annotation.Transactional;
  * inserted, while that movie write waits for the same genre row to assign it, and PostgreSQL
  * aborts one of the two as a deadlock victim. A rename that runs again after the movie write has
  * created the genre it was renaming to is then a 409.
+ *
+ * <p>Each rename attempt loads the genre with a row lock ({@link GenreRepository#findForUpdateById})
+ * before its duplicate check. A rename that read the genre without the lock could compare the new
+ * name with a name that a concurrent rename had already replaced: renaming the genre back to that
+ * old name then looked like no change, so nothing was written and the response reported a name the
+ * genre no longer had.
  */
 @Service
 public class GenreService {
@@ -68,7 +74,8 @@ public class GenreService {
 
     /**
      * Renames a genre and recomputes its slug from the new name. Renaming a genre to its own name or
-     * slug is allowed.
+     * slug is allowed. A concurrent rename of the same genre is waited for, and this one is then
+     * applied to the name it committed.
      *
      * @throws CatalogValidationException 400 {@code VALIDATION_ERROR}
      * @throws GenreNotFoundException     404 {@code GENRE_NOT_FOUND}
@@ -84,7 +91,7 @@ public class GenreService {
      * One rename attempt, inside the transaction {@link CatalogWriteRetry} started.
      */
     private GenreResponse renameGenre(UUID genreId, GenreInput input) {
-        Genre genre = genreRepository.findById(genreId).orElseThrow(GenreNotFoundException::new);
+        Genre genre = genreRepository.findForUpdateById(genreId).orElseThrow(GenreNotFoundException::new);
         if (genreRepository.existsBySlugAndIdNot(input.slug(), genreId)) {
             throw new GenreConflictException();
         }

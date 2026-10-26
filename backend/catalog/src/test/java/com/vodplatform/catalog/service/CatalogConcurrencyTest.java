@@ -14,6 +14,7 @@ import com.vodplatform.catalog.dto.PersonResponse;
 import com.vodplatform.catalog.dto.UpsertGenreRequest;
 import com.vodplatform.catalog.dto.UpsertPersonRequest;
 import com.vodplatform.catalog.exception.GenreConflictException;
+import com.vodplatform.catalog.persistence.Genre;
 import com.vodplatform.catalog.persistence.GenreRepository;
 import com.vodplatform.catalog.persistence.Person;
 import com.vodplatform.catalog.persistence.PersonRepository;
@@ -50,6 +51,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * holder transaction inserts the conflicting row and keeps it uncommitted; the service call under
  * test runs in a second transaction, and the holder ends only after H2 reports that second
  * transaction as blocked on the holder's row, so every test exercises the wait and its outcome.
+ *
+ * <p>Renames of the same genre or person race the same way on the row itself: the holder renames
+ * it, and the rename under test waits for the row lock and then works on the committed row.
  *
  * <p>H2 reproduces the PostgreSQL behavior these writes rely on: an {@code ON CONFLICT DO NOTHING}
  * insert waits for the uncommitted conflicting row, then skips after a commit or inserts after a
@@ -220,6 +224,64 @@ class CatalogConcurrencyTest {
                 .containsExactlyInAnyOrder(tuple(uuid(1), "tran-thanh"), tuple(uuid(2), "tran-thanh-2"));
     }
 
+    // ---- renames that wait for the row lock ----
+
+    /**
+     * Another transaction renames person "Lý Hải" (slug {@code ly-hai}) to "Trấn Thành" and creates
+     * a new "Lý Hải", which reclaims {@code ly-hai}, and keeps both uncommitted. A rename of the
+     * first person to "LÝ HẢI" waits for the person's row lock and then decides on the committed
+     * row: the slug base changes from {@code tran-thanh} to {@code ly-hai}, which the new person
+     * has, so the rename takes {@code ly-hai-2}. Read without the lock, the person still looked
+     * like "Lý Hải": the rename kept {@code ly-hai} for the unchanged base and failed on
+     * {@code ux_people_slug} once the other transaction committed.
+     */
+    @Test
+    void aPersonRenameWaitingForAnotherRenameOfThePersonDecidesOnTheCommittedRow() throws Exception {
+        new TransactionTemplate(transactionManager).executeWithoutResult(
+                status -> personRepository.insertIfSlugFree(uuid(1), "Lý Hải", "ly-hai"));
+        CountDownLatch release = new CountDownLatch(1);
+        Future<?> holder = holdUncommitted(() -> {
+            personService.rename(uuid(1), new UpsertPersonRequest("Trấn Thành"));
+            personService.create(new UpsertPersonRequest("Lý Hải"));
+        }, release, true);
+
+        Future<PersonResponse> racing = executor.submit(
+                () -> personService.rename(uuid(1), new UpsertPersonRequest("LÝ HẢI")));
+        awaitLockedReadBlocked("people");
+        release.countDown();
+
+        holder.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        assertThat(racing.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                .isEqualTo(new PersonResponse(uuid(1), "LÝ HẢI", "ly-hai-2"));
+        assertThat(personRepository.findAll()).extracting(Person::getName, Person::getSlug)
+                .containsExactlyInAnyOrder(tuple("LÝ HẢI", "ly-hai-2"), tuple("Lý Hải", "ly-hai"));
+    }
+
+    /**
+     * Another transaction renames genre "Hài" to "Hài Hước" and keeps it uncommitted. A rename of
+     * the genre back to "Hài" waits for the genre's row lock and then renames the committed row.
+     * Read without the lock, the genre still looked like "Hài": the rename found nothing to change,
+     * reported "Hài", and the genre kept the other transaction's name.
+     */
+    @Test
+    void aGenreRenameWaitingForAnotherRenameOfTheGenreAppliesToTheCommittedRow() throws Exception {
+        new TransactionTemplate(transactionManager).executeWithoutResult(
+                status -> genreRepository.insertIfAbsent(uuid(1), "Hài", "hai"));
+        CountDownLatch release = new CountDownLatch(1);
+        Future<?> holder = holdUncommitted(
+                () -> genreService.rename(uuid(1), new UpsertGenreRequest("Hài Hước")), release, true);
+
+        Future<GenreResponse> racing = executor.submit(
+                () -> genreService.rename(uuid(1), new UpsertGenreRequest("Hài")));
+        awaitLockedReadBlocked("genres");
+        release.countDown();
+
+        holder.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        assertThat(racing.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(new GenreResponse(uuid(1), "Hài", "hai"));
+        assertThat(genreRepository.findAll()).extracting(Genre::getId, Genre::getName, Genre::getSlug)
+                .containsExactly(tuple(uuid(1), "Hài", "hai"));
+    }
+
     // ---- helpers ----
 
     /**
@@ -266,6 +328,29 @@ class CatalogConcurrencyTest {
             Thread.sleep(10);
         }
         fail("The racing transaction never waited for the holder transaction");
+    }
+
+    /**
+     * Waits until the racing transaction's locking read of a row in the table waits for the
+     * holder, which has written that row. H2 reports a wait for a written row, unlike the wait for
+     * an uncommitted unique key ({@link #awaitBlocked}), as a {@code BLOCKED} session with a
+     * blocker.
+     */
+    private void awaitLockedReadBlocked(String table) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TIMEOUT_SECONDS);
+        while (System.nanoTime() < deadline) {
+            boolean waiting = jdbc.queryForList(
+                    "select executing_statement from information_schema.sessions"
+                            + " where session_state = 'BLOCKED' and blocker_id is not null",
+                    String.class
+            ).stream().map(sql -> sql.toLowerCase(Locale.ROOT)).anyMatch(sql -> sql.startsWith("select ")
+                    && sql.contains(" from " + table + " ") && sql.contains(" for update"));
+            if (waiting) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        fail("The racing transaction never waited for the " + table + " row the holder transaction wrote");
     }
 
     private static void awaitUninterruptibly(CountDownLatch latch) {

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.vodplatform.catalog.config.CatalogConfiguration;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -69,6 +70,15 @@ class GenreRepositoryTest {
         assertThat(genreRepository.findBySlug("kinh-di").orElseThrow().getId()).isEqualTo(uuid(5));
         assertThat(genreRepository.findBySlug("action-2")).isEmpty();
         assertThat(genreRepository.count()).isEqualTo(5);
+    }
+
+    @Test
+    void findForUpdateLoadsTheGenreWithAPessimisticWriteLock() {
+        Genre locked = genreRepository.findForUpdateById(uuid(4)).orElseThrow();
+
+        assertThat(locked.getSlug()).isEqualTo("hanh-dong-hai");
+        assertThat(entityManager.getLockMode(locked)).isEqualTo(LockModeType.PESSIMISTIC_WRITE);
+        assertThat(genreRepository.findForUpdateById(uuid(9))).isEmpty();
     }
 
     @Test

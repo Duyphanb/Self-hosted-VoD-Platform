@@ -26,6 +26,7 @@ import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,8 @@ import org.springframework.test.context.ContextConfiguration;
  * renames and the search. Writes that race with another transaction are covered by
  * {@link CatalogConcurrencyTest}.
  */
-@DataJpaTest
+@DataJpaTest(properties = "spring.jpa.properties.hibernate.session_factory.statement_inspector="
+        + "com.vodplatform.catalog.service.RecordingStatementInspector")
 @ContextConfiguration(classes = {CatalogConfiguration.class, PersonService.class, CatalogWriteRetry.class})
 class PersonServiceTest {
 
@@ -204,6 +206,57 @@ class PersonServiceTest {
     }
 
     @Test
+    void renameLocksThePersonRowBeforeAnythingElseReadsPeople() {
+        persist(1, "Lý Hải", "ly-hai");
+        persist(2, "Trấn Thành", "tran-thanh");
+        flushAndClear();
+
+        // The slug base is unchanged, so the slug is kept without a slug lookup.
+        RecordingStatementInspector.clear();
+        personService.rename(uuid(1), new UpsertPersonRequest("LÝ HẢI"));
+        List<String> keptSlug = peopleReads();
+        flushAndClear();
+        // The slug base changes, so the slug is chosen from a slug lookup.
+        RecordingStatementInspector.clear();
+        personService.rename(uuid(1), new UpsertPersonRequest("Trấn Thành"));
+        List<String> newSlug = peopleReads();
+
+        for (List<String> reads : List.of(keptSlug, newSlug)) {
+            assertThat(reads).isNotEmpty();
+            assertThat(reads.get(0)).as("%s", reads).contains(" where ").contains(" for update");
+            assertThat(reads).filteredOn(sql -> sql.contains(" for update")).hasSize(1);
+        }
+        assertThat(newSlug).filteredOn(sql -> sql.contains(" like ")).hasSize(1);
+    }
+
+    @Test
+    void aRenameAfterAnotherRenameAndAReclaimOfTheOldSlugTakesTheNextSuffix() {
+        persist(1, "Lý Hải", "ly-hai");
+        flushAndClear();
+        // Another rename moves the person away from ly-hai, and a new "Lý Hải" reclaims it.
+        personService.rename(uuid(1), new UpsertPersonRequest("Trấn Thành"));
+        PersonResponse reclaimed = personService.create(new UpsertPersonRequest("Lý Hải"));
+        flushAndClear();
+
+        // Decided on the current row: the base changes from tran-thanh to ly-hai, which is taken.
+        PersonResponse renamed = personService.rename(uuid(1), new UpsertPersonRequest("LÝ HẢI"));
+        flushAndClear();
+        // The person's own ly-hai-2 never counts as a collision: it is kept for the base ly-hai-2,
+        // and again for the base ly-hai rather than moving to ly-hai-3.
+        PersonResponse numbered = personService.rename(uuid(1), new UpsertPersonRequest("Lý Hải 2"));
+        flushAndClear();
+        PersonResponse back = personService.rename(uuid(1), new UpsertPersonRequest("Lý Hải"));
+        flushAndClear();
+
+        assertThat(reclaimed.slug()).isEqualTo("ly-hai");
+        assertThat(renamed).isEqualTo(new PersonResponse(uuid(1), "LÝ HẢI", "ly-hai-2"));
+        assertThat(numbered).isEqualTo(new PersonResponse(uuid(1), "Lý Hải 2", "ly-hai-2"));
+        assertThat(back).isEqualTo(new PersonResponse(uuid(1), "Lý Hải", "ly-hai-2"));
+        assertThat(personRepository.findAll()).extracting(Person::getId, Person::getSlug)
+                .containsExactlyInAnyOrder(tuple(uuid(1), "ly-hai-2"), tuple(reclaimed.id(), "ly-hai"));
+    }
+
+    @Test
     void renameOfAMissingPersonIsNotFoundButAnInvalidBodyIsReportedFirst() {
         ApiException missing = catchThrowableOfType(
                 ApiException.class, () -> personService.rename(uuid(99), new UpsertPersonRequest("Lý Hải")));
@@ -268,6 +321,18 @@ class PersonServiceTest {
     }
 
     // ---- helpers ----
+
+    /**
+     * Statements that read {@code people}, lower-cased, in order. H2 renders the row lock as
+     * {@code FOR UPDATE}; PostgreSQL would use {@code FOR NO KEY UPDATE}. The rename update itself
+     * runs as plain JDBC ({@code PersonRenamingImpl}), which the inspector does not see.
+     */
+    private static List<String> peopleReads() {
+        return RecordingStatementInspector.statements().stream()
+                .map(sql -> sql.toLowerCase(Locale.ROOT))
+                .filter(sql -> sql.startsWith("select") && sql.contains(" from people "))
+                .toList();
+    }
 
     /**
      * A repository whose first slug lookup returns no slugs, as if it ran before another

@@ -267,7 +267,7 @@ class CatalogWriteRetryTransactionTest {
         PersonResponse renamed = new PersonService(people, writeRetry)
                 .rename(uuid(1), new UpsertPersonRequest("Trấn Thành"));
 
-        verify(people, times(2)).findById(uuid(1));
+        verify(people, times(2)).findForUpdateById(uuid(1));
         assertThat(renamed).isEqualTo(new PersonResponse(uuid(1), "Trấn Thành", "tran-thanh"));
         assertThat(jdbc.query("select id, name, slug from people",
                 (row, index) -> tuple(row.getObject(1, UUID.class), row.getString(2), row.getString(3))))
@@ -311,7 +311,7 @@ class CatalogWriteRetryTransactionTest {
         GenreResponse renamed = new GenreService(genres, writeRetry)
                 .rename(uuid(1), new UpsertGenreRequest("Hài Hước"));
 
-        verify(genres, times(2)).findById(uuid(1));
+        verify(genres, times(2)).findForUpdateById(uuid(1));
         assertThat(renamed).isEqualTo(new GenreResponse(uuid(1), "Hài Hước", "hai-huoc"));
         assertThat(jdbc.query("select id, name, slug from genres",
                 (row, index) -> tuple(row.getObject(1, UUID.class), row.getString(2), row.getString(3))))
@@ -344,7 +344,7 @@ class CatalogWriteRetryTransactionTest {
         verify(movies, times(1)).existsBySlug("phim");
         verify(movies, times(1)).findForUpdateById(uuid(99));
         verify(genres, times(1)).insertIfAbsent(any(), any(), any());
-        verify(people, times(1)).findById(uuid(99));
+        verify(people, times(1)).findForUpdateById(uuid(99));
     }
 
     // ---- helpers ----
