@@ -44,8 +44,11 @@ import org.springframework.transaction.annotation.Transactional;
  * pending changes, and a slug violation raised by such a flush would escape the 409 translation.
  * Requests for different movies that create the same new genre, or a person with the same slug,
  * do not fail: genres and people are inserted with {@code ON CONFLICT DO NOTHING}, so a genre
- * another request created first is reused and a taken person slug moves to the next suffix. Any
- * other integrity violation is rethrown unchanged, never reported as a slug conflict.
+ * another request created first is reused and a taken person slug moves to the next suffix. New
+ * genres and people are inserted in slug order rather than request order, so two such requests
+ * that list the same new rows in different orders wait for each other instead of deadlocking
+ * ({@link MovieAssignmentResolver}). Any other integrity violation is rethrown unchanged, never
+ * reported as a slug conflict.
  *
  * <p>{@code search_vector} is not mapped and therefore never written here; search (Issue 7.2)
  * owns it.

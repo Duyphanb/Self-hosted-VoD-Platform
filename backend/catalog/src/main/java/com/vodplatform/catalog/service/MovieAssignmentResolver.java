@@ -9,8 +9,10 @@ import com.vodplatform.catalog.persistence.Person;
 import com.vodplatform.catalog.persistence.PersonRepository;
 import com.vodplatform.catalog.service.ValidatedMovie.CreditInput;
 import com.vodplatform.catalog.service.ValidatedMovie.GenreInput;
+import com.vodplatform.catalog.text.SlugNormalizer;
 import com.vodplatform.shared.error.ApiFieldError;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -45,6 +47,15 @@ import org.springframework.stereotype.Component;
  *   <li>{@link #assignCredits} creates each new person once, with a generated slug
  *       ({@link PersonWriter}), and returns the assignments in request order.</li>
  * </ol>
+ *
+ * <p>New rows are inserted in one fixed order, whatever the request order: the new genres by
+ * slug, then (the movie service resolves genres first) the new people by slug base, then name.
+ * An insert that conflicts with another transaction's uncommitted row waits for that transaction,
+ * so two requests inserting the same new rows in opposite orders would each wait for the other,
+ * and PostgreSQL would abort one of them as a deadlock. In the fixed order the later request waits
+ * at the first row both insert, before it holds a row the earlier one still needs. The order of
+ * the returned genres and assignments, and so the credit {@code sort_order}, still follows the
+ * request.
  */
 @Component
 class MovieAssignmentResolver {
@@ -52,6 +63,13 @@ class MovieAssignmentResolver {
     static final String UNKNOWN_PERSON = "must identify an existing person";
     static final String AMBIGUOUS_NAME = "is required because more than one person has this name";
     static final String DUPLICATE_CREDIT = "must not repeat the person and role of another entry";
+
+    /**
+     * The order in which new people are inserted: by slug base, then by name key, so that names
+     * sharing a base are inserted in the same order by every request.
+     */
+    private static final Comparator<String> PERSON_CREATION_ORDER =
+            Comparator.comparing(SlugNormalizer::personSlugBase).thenComparing(MovieAssignmentResolver::nameKey);
 
     private final GenreRepository genreRepository;
     private final PersonRepository personRepository;
@@ -64,18 +82,19 @@ class MovieAssignmentResolver {
     }
 
     /**
-     * Returns one genre per input, in input order, creating the genres that do not exist yet.
+     * Returns one genre per input, in input order, creating the genres that do not exist yet in
+     * slug order (see the class comment).
      */
     List<Genre> resolveGenres(List<GenreInput> inputs) {
-        Map<String, Genre> existing = new HashMap<>();
+        Map<String, Genre> genresBySlug = new HashMap<>();
         genreRepository.findAllBySlugIn(inputs.stream().map(GenreInput::slug).toList())
-                .forEach(genre -> existing.put(genre.getSlug(), genre));
-        List<Genre> genres = new ArrayList<>(inputs.size());
-        for (GenreInput input : inputs) {
-            Genre genre = existing.get(input.slug());
-            genres.add(genre != null ? genre : createOrReuse(input));
-        }
-        return genres;
+                .forEach(genre -> genresBySlug.put(genre.getSlug(), genre));
+        List<GenreInput> missing = inputs.stream()
+                .filter(input -> !genresBySlug.containsKey(input.slug()))
+                .sorted(Comparator.comparing(GenreInput::slug))
+                .toList();
+        missing.forEach(input -> genresBySlug.put(input.slug(), createOrReuse(input)));
+        return inputs.stream().map(input -> genresBySlug.get(input.slug())).toList();
     }
 
     /**
@@ -135,16 +154,23 @@ class MovieAssignmentResolver {
     }
 
     /**
-     * Creates the people that name-only credits introduce, each once, and returns one assignment
-     * per resolved credit, in the same order. Call it after the movie row is written.
+     * Creates the people that name-only credits introduce, each once and in slug order (see the
+     * class comment), and returns one assignment per resolved credit, in the same order as the
+     * credits. Call it after the movie row is written.
      */
     List<CreditAssignment> assignCredits(List<ResolvedCredit> credits) {
+        Map<String, String> newNames = new HashMap<>();
+        credits.stream()
+                .map(ResolvedCredit::newName)
+                .filter(Objects::nonNull)
+                .forEach(name -> newNames.putIfAbsent(nameKey(name), name));
+        List<String> creationOrder = newNames.values().stream().sorted(PERSON_CREATION_ORDER).toList();
         Map<String, Person> created = new HashMap<>();
+        creationOrder.forEach(name -> created.put(nameKey(name), personWriter.create(name)));
+
         List<CreditAssignment> assignments = new ArrayList<>(credits.size());
         for (ResolvedCredit credit : credits) {
-            Person person = credit.person() != null
-                    ? credit.person()
-                    : created.computeIfAbsent(nameKey(credit.newName()), key -> personWriter.create(credit.newName()));
+            Person person = credit.person() != null ? credit.person() : created.get(nameKey(credit.newName()));
             assignments.add(new CreditAssignment(person, credit.role()));
         }
         return assignments;

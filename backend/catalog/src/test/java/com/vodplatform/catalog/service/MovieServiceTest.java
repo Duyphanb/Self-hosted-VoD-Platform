@@ -13,6 +13,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import com.vodplatform.catalog.config.CatalogConfiguration;
 import com.vodplatform.catalog.dto.CreditedPerson;
@@ -33,6 +35,7 @@ import com.vodplatform.catalog.persistence.MovieSort;
 import com.vodplatform.catalog.persistence.MovieStatus;
 import com.vodplatform.catalog.persistence.Person;
 import com.vodplatform.catalog.persistence.PersonRepository;
+import com.vodplatform.catalog.service.ValidatedMovie.GenreInput;
 import com.vodplatform.catalog.text.SlugNormalizer;
 import com.vodplatform.shared.error.ApiException;
 import com.vodplatform.shared.error.ApiFieldError;
@@ -40,12 +43,19 @@ import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.stream.Stream;
+import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.AdditionalAnswers;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.context.annotation.Bean;
@@ -206,6 +216,32 @@ class MovieServiceTest {
         );
 
         assertSlugConflict(conflict);
+    }
+
+    static Stream<List<String>> newGenreRequestOrders() {
+        return Stream.of(
+                List.of("Tâm Lý", "Hài", "Kinh Dị", "Gia Đình"),
+                List.of("Gia Đình", "Kinh Dị", "Hài", "Tâm Lý")
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("newGenreRequestOrders")
+    void newGenresAreInsertedInSlugOrderButReturnedInRequestOrder(List<String> names) {
+        persist(new Genre(uuid(101), "Hài", "hai"));
+        flushAndClear();
+        GenreRepository genres = mock(GenreRepository.class, AdditionalAnswers.delegatesTo(genreRepository));
+        List<GenreInput> inputs = names.stream().map(name -> new GenreInput(name, SlugNormalizer.slugify(name))).toList();
+
+        List<Genre> resolved = new MovieAssignmentResolver(genres, personRepository).resolveGenres(inputs);
+
+        // Every request inserts the same new genres in the same order, so two requests never wait
+        // for each other's genres in opposite orders.
+        ArgumentCaptor<String> insertedSlugs = ArgumentCaptor.forClass(String.class);
+        verify(genres, times(3)).insertIfAbsent(any(), any(), insertedSlugs.capture());
+        assertThat(insertedSlugs.getAllValues()).containsExactly("gia-dinh", "kinh-di", "tam-ly");
+        assertThat(resolved).extracting(Genre::getSlug)
+                .containsExactlyElementsOf(inputs.stream().map(GenreInput::slug).toList());
     }
 
     @Test
@@ -449,6 +485,50 @@ class MovieServiceTest {
                 .containsExactly(tuple(uuid(202), DIRECTOR, 0), tuple(uuid(201), DIRECTOR, 1), tuple(uuid(201), ACTOR, 2));
         assertThat(countRows("movie_credits")).isEqualTo(3);
         assertThat(personRepository.count()).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void newPeopleAreInsertedInSlugOrderWhileCreditsKeepTheRequestOrder(boolean reversed) {
+        Person known = persist(person(201, "Ngô Thanh Vân"));
+        flushAndClear();
+        List<MovieCreditInput> credits = new ArrayList<>(List.of(
+                byName("Trấn Thành", ACTOR),
+                credit(known, DIRECTOR),
+                byName("Lý Hải", DIRECTOR),
+                byName("Ly Hai", ACTOR),
+                byName("An Nhiên", ACTOR)
+        ));
+        if (reversed) {
+            Collections.reverse(credits);
+        }
+        PersonRepository people = mock(PersonRepository.class, AdditionalAnswers.delegatesTo(personRepository));
+        MovieService service = new MovieService(movieRepository, new MovieAssignmentResolver(genreRepository, people), clock);
+
+        MovieDetail created = service.create(new MovieRequestBuilder().people(credits).build());
+        flushAndClear();
+
+        // Every request inserts the same new people in the same order: by slug base, then name, so
+        // "Ly Hai" comes before "Lý Hải", which shares its base and gets the next suffix.
+        ArgumentCaptor<String> insertedSlugs = ArgumentCaptor.forClass(String.class);
+        verify(people, times(4)).insertIfSlugFree(any(), any(), insertedSlugs.capture());
+        assertThat(insertedSlugs.getAllValues()).containsExactly("an-nhien", "ly-hai", "ly-hai-2", "tran-thanh");
+        assertThat(personRepository.findAll()).extracting(Person::getName, Person::getSlug).containsExactlyInAnyOrder(
+                tuple("Ngô Thanh Vân", "ngo-thanh-van"),
+                tuple("An Nhiên", "an-nhien"),
+                tuple("Ly Hai", "ly-hai"),
+                tuple("Lý Hải", "ly-hai-2"),
+                tuple("Trấn Thành", "tran-thanh")
+        );
+        // The credits, and their sort_order, still follow the request.
+        List<Tuple> expected = new ArrayList<>();
+        for (int index = 0; index < credits.size(); index++) {
+            MovieCreditInput input = credits.get(index);
+            expected.add(tuple(input.personId() != null ? known.getName() : input.name(), input.role(), index));
+        }
+        assertThat(movieRepository.findById(created.id()).orElseThrow().getCredits())
+                .extracting(entry -> entry.getPerson().getName(), MovieCredit::getRole, MovieCredit::getSortOrder)
+                .containsExactlyElementsOf(expected);
     }
 
     // ---- update ----
