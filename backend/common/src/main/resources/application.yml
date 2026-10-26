@@ -4,6 +4,13 @@ server:
 spring:
   application:
     name: vod-backend
+  jpa:
+    # Lazy associations load inside service transactions only; no connection is held while a
+    # response is rendered or streamed.
+    open-in-view: false
+    properties:
+      hibernate:
+        default_batch_fetch_size: 50
 
 auth:
   tokens:

@@ -118,6 +118,8 @@ services:
       SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/vod_platform}
       SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-vod_app}
       SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-change-me}
+      # Flyway owns the schema. Hibernate only validates the entity mapping, so drift fails startup.
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       JWT_SECRET: ${JWT_SECRET:-change-me-use-a-long-random-secret}
       JWT_ACCESS_TOKEN_TTL_MINUTES: ${JWT_ACCESS_TOKEN_TTL_MINUTES:-60}
       JWT_REFRESH_TOKEN_TTL_DAYS: ${JWT_REFRESH_TOKEN_TTL_DAYS:-7}
