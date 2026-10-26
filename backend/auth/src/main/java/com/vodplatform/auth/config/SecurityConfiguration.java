@@ -50,6 +50,19 @@ public class SecurityConfiguration {
             get("/actuator/health/**")
     );
 
+    /**
+     * Admin operations are authorized by URL before argument resolution and validation run, so a
+     * non-admin caller gets 403 even for an invalid body or a missing target. {@code *} matches
+     * exactly one path segment: user sub-resources such as {@code /api/v1/movies/{movieId}/progress}
+     * are not admin endpoints. Method-level {@code @PreAuthorize} remains the second layer.
+     */
+    private static final RequestMatcher ADMIN_ENDPOINTS = new OrRequestMatcher(
+            PathPatternRequestMatcher.pathPattern("/api/v1/admin/**"),
+            post("/api/v1/movies"),
+            put("/api/v1/movies/*"),
+            delete("/api/v1/movies/*")
+    );
+
     @Bean
     @Order(1)
     SecurityFilterChain publicEndpointSecurityFilterChain(
@@ -72,7 +85,9 @@ public class SecurityConfiguration {
             CorsConfigurationSource corsConfigurationSource
     ) throws Exception {
         applyStatelessDefaults(http, corsConfigurationSource);
-        http.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
+        http.authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(ADMIN_ENDPOINTS).hasRole("ADMIN")
+                        .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler))
@@ -115,5 +130,13 @@ public class SecurityConfiguration {
 
     private static RequestMatcher post(String pattern) {
         return PathPatternRequestMatcher.pathPattern(HttpMethod.POST, pattern);
+    }
+
+    private static RequestMatcher put(String pattern) {
+        return PathPatternRequestMatcher.pathPattern(HttpMethod.PUT, pattern);
+    }
+
+    private static RequestMatcher delete(String pattern) {
+        return PathPatternRequestMatcher.pathPattern(HttpMethod.DELETE, pattern);
     }
 }
