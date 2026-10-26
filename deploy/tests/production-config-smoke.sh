@@ -339,6 +339,7 @@ expected = {
     "backend": {
         "SPRING_DATASOURCE_USERNAME": "ci_postgres_user",
         "SPRING_DATASOURCE_PASSWORD": "ci-postgres-password-46",
+        "SPRING_JPA_HIBERNATE_DDL_AUTO": "validate",
         "JWT_SECRET": "ci-jwt-signing-secret-with-at-least-thirty-two-bytes",
         "CORS_ALLOWED_ORIGINS": "",
         "RABBITMQ_USERNAME": "ci_rabbitmq_user",
