@@ -5,13 +5,18 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 /**
  * Person persistence for credit assignment and the admin people search (ADR-009).
+ *
+ * <p>Generated slugs can collide with a slug another transaction writes concurrently. Both writes
+ * here report such a collision as a result instead of a failed statement, because on PostgreSQL a
+ * failed statement aborts the whole transaction and the caller could not try the next suffix.
  */
-public interface PersonRepository extends JpaRepository<Person, UUID> {
+public interface PersonRepository extends JpaRepository<Person, UUID>, PersonRenaming {
 
     /**
      * Admin people list without a search term, ordered by name, then id.
@@ -39,4 +44,24 @@ public interface PersonRepository extends JpaRepository<Person, UUID> {
      */
     @Query("select p.slug from Person p where p.slug = :base or p.slug like concat(:base, '-%')")
     List<String> findSlugsWithBase(@Param("base") String base);
+
+    /**
+     * Inserts a person unless another person already has the slug, and returns the number of rows
+     * inserted: 1, or 0 when the slug is taken and the caller should pick the next suffix.
+     *
+     * <p>{@code ON CONFLICT DO NOTHING} skips a duplicate instead of raising a unique violation that
+     * would abort the transaction on PostgreSQL. When the conflicting row is not committed yet,
+     * PostgreSQL waits for that transaction: after a commit the insert does nothing and the next
+     * slug lookup (READ COMMITTED) sees the taken slug; after a rollback the insert proceeds. The
+     * id is new, so {@code ux_people_slug} is the only constraint that can conflict.
+     *
+     * <p>H2 accepts this statement only in PostgreSQL compatibility mode, which the catalog and
+     * application tests enable.
+     */
+    @Modifying
+    @Query(
+            value = "insert into people (id, name, slug) values (:id, :name, :slug) on conflict do nothing",
+            nativeQuery = true
+    )
+    int insertIfSlugFree(@Param("id") UUID id, @Param("name") String name, @Param("slug") String slug);
 }

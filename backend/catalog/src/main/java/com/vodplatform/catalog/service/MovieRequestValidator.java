@@ -5,7 +5,6 @@ import com.vodplatform.catalog.dto.UpsertMovieRequest;
 import com.vodplatform.catalog.exception.CatalogValidationException;
 import com.vodplatform.catalog.service.ValidatedMovie.CreditInput;
 import com.vodplatform.catalog.service.ValidatedMovie.GenreInput;
-import com.vodplatform.catalog.text.InvalidTextException;
 import com.vodplatform.catalog.text.SlugNormalizer;
 import com.vodplatform.catalog.text.TextNormalizer;
 import com.vodplatform.shared.error.ApiFieldError;
@@ -37,9 +36,7 @@ final class MovieRequestValidator {
     static final int MAX_PEOPLE = 50;
     static final int PERSON_NAME_MAX_LENGTH = 255;
 
-    static final String NOT_NULL = "must not be null";
-    static final String NOT_BLANK = "must not be blank";
-    static final String NO_CONTROL_CHARACTERS = "must not contain control characters";
+    static final String NOT_NULL = TextFields.NOT_NULL;
     static final String SLUG_PATTERN = "must match \"^[a-z0-9]+(-[a-z0-9]+)*$\"";
     static final String RELEASE_YEAR_RANGE = "must be between " + MIN_RELEASE_YEAR + " and " + MAX_RELEASE_YEAR;
     static final String GENRE_WITHOUT_SLUG = "must contain at least one letter or digit";
@@ -154,10 +151,6 @@ final class MovieRequestValidator {
         return people;
     }
 
-    /**
-     * Checks a required text value and returns it normalized, or records an error and returns
-     * null.
-     */
     private static String text(
             List<ApiFieldError> errors,
             String field,
@@ -165,30 +158,14 @@ final class MovieRequestValidator {
             int maxLength,
             UnaryOperator<String> normalizer
     ) {
-        if (value == null) {
-            errors.add(new ApiFieldError(field, NOT_NULL));
-            return null;
-        }
-        if (length(value) > maxLength) {
-            errors.add(new ApiFieldError(field, size(1, maxLength)));
-            return null;
-        }
-        try {
-            return normalizer.apply(value);
-        } catch (InvalidTextException exception) {
-            String message = exception.getReason() == InvalidTextException.Reason.BLANK
-                    ? NOT_BLANK
-                    : NO_CONTROL_CHARACTERS;
-            errors.add(new ApiFieldError(field, message));
-            return null;
-        }
+        return TextFields.required(errors, field, value, maxLength, normalizer);
     }
 
     static String size(int min, int max) {
-        return "size must be between " + min + " and " + max;
+        return TextFields.size(min, max);
     }
 
     private static int length(String value) {
-        return value.codePointCount(0, value.length());
+        return TextFields.length(value);
     }
 }

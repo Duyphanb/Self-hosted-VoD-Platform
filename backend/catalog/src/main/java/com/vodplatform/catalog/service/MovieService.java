@@ -13,6 +13,7 @@ import com.vodplatform.catalog.persistence.Movie;
 import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.catalog.persistence.MovieSort;
 import com.vodplatform.catalog.persistence.MovieStatus;
+import com.vodplatform.catalog.service.MovieAssignmentResolver.ResolvedCredit;
 import java.time.Clock;
 import java.util.List;
 import java.util.Objects;
@@ -20,7 +21,6 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,21 +29,23 @@ import org.springframework.transaction.annotation.Transactional;
  * Movie metadata CRUD (Issue 3.2). Returns catalog DTOs only; entities never leave this service.
  *
  * <p>Create and update validate the whole request first ({@link CatalogValidationException}), then
- * check the slug ({@link MovieSlugConflictException}) and resolve the credits, which only reads.
- * They then write the movie row and flush it before resolving genres, which may insert new ones,
- * and finally write the genre and credit assignments. A duplicate slug that slips past the
- * pre-check because another transaction wrote it concurrently fails on {@code ux_movies_slug} at
- * that first flush and is reported as the same 409. Flushing the movie row first keeps that true
- * when both requests also bring the same new genre: the losing request fails on the slug before it
- * inserts the genre a second time, so it never gets a genre violation instead of the 409. Update
+ * check the slug ({@link MovieSlugConflictException}) and resolve the credits, which only reads
+ * (ADR-009 name matching included, see {@link MovieAssignmentResolver}). They then write the movie
+ * row and flush it before resolving genres and creating the people of name-only credits, which may
+ * insert rows, and finally write the genre and credit assignments. A duplicate slug that slips past
+ * the pre-check because another transaction wrote it concurrently fails on {@code ux_movies_slug}
+ * at that first flush and is reported as the same 409. Flushing the movie row first keeps that
+ * true when both requests also bring the same new genre or person: the losing request fails on the
+ * slug before it inserts anything else, so the 409 is never replaced by another outcome. Update
  * and archive lock the movie row first, so concurrent writes to one movie are serialized and the
  * last write wins.
  *
  * <p>No query may run between changing the movie row and that first flush: a query can auto-flush
  * pending changes, and a slug violation raised by such a flush would escape the 409 translation.
- * Requests for different movies that create the same new genre can still fail on
- * {@code ux_genres_name} or {@code ux_genres_slug}; that violation is rethrown unchanged, never
- * reported as a slug conflict, and re-reading the genre (ADR-009) belongs to Issue 3.3 (#86).
+ * Requests for different movies that create the same new genre, or a person with the same slug,
+ * do not fail: genres and people are inserted with {@code ON CONFLICT DO NOTHING}, so a genre
+ * another request created first is reused and a taken person slug moves to the next suffix. Any
+ * other integrity violation is rethrown unchanged, never reported as a slug conflict.
  *
  * <p>{@code search_vector} is not mapped and therefore never written here; search (Issue 7.2)
  * owns it.
@@ -52,10 +54,10 @@ import org.springframework.transaction.annotation.Transactional;
 public class MovieService {
 
     /** Highest page index the API contract accepts. */
-    public static final int MAX_PAGE = 10_000;
+    public static final int MAX_PAGE = CatalogPaging.MAX_PAGE;
 
     /** Largest page size the API contract accepts. */
-    public static final int MAX_PAGE_SIZE = 100;
+    public static final int MAX_PAGE_SIZE = CatalogPaging.MAX_PAGE_SIZE;
 
     private final MovieRepository movieRepository;
     private final MovieAssignmentResolver assignmentResolver;
@@ -79,10 +81,10 @@ public class MovieService {
         if (movieRepository.existsBySlug(input.slug())) {
             throw new MovieSlugConflictException();
         }
-        List<CreditAssignment> credits = assignmentResolver.resolveCredits(input.people());
+        List<ResolvedCredit> credits = assignmentResolver.resolveCredits(input.people());
 
-        // Insert the movie row before any new genre, so a concurrent duplicate slug is the 409 even
-        // when the other request created the same new genre (see the class comment).
+        // Insert the movie row before any new genre or person, so a concurrent duplicate slug is the
+        // 409 even when the other request created the same new genre (see the class comment).
         Movie movie = writeOrSlugConflict(() -> movieRepository.saveAndFlush(new Movie(
                 UUID.randomUUID(),
                 input.title(),
@@ -93,11 +95,7 @@ public class MovieService {
                 input.status(),
                 clock.instant()
         )));
-        List<Genre> genres = assignmentResolver.resolveGenres(input.genres());
-        movie.replaceGenres(genres);
-        movie.replaceCredits(credits);
-        // A genre violation here means another request created the same genre: Issue 3.3 (#86).
-        movieRepository.flush();
+        assignGenresAndCredits(movie, input, credits);
         return MovieMapper.toDetail(movie);
     }
 
@@ -120,7 +118,7 @@ public class MovieService {
         }
         // Resolve the credits before changing the movie: their lookup may auto-flush pending changes,
         // and a slug violation raised by that flush would escape the translation below.
-        List<CreditAssignment> credits = assignmentResolver.resolveCredits(input.people());
+        List<ResolvedCredit> credits = assignmentResolver.resolveCredits(input.people());
 
         movie.update(
                 input.title(),
@@ -131,18 +129,27 @@ public class MovieService {
                 input.status(),
                 clock.instant()
         );
-        // Write the movie row before any new genre is inserted (see the class comment); genres are
-        // resolved only after this flush, so their lookup finds nothing left to auto-flush.
+        // Write the movie row before any new genre or person is inserted (see the class comment);
+        // genres and people are resolved only after this flush, so their queries find nothing left
+        // to auto-flush.
         writeOrSlugConflict(() -> {
             movieRepository.flush();
             return movie;
         });
-        List<Genre> genres = assignmentResolver.resolveGenres(input.genres());
-        movie.replaceGenres(genres);
-        movie.replaceCredits(credits);
-        // A genre violation here means another request created the same genre: Issue 3.3 (#86).
-        movieRepository.flush();
+        assignGenresAndCredits(movie, input, credits);
         return MovieMapper.toDetail(movie);
+    }
+
+    /**
+     * Resolves the genres and creates the people of name-only credits, which may insert rows, then
+     * replaces the movie's assignments and writes them. Call it only after the movie row is flushed.
+     */
+    private void assignGenresAndCredits(Movie movie, ValidatedMovie input, List<ResolvedCredit> credits) {
+        List<Genre> genres = assignmentResolver.resolveGenres(input.genres());
+        List<CreditAssignment> assignments = assignmentResolver.assignCredits(credits);
+        movie.replaceGenres(genres);
+        movie.replaceCredits(assignments);
+        movieRepository.flush();
     }
 
     /**
@@ -210,13 +217,7 @@ public class MovieService {
 
     private static Pageable pageRequest(int page, int size, MovieSort sort) {
         Objects.requireNonNull(sort, "sort");
-        if (page < 0 || page > MAX_PAGE) {
-            throw new IllegalArgumentException("Page index must be between 0 and " + MAX_PAGE);
-        }
-        if (size < 1 || size > MAX_PAGE_SIZE) {
-            throw new IllegalArgumentException("Page size must be between 1 and " + MAX_PAGE_SIZE);
-        }
-        return PageRequest.of(page, size, sort.sort());
+        return CatalogPaging.pageRequest(page, size, sort.sort());
     }
 
     /**

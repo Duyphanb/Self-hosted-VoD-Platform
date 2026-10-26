@@ -14,37 +14,53 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 /**
- * Turns the validated genres and credits of a movie upsert into the rows a movie is assigned to.
- * Runs inside the movie write transaction.
+ * Turns the validated genres and credits of a movie upsert into the rows a movie is assigned to,
+ * following ADR-009. Runs inside the movie write transaction.
  *
  * <p>Genres follow the {@code UpsertMovieRequest} rule: a genre with the same slug is reused and
- * keeps its stored name; otherwise a genre is created with the normalized name. Concurrent
- * creation of the same new genre is not yet handled and belongs to Issue 3.3 (#86).
+ * keeps its stored name; otherwise a genre is created with the normalized name. When a concurrent
+ * request creates the same genre first, the insert does nothing
+ * ({@link GenreRepository#insertIfAbsent}) and that request's genre is reused, so concurrent
+ * creation of the same genre never fails.
  *
- * <p>Credits identified by {@code personId} reuse that person; an unknown id is a 400 on
- * {@code people[i].personId}. Name-only credits (ADR-009 name matching and person creation)
- * belong to Issue 3.3 (#86) and are rejected until then, see {@link #resolveByName}. A (person,
- * role) pair may appear once; the check runs on the resolved person.
+ * <p>Credits are resolved in two steps, so that the movie service can write the movie row between
+ * them and no person is inserted before a duplicate movie slug is reported:
+ * <ol>
+ *   <li>{@link #resolveCredits} only reads. A {@code personId} identifies the person (an unknown id
+ *       is a 400 on {@code people[i].personId}). A name-only entry is compared case-insensitively,
+ *       with diacritics significant, against the stored names of all people: one match reuses that
+ *       person, several matches are a 400 on {@code people[i].personId} asking for an id, and no
+ *       match means the person will be created. Name-only entries whose normalized names are
+ *       equal ignoring case resolve to the same person. A (person, role) pair may appear once; the
+ *       check runs on the resolved person, so a name that resolves to a person already credited
+ *       in the same role is a duplicate.</li>
+ *   <li>{@link #assignCredits} creates each new person once, with a generated slug
+ *       ({@link PersonWriter}), and returns the assignments in request order.</li>
+ * </ol>
  */
 @Component
 class MovieAssignmentResolver {
 
     static final String UNKNOWN_PERSON = "must identify an existing person";
-    static final String PERSON_ID_REQUIRED = "is required; name-only credits are not supported yet";
+    static final String AMBIGUOUS_NAME = "is required because more than one person has this name";
     static final String DUPLICATE_CREDIT = "must not repeat the person and role of another entry";
 
     private final GenreRepository genreRepository;
     private final PersonRepository personRepository;
+    private final PersonWriter personWriter;
 
     MovieAssignmentResolver(GenreRepository genreRepository, PersonRepository personRepository) {
         this.genreRepository = genreRepository;
         this.personRepository = personRepository;
+        this.personWriter = new PersonWriter(personRepository);
     }
 
     /**
@@ -57,44 +73,60 @@ class MovieAssignmentResolver {
         List<Genre> genres = new ArrayList<>(inputs.size());
         for (GenreInput input : inputs) {
             Genre genre = existing.get(input.slug());
-            if (genre == null) {
-                genre = genreRepository.save(new Genre(UUID.randomUUID(), input.name(), input.slug()));
-            }
-            genres.add(genre);
+            genres.add(genre != null ? genre : createOrReuse(input));
         }
         return genres;
     }
 
     /**
-     * Returns one credit per input, in input order.
+     * Inserts the genre, or does nothing when another transaction has committed a genre with the
+     * same slug since the lookup, then reads the genre by slug, which returns either one.
+     */
+    private Genre createOrReuse(GenreInput input) {
+        genreRepository.insertIfAbsent(UUID.randomUUID(), input.name(), input.slug());
+        return genreRepository.findBySlug(input.slug())
+                .orElseThrow(() -> new IllegalStateException("A genre with the requested name has another slug"));
+    }
+
+    /**
+     * Resolves every credit without writing anything; see the class comment.
      *
+     * @return one resolved credit per input, in input order
      * @throws CatalogValidationException if a person cannot be resolved or a (person, role) pair
      *                                    repeats
      */
-    List<CreditAssignment> resolveCredits(List<CreditInput> inputs) {
+    List<ResolvedCredit> resolveCredits(List<CreditInput> inputs) {
         Set<UUID> personIds = new HashSet<>();
-        inputs.stream().map(CreditInput::personId).filter(id -> id != null).forEach(personIds::add);
+        inputs.stream().map(CreditInput::personId).filter(Objects::nonNull).forEach(personIds::add);
         Map<UUID, Person> peopleById = new HashMap<>();
         personRepository.findAllById(personIds).forEach(person -> peopleById.put(person.getId(), person));
+        Map<String, NameMatch> nameMatches = new HashMap<>();
 
         List<ApiFieldError> errors = new ArrayList<>();
         Set<CreditKey> assigned = new HashSet<>();
-        List<CreditAssignment> credits = new ArrayList<>(inputs.size());
+        List<ResolvedCredit> credits = new ArrayList<>(inputs.size());
         for (CreditInput input : inputs) {
-            Person person = input.personId() != null
-                    ? peopleById.get(input.personId())
-                    : resolveByName(input, errors);
-            if (person == null) {
-                if (input.personId() != null) {
+            ResolvedCredit credit;
+            if (input.personId() != null) {
+                Person person = peopleById.get(input.personId());
+                if (person == null) {
                     errors.add(new ApiFieldError(input.field() + ".personId", UNKNOWN_PERSON));
+                    continue;
                 }
-                continue;
+                credit = new ResolvedCredit(person, null, input.role());
+            } else {
+                NameMatch match = nameMatches.computeIfAbsent(nameKey(input.name()), key -> matchName(input.name()));
+                if (match.ambiguous()) {
+                    errors.add(new ApiFieldError(input.field() + ".personId", AMBIGUOUS_NAME));
+                    continue;
+                }
+                credit = new ResolvedCredit(match.person(), match.newName(), input.role());
             }
-            if (!assigned.add(new CreditKey(person.getId(), input.role()))) {
+            if (!assigned.add(credit.key())) {
                 errors.add(new ApiFieldError(input.field(), DUPLICATE_CREDIT));
                 continue;
             }
-            credits.add(new CreditAssignment(person, input.role()));
+            credits.add(credit);
         }
         if (!errors.isEmpty()) {
             throw new CatalogValidationException(errors);
@@ -103,18 +135,68 @@ class MovieAssignmentResolver {
     }
 
     /**
-     * Seam for Issue 3.3 (#86): name-only credits are matched case-insensitively against stored
-     * person names (no match creates a person with a generated slug, one match reuses it, several
-     * matches are a 400 asking for a {@code personId}), and equal names in one request resolve to
-     * one person. Until that lands, a name-only credit is a 400 asking for a {@code personId}.
-     *
-     * @return the person, or null after recording an error
+     * Creates the people that name-only credits introduce, each once, and returns one assignment
+     * per resolved credit, in the same order. Call it after the movie row is written.
      */
-    private Person resolveByName(CreditInput input, List<ApiFieldError> errors) {
-        errors.add(new ApiFieldError(input.field() + ".personId", PERSON_ID_REQUIRED));
-        return null;
+    List<CreditAssignment> assignCredits(List<ResolvedCredit> credits) {
+        Map<String, Person> created = new HashMap<>();
+        List<CreditAssignment> assignments = new ArrayList<>(credits.size());
+        for (ResolvedCredit credit : credits) {
+            Person person = credit.person() != null
+                    ? credit.person()
+                    : created.computeIfAbsent(nameKey(credit.newName()), key -> personWriter.create(credit.newName()));
+            assignments.add(new CreditAssignment(person, credit.role()));
+        }
+        return assignments;
     }
 
-    private record CreditKey(UUID personId, CreditRole role) {
+    private NameMatch matchName(String name) {
+        List<Person> matches = personRepository.findAllByNameIgnoringCase(name);
+        return switch (matches.size()) {
+            case 0 -> new NameMatch(null, name, false);
+            case 1 -> new NameMatch(matches.getFirst(), null, false);
+            default -> new NameMatch(null, null, true);
+        };
+    }
+
+    /**
+     * Groups name-only entries of one request: normalized names that are equal ignoring case,
+     * as the database comparison treats them.
+     */
+    private static String nameKey(String normalizedName) {
+        return normalizedName.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * A credit after {@link #resolveCredits}: an existing {@code person}, or the normalized
+     * {@code newName} of a person {@link #assignCredits} creates. Exactly one of them is set.
+     */
+    record ResolvedCredit(Person person, String newName, CreditRole role) {
+
+        ResolvedCredit {
+            if ((person == null) == (newName == null)) {
+                throw new IllegalArgumentException("Exactly one of person and newName must be set");
+            }
+            Objects.requireNonNull(role, "role");
+        }
+
+        private CreditKey key() {
+            return person != null
+                    ? new CreditKey(person.getId(), null, role)
+                    : new CreditKey(null, nameKey(newName), role);
+        }
+    }
+
+    /**
+     * The outcome of matching one name: an existing person, a person to create under the name of
+     * the first entry with that name, or an ambiguous name.
+     */
+    private record NameMatch(Person person, String newName, boolean ambiguous) {
+    }
+
+    /**
+     * Identifies a (person, role) pair; a person to create is identified by its name key.
+     */
+    private record CreditKey(UUID personId, String newNameKey, CreditRole role) {
     }
 }

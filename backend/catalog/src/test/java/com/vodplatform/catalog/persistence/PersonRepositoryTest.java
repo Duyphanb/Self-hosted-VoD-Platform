@@ -1,6 +1,7 @@
 package com.vodplatform.catalog.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.vodplatform.catalog.config.CatalogConfiguration;
 import jakarta.persistence.EntityManager;
@@ -92,6 +93,54 @@ class PersonRepositoryTest {
         assertThat(personRepository.findSlugsWithBase("tran-thanh"))
                 .containsExactlyInAnyOrder("tran-thanh", "tran-thanh-2", "tran-thanh-10", "tran-thanh-huy");
         assertThat(personRepository.findSlugsWithBase("person")).isEmpty();
+    }
+
+    @Test
+    void insertIfSlugFreeSkipsATakenSlugButNotATakenName() {
+        persist(1, "Trấn Thành", "tran-thanh");
+        flushAndClear();
+
+        assertThat(personRepository.insertIfSlugFree(uuid(2), "Trấn Thành", "tran-thanh")).isZero();
+        assertThat(personRepository.insertIfSlugFree(uuid(3), "Trấn Thành", "tran-thanh-2")).isEqualTo(1);
+        entityManager.clear();
+
+        assertThat(personRepository.findAllByNameIgnoringCase("trấn thành"))
+                .extracting(Person::getId, Person::getSlug)
+                .containsExactly(tuple(uuid(1), "tran-thanh"), tuple(uuid(3), "tran-thanh-2"));
+    }
+
+    @Test
+    void renameIfSlugFreeRenamesAndRefreshesThePerson() {
+        persist(1, "Tuấn Trần", "tuan-tran");
+        flushAndClear();
+        Person person = personRepository.findById(uuid(1)).orElseThrow();
+
+        assertThat(personRepository.renameIfSlugFree(person, "Trấn Thành", "tran-thanh")).isTrue();
+
+        assertThat(person.getName()).isEqualTo("Trấn Thành");
+        assertThat(person.getSlug()).isEqualTo("tran-thanh");
+        entityManager.clear();
+        assertThat(personRepository.findById(uuid(1)).orElseThrow().getSlug()).isEqualTo("tran-thanh");
+    }
+
+    @Test
+    void renameIfSlugFreeLeavesEverythingUnchangedWhenAnotherPersonHasTheSlug() {
+        persist(1, "Trấn Thành", "tran-thanh");
+        persist(2, "Tuấn Trần", "tuan-tran");
+        flushAndClear();
+        Person person = personRepository.findById(uuid(2)).orElseThrow();
+
+        assertThat(personRepository.renameIfSlugFree(person, "Trấn Thành", "tran-thanh")).isFalse();
+
+        assertThat(person.getName()).isEqualTo("Tuấn Trần");
+        // The failed update was rolled back to its savepoint, so the transaction goes on.
+        assertThat(personRepository.renameIfSlugFree(person, "Trấn Thành", "tran-thanh-2")).isTrue();
+        entityManager.clear();
+        assertThat(personRepository.findAll())
+                .extracting(Person::getId, Person::getName, Person::getSlug)
+                .containsExactlyInAnyOrder(
+                        tuple(uuid(1), "Trấn Thành", "tran-thanh"),
+                        tuple(uuid(2), "Trấn Thành", "tran-thanh-2"));
     }
 
     private void persist(int id, String name, String slug) {

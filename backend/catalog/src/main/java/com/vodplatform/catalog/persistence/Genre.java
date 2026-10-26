@@ -41,6 +41,14 @@ public class Genre {
         this.slug = Objects.requireNonNull(slug, "slug");
     }
 
+    /**
+     * Renames the genre. The caller derives the slug from the new name with the slug rule.
+     */
+    public void rename(String name, String slug) {
+        this.name = Objects.requireNonNull(name, "name");
+        this.slug = Objects.requireNonNull(slug, "slug");
+    }
+
     public UUID getId() {
         return id;
     }

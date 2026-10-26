@@ -58,6 +58,26 @@ class GenreRepositoryTest {
                 .containsExactly("Action", "Comedy", "Drama", "Hành Động Hài");
     }
 
+    @Test
+    void insertIfAbsentSkipsAGenreWhoseNameOrSlugExists() {
+        assertThat(genreRepository.insertIfAbsent(uuid(5), "Kinh Dị", "kinh-di")).isEqualTo(1);
+        assertThat(genreRepository.insertIfAbsent(uuid(6), "Kinh Dị Mới", "kinh-di")).isZero();
+        // No conflict target: the name constraint arbitrates too.
+        assertThat(genreRepository.insertIfAbsent(uuid(7), "Action", "action-2")).isZero();
+        entityManager.clear();
+
+        assertThat(genreRepository.findBySlug("kinh-di").orElseThrow().getId()).isEqualTo(uuid(5));
+        assertThat(genreRepository.findBySlug("action-2")).isEmpty();
+        assertThat(genreRepository.count()).isEqualTo(5);
+    }
+
+    @Test
+    void checksWhetherAnotherGenreUsesASlug() {
+        assertThat(genreRepository.existsBySlugAndIdNot("drama", uuid(1))).isTrue();
+        assertThat(genreRepository.existsBySlugAndIdNot("drama", uuid(3))).isFalse();
+        assertThat(genreRepository.existsBySlugAndIdNot("kinh-di", uuid(1))).isFalse();
+    }
+
     private static UUID uuid(int value) {
         return new UUID(0L, value);
     }
