@@ -29,10 +29,21 @@ import org.springframework.transaction.annotation.Transactional;
  * Movie metadata CRUD (Issue 3.2). Returns catalog DTOs only; entities never leave this service.
  *
  * <p>Create and update validate the whole request first ({@link CatalogValidationException}), then
- * check the slug ({@link MovieSlugConflictException}), then resolve genres and credits. A duplicate
- * slug that slips past the pre-check because another transaction inserted it concurrently fails
- * on {@code ux_movies_slug} at flush and is reported as the same 409. Update and archive lock the
- * movie row first, so concurrent writes to one movie are serialized and the last write wins.
+ * check the slug ({@link MovieSlugConflictException}) and resolve the credits, which only reads.
+ * They then write the movie row and flush it before resolving genres, which may insert new ones,
+ * and finally write the genre and credit assignments. A duplicate slug that slips past the
+ * pre-check because another transaction wrote it concurrently fails on {@code ux_movies_slug} at
+ * that first flush and is reported as the same 409. Flushing the movie row first keeps that true
+ * when both requests also bring the same new genre: the losing request fails on the slug before it
+ * inserts the genre a second time, so it never gets a genre violation instead of the 409. Update
+ * and archive lock the movie row first, so concurrent writes to one movie are serialized and the
+ * last write wins.
+ *
+ * <p>No query may run between changing the movie row and that first flush: a query can auto-flush
+ * pending changes, and a slug violation raised by such a flush would escape the 409 translation.
+ * Requests for different movies that create the same new genre can still fail on
+ * {@code ux_genres_name} or {@code ux_genres_slug}; that violation is rethrown unchanged, never
+ * reported as a slug conflict, and re-reading the genre (ADR-009) belongs to Issue 3.3 (#86).
  *
  * <p>{@code search_vector} is not mapped and therefore never written here; search (Issue 7.2)
  * owns it.
@@ -69,9 +80,10 @@ public class MovieService {
             throw new MovieSlugConflictException();
         }
         List<CreditAssignment> credits = assignmentResolver.resolveCredits(input.people());
-        List<Genre> genres = assignmentResolver.resolveGenres(input.genres());
 
-        Movie movie = new Movie(
+        // Insert the movie row before any new genre, so a concurrent duplicate slug is the 409 even
+        // when the other request created the same new genre (see the class comment).
+        Movie movie = writeOrSlugConflict(() -> movieRepository.saveAndFlush(new Movie(
                 UUID.randomUUID(),
                 input.title(),
                 input.slug(),
@@ -80,11 +92,13 @@ public class MovieService {
                 input.maturityRating(),
                 input.status(),
                 clock.instant()
-        );
+        )));
+        List<Genre> genres = assignmentResolver.resolveGenres(input.genres());
         movie.replaceGenres(genres);
         movie.replaceCredits(credits);
-        Movie saved = writeOrSlugConflict(() -> movieRepository.saveAndFlush(movie));
-        return MovieMapper.toDetail(saved);
+        // A genre violation here means another request created the same genre: Issue 3.3 (#86).
+        movieRepository.flush();
+        return MovieMapper.toDetail(movie);
     }
 
     /**
@@ -104,10 +118,9 @@ public class MovieService {
         if (movieRepository.existsBySlugAndIdNot(input.slug(), movieId)) {
             throw new MovieSlugConflictException();
         }
-        // Resolve before changing the movie: a lookup query may auto-flush pending changes, and a
-        // slug violation raised by that flush would escape the translation below.
+        // Resolve the credits before changing the movie: their lookup may auto-flush pending changes,
+        // and a slug violation raised by that flush would escape the translation below.
         List<CreditAssignment> credits = assignmentResolver.resolveCredits(input.people());
-        List<Genre> genres = assignmentResolver.resolveGenres(input.genres());
 
         movie.update(
                 input.title(),
@@ -118,12 +131,17 @@ public class MovieService {
                 input.status(),
                 clock.instant()
         );
-        movie.replaceGenres(genres);
-        movie.replaceCredits(credits);
+        // Write the movie row before any new genre is inserted (see the class comment); genres are
+        // resolved only after this flush, so their lookup finds nothing left to auto-flush.
         writeOrSlugConflict(() -> {
             movieRepository.flush();
             return movie;
         });
+        List<Genre> genres = assignmentResolver.resolveGenres(input.genres());
+        movie.replaceGenres(genres);
+        movie.replaceCredits(credits);
+        // A genre violation here means another request created the same genre: Issue 3.3 (#86).
+        movieRepository.flush();
         return MovieMapper.toDetail(movie);
     }
 

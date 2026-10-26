@@ -3,8 +3,11 @@ package com.vodplatform.catalog.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -25,6 +28,7 @@ import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -82,6 +86,53 @@ class MovieServiceUnitTest {
         Throwable failure = catchThrowable(() -> movieService.create(new MovieRequestBuilder().build()));
 
         assertThat(failure).isSameAs(genreRace);
+    }
+
+    @Test
+    void aGenreViolationAfterTheMovieIsCreatedIsNotReportedAsASlugConflict() {
+        DataIntegrityViolationException genreRace = violation("ux_genres_name");
+        when(movieRepository.saveAndFlush(any(Movie.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        doThrow(genreRace).when(movieRepository).flush();
+
+        Throwable failure = catchThrowable(() -> movieService.create(new MovieRequestBuilder().build()));
+
+        assertThat(failure).isSameAs(genreRace);
+    }
+
+    @Test
+    void aGenreViolationAfterTheMovieIsUpdatedIsNotReportedAsASlugConflict() {
+        DataIntegrityViolationException genreRace = violation("ux_genres_slug");
+        when(movieRepository.findForUpdateById(MOVIE_ID)).thenReturn(Optional.of(movie(MovieStatus.PUBLISHED)));
+        doNothing().doThrow(genreRace).when(movieRepository).flush();
+
+        Throwable failure = catchThrowable(() -> movieService.update(MOVIE_ID, new MovieRequestBuilder().build()));
+
+        assertThat(failure).isSameAs(genreRace);
+    }
+
+    @Test
+    void creditsAreResolvedBeforeAndGenresAfterTheMovieRowIsWritten() {
+        when(movieRepository.saveAndFlush(any(Movie.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(movieRepository.findForUpdateById(MOVIE_ID)).thenReturn(Optional.of(movie(MovieStatus.PUBLISHED)));
+        InOrder order = inOrder(movieRepository, assignmentResolver);
+
+        movieService.create(new MovieRequestBuilder().build());
+
+        order.verify(movieRepository).existsBySlug(anyString());
+        order.verify(assignmentResolver).resolveCredits(anyList());
+        order.verify(movieRepository).saveAndFlush(any(Movie.class));
+        order.verify(assignmentResolver).resolveGenres(anyList());
+        order.verify(movieRepository).flush();
+
+        movieService.update(MOVIE_ID, new MovieRequestBuilder().build());
+
+        order.verify(movieRepository).findForUpdateById(MOVIE_ID);
+        order.verify(movieRepository).existsBySlugAndIdNot(anyString(), any(UUID.class));
+        order.verify(assignmentResolver).resolveCredits(anyList());
+        order.verify(movieRepository).flush();
+        order.verify(assignmentResolver).resolveGenres(anyList());
+        order.verify(movieRepository).flush();
+        order.verifyNoMoreInteractions();
     }
 
     @Test

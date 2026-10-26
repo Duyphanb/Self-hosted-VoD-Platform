@@ -183,6 +183,32 @@ class MovieServiceTest {
     }
 
     @Test
+    void createWritesTheMovieRowBeforeInsertingANewGenre() {
+        RecordingStatementInspector.clear();
+
+        movieService.create(new MovieRequestBuilder().slug("phim-moi").genres(List.of("Kinh Dị")).build());
+
+        assertFirstRunsBefore("insert into movies ", "insert into genres ");
+    }
+
+    @Test
+    void createReportsTheSlugConflictWhenTheOtherTransactionAlsoCreatedTheNewGenre() {
+        // Two creates with the same new slug and the same new genre: the other transaction commits
+        // both after this one's slug pre-check and genre lookup, so it tries to insert both again.
+        persist(movie(1, "dat-rung", DRAFT));
+        persist(new Genre(uuid(101), "Kinh Dị", "kinh-di"));
+        flushAndClear();
+
+        MovieSlugConflictException conflict = catchThrowableOfType(
+                MovieSlugConflictException.class,
+                () -> serviceWithStaleSlugCheckAndGenreLookup()
+                        .create(new MovieRequestBuilder().slug("dat-rung").genres(List.of("Kinh Dị")).build())
+        );
+
+        assertSlugConflict(conflict);
+    }
+
+    @Test
     void invalidRequestsAreRejectedBeforeAnythingIsWritten() {
         CatalogValidationException invalid = catchThrowableOfType(
                 CatalogValidationException.class,
@@ -373,6 +399,33 @@ class MovieServiceTest {
         MovieSlugConflictException conflict = catchThrowableOfType(
                 MovieSlugConflictException.class,
                 () -> serviceWithStaleSlugCheck().update(uuid(1), new MovieRequestBuilder().slug("phim-2").build())
+        );
+
+        assertSlugConflict(conflict);
+    }
+
+    @Test
+    void updateWritesTheMovieRowBeforeInsertingANewGenre() {
+        persist(movie(1, "phim-cu", PUBLISHED));
+        flushAndClear();
+        RecordingStatementInspector.clear();
+
+        movieService.update(uuid(1), new MovieRequestBuilder().slug("phim-moi").genres(List.of("Kinh Dị")).build());
+
+        assertFirstRunsBefore("update movies ", "insert into genres ");
+    }
+
+    @Test
+    void updateReportsTheSlugConflictWhenTheOtherTransactionAlsoCreatedTheNewGenre() {
+        persist(movie(1, "phim-1", PUBLISHED));
+        persist(movie(2, "phim-2", DRAFT));
+        persist(new Genre(uuid(101), "Kinh Dị", "kinh-di"));
+        flushAndClear();
+
+        MovieSlugConflictException conflict = catchThrowableOfType(
+                MovieSlugConflictException.class,
+                () -> serviceWithStaleSlugCheckAndGenreLookup()
+                        .update(uuid(1), new MovieRequestBuilder().slug("phim-2").genres(List.of("Kinh Dị")).build())
         );
 
         assertSlugConflict(conflict);
@@ -586,13 +639,52 @@ class MovieServiceTest {
     }
 
     /**
+     * Asserts that the first statement starting with {@code first} runs before the first statement
+     * starting with {@code then}, and that both run.
+     */
+    private static void assertFirstRunsBefore(String first, String then) {
+        List<String> statements = RecordingStatementInspector.statements().stream()
+                .map(sql -> sql.toLowerCase(Locale.ROOT))
+                .toList();
+        int firstIndex = indexOfFirstStartingWith(statements, first);
+        int thenIndex = indexOfFirstStartingWith(statements, then);
+
+        assertThat(firstIndex).as("'%s' in %s", first, statements).isNotNegative();
+        assertThat(thenIndex).as("'%s' in %s", then, statements).isNotNegative();
+        assertThat(firstIndex).as("'%s' before '%s' in %s", first, then, statements).isLessThan(thenIndex);
+    }
+
+    private static int indexOfFirstStartingWith(List<String> statements, String prefix) {
+        for (int index = 0; index < statements.size(); index++) {
+            if (statements.get(index).startsWith(prefix)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    /**
      * A service whose slug pre-checks always pass, so a duplicate slug reaches the database.
      */
     private MovieService serviceWithStaleSlugCheck() {
+        return serviceWithStaleSlugCheck(genreRepository);
+    }
+
+    /**
+     * A service whose slug pre-checks always pass and whose genre lookup finds no genre, so a
+     * duplicate slug and a duplicate genre both reach the database.
+     */
+    private MovieService serviceWithStaleSlugCheckAndGenreLookup() {
+        GenreRepository staleGenres = mock(GenreRepository.class, AdditionalAnswers.delegatesTo(genreRepository));
+        doReturn(List.of()).when(staleGenres).findAllBySlugIn(any());
+        return serviceWithStaleSlugCheck(staleGenres);
+    }
+
+    private MovieService serviceWithStaleSlugCheck(GenreRepository genres) {
         MovieRepository stale = mock(MovieRepository.class, AdditionalAnswers.delegatesTo(movieRepository));
         doReturn(false).when(stale).existsBySlug(anyString());
         doReturn(false).when(stale).existsBySlugAndIdNot(anyString(), any());
-        return new MovieService(stale, new MovieAssignmentResolver(genreRepository, personRepository), clock);
+        return new MovieService(stale, new MovieAssignmentResolver(genres, personRepository), clock);
     }
 
     private static void assertSlugConflict(MovieSlugConflictException conflict) {
