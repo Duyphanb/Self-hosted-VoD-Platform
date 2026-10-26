@@ -57,6 +57,14 @@
             <artifactId>spring-boot-starter-webmvc-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Validates MockMvc responses against docs/architecture/API-CONTRACT.yaml (Issue #120).
+             Test scope only. The 3.x line is built on Jackson 3 (tools.jackson). -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>3.0.8</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

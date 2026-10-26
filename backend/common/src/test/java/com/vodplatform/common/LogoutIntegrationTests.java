@@ -149,6 +149,17 @@ class LogoutIntegrationTests {
                 .andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
     }
 
+    @Test
+    void blankSubmittedRefreshTokenFailsRequestValidation() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"refreshToken":" "}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
     private byte[] logoutBody(String refreshToken) throws Exception {
         return objectMapper.writeValueAsBytes(
                 objectMapper.createObjectNode().put("refreshToken", refreshToken)

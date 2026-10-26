@@ -1,5 +1,6 @@
 package com.vodplatform.common;
 
+import static com.vodplatform.common.contract.ContractValidation.offContract;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -199,7 +200,9 @@ class PersonAdminApiIntegrationTests {
 
     @Test
     void peopleCannotBeDeleted() throws Exception {
-        perform(delete(PEOPLE + "/" + UUID.randomUUID()), bearerToken("ROLE_ADMIN"))
+        perform(delete(PEOPLE + "/" + UUID.randomUUID())
+                        .with(offContract("the contract declares no DELETE; the test proves the method is rejected")),
+                bearerToken("ROLE_ADMIN"))
                 .andExpect(status().isMethodNotAllowed());
     }
 

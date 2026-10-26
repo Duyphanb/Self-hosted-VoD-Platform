@@ -1,5 +1,6 @@
 package com.vodplatform.common;
 
+import static com.vodplatform.common.contract.ContractValidation.offContract;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -39,6 +40,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -71,6 +73,12 @@ class AdminUrlAuthorizationIntegrationTests {
     private static final String PROBE_HEADER = "X-Test-Probe";
     private static final String PROBE_HEADER_VALUE = "admin-url-authorization";
     private static final String PROBE_HEADER_CONDITION = PROBE_HEADER + "=" + PROBE_HEADER_VALUE;
+    /**
+     * The probe controllers answer {"status": "allowed"} on catalog paths and add paths the
+     * contract does not declare, so their responses are not contract responses.
+     */
+    private static final RequestPostProcessor PROBE = offContract(
+            "test-only probe controllers (#147) for the URL authorization rules, not API operations");
 
     private static final String MOVIE_ID = "6f1d2a4e-8c3b-4a5f-9e7d-1b2c3d4e5f60";
     private static final String VALID_BODY = """
@@ -219,7 +227,8 @@ class AdminUrlAuthorizationIntegrationTests {
 
     private ResultActions perform(ProbeRequest probe, String authorization) throws Exception {
         MockHttpServletRequestBuilder request = request(probe.method(), probe.path())
-                .header(PROBE_HEADER, PROBE_HEADER_VALUE);
+                .header(PROBE_HEADER, PROBE_HEADER_VALUE)
+                .with(PROBE);
         if (probe.body() != null) {
             request.contentType(MediaType.APPLICATION_JSON).content(probe.body());
         }

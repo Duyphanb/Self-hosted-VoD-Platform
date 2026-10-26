@@ -1,5 +1,6 @@
 package com.vodplatform.common;
 
+import static com.vodplatform.common.contract.ContractValidation.offContract;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -20,6 +21,7 @@ import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -34,6 +36,9 @@ import org.springframework.web.bind.annotation.RestController;
 @Import(AdminAuthorizationIntegrationTests.AdminAuthorizationProbeController.class)
 class AdminAuthorizationIntegrationTests {
 
+    private static final RequestPostProcessor PROBE = offContract(
+            "test-only probe controller for method security; /test/admin-authorization is not an API operation");
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -42,7 +47,7 @@ class AdminAuthorizationIntegrationTests {
 
     @Test
     void roleUserReceivesForbiddenForAdminOperation() throws Exception {
-        mockMvc.perform(get("/test/admin-authorization")
+        mockMvc.perform(get("/test/admin-authorization").with(PROBE)
                         .header(HttpHeaders.AUTHORIZATION, bearerToken("ROLE_USER")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.status").value(403))
@@ -53,7 +58,7 @@ class AdminAuthorizationIntegrationTests {
 
     @Test
     void roleAdminCanAccessAdminOperation() throws Exception {
-        mockMvc.perform(get("/test/admin-authorization")
+        mockMvc.perform(get("/test/admin-authorization").with(PROBE)
                         .header(HttpHeaders.AUTHORIZATION, bearerToken("ROLE_ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("allowed"));
@@ -61,7 +66,7 @@ class AdminAuthorizationIntegrationTests {
 
     @Test
     void anonymousRequestStillReceivesUnauthorized() throws Exception {
-        mockMvc.perform(get("/test/admin-authorization"))
+        mockMvc.perform(get("/test/admin-authorization").with(PROBE))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }

@@ -12,6 +12,7 @@ These retain the repository's engineering conventions. Frozen contracts govern b
 - Constructor injection only. Keep controllers thin and business logic in services.
 - Use request/response DTOs, never exposed JPA entities; Spring Validation and centralized `@RestControllerAdvice` handle validation/errors.
 - Use SLF4J, not `System.out.println`. Keep OpenAPI behavior synchronized with the frozen API contract.
+- Full-context `@AutoConfigureMockMvc` tests in `backend/common` validate every response against `docs/architecture/API-CONTRACT.yaml` (`ContractValidation`); update the contract first, and mark only deliberate off-contract requests with `offContract(reason)`.
 - Use JUnit Jupiter and Mockito by default, at the versions managed by Spring Boot (do not override them). Persistence, queue, and storage changes need appropriate boundary integration coverage.
 
 ### Spring Boot 4 conventions
