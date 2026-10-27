@@ -13,6 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
+import com.vodplatform.catalog.persistence.Person;
+import com.vodplatform.catalog.persistence.PersonRepository;
 import com.vodplatform.catalog.web.PersonAdminController;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -74,6 +76,9 @@ class PersonAdminApiIntegrationTests {
 
     @Autowired
     private PersonAdminController personAdminController;
+
+    @Autowired
+    private PersonRepository personRepository;
 
     @AfterEach
     void clearSecurityContext() {
@@ -189,6 +194,24 @@ class PersonAdminApiIntegrationTests {
                 .andExpect(validationError("name", "must not be null"));
         perform(json(put(PEOPLE + "/not-a-uuid"), "{\"name\": \"Lý Hải\"}"), admin)
                 .andExpect(validationError("personId", "must be a valid UUID"));
+    }
+
+    @Test
+    void aPersonIdThatIsNotInCanonicalFormIsAValidationErrorEvenWhenItWouldNameAPerson() throws Exception {
+        // UUID.fromString reads each of these forms as the id of this person.
+        UUID personId = UUID.fromString("0000000a-000b-000c-000d-00000000000e");
+        personRepository.saveAndFlush(new Person(personId, "Trấn Thành", "tran-thanh"));
+        String admin = bearerToken("ROLE_ADMIN");
+
+        for (String nonCanonical : List.of("a-b-c-d-e", "+a-b-c-d-e", "0000000a-000b-000c-000d-0000000000e")) {
+            perform(json(put(PEOPLE + "/" + nonCanonical), "{\"name\": \"Lý Hải\"}"), admin)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(validationError("personId", "must be a valid UUID"));
+        }
+        perform(json(put(PEOPLE + "/0000000A-000B-000C-000D-00000000000E"), "{\"name\": \"Lý Hải\"}"), admin)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(personId.toString()))
+                .andExpect(jsonPath("$.name").value("Lý Hải"));
     }
 
     @Test

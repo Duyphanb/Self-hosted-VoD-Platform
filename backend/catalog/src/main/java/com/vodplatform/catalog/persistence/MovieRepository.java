@@ -2,6 +2,7 @@ package com.vodplatform.catalog.persistence;
 
 import jakarta.persistence.LockModeType;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,6 +12,8 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
  * Movie persistence. Callers pass a {@link MovieSort} order in the {@link Pageable}. Routes use
@@ -45,6 +48,17 @@ public interface MovieRepository extends JpaRepository<Movie, UUID>, JpaSpecific
      * Admin list filtered by status; {@link #findAll(Pageable)} lists every status.
      */
     Page<Movie> findByStatus(MovieStatus status, Pageable pageable);
+
+    /**
+     * The genre assignments of the given movies, read with one query, so a page of movies is mapped
+     * without loading each movie's genres separately. A movie without genres has no row; the order
+     * of the rows is unspecified.
+     *
+     * @param movieIds the movies to read; must not be empty
+     */
+    @Query("select new com.vodplatform.catalog.persistence.MovieGenreAssignment(m.id, g)"
+            + " from Movie m join m.genres g where m.id in :movieIds")
+    List<MovieGenreAssignment> findGenreAssignments(@Param("movieIds") Collection<UUID> movieIds);
 
     /**
      * User-facing list: {@code PUBLISHED} movies only, for every role.

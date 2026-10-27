@@ -10,15 +10,18 @@ import com.vodplatform.catalog.persistence.CatalogConstraints;
 import com.vodplatform.catalog.persistence.CreditAssignment;
 import com.vodplatform.catalog.persistence.Genre;
 import com.vodplatform.catalog.persistence.Movie;
+import com.vodplatform.catalog.persistence.MovieGenreAssignment;
 import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.catalog.persistence.MovieSort;
 import com.vodplatform.catalog.persistence.MovieStatus;
 import com.vodplatform.catalog.service.MovieAssignmentResolver.ResolvedCredit;
 import java.time.Clock;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -69,6 +72,12 @@ public class MovieService {
 
     /** Largest page size the API contract accepts. */
     public static final int MAX_PAGE_SIZE = CatalogPaging.MAX_PAGE_SIZE;
+
+    /** Earliest release year the API contract accepts, in a movie and in the list filter. */
+    public static final int MIN_RELEASE_YEAR = MovieRequestValidator.MIN_RELEASE_YEAR;
+
+    /** Latest release year the API contract accepts, in a movie and in the list filter. */
+    public static final int MAX_RELEASE_YEAR = MovieRequestValidator.MAX_RELEASE_YEAR;
 
     private final MovieRepository movieRepository;
     private final MovieAssignmentResolver assignmentResolver;
@@ -204,14 +213,21 @@ public class MovieService {
     /**
      * User-facing list: {@code PUBLISHED} movies only, for every role.
      *
-     * @param page zero-based page index, at most {@value #MAX_PAGE}
-     * @param size page size, from 1 to {@value #MAX_PAGE_SIZE}
-     * @throws IllegalArgumentException if the page or size is outside the contract range; the API
-     *                                  layer validates them first
+     * @param genre       genre name or slug to filter by, as received, or null for every genre. It
+     *                    is normalized with the slug rule and matched against the genre slug; an
+     *                    unknown genre yields an empty page.
+     * @param releaseYear release year to filter by, or null for every year
+     * @param page        zero-based page index, at most {@value #MAX_PAGE}
+     * @param size        page size, from 1 to {@value #MAX_PAGE_SIZE}
+     * @throws CatalogValidationException 400 {@code VALIDATION_ERROR} if the genre is empty, longer
+     *                                    than the contract allows or has an empty slug
+     * @throws IllegalArgumentException   if the page or size is outside the contract range; the API
+     *                                    layer validates them first
      */
     @Transactional(readOnly = true)
-    public Page<MovieSummary> listPublished(int page, int size, MovieSort sort) {
-        return movieRepository.findPublished(null, null, pageRequest(page, size, sort)).map(MovieMapper::toSummary);
+    public Page<MovieSummary> listPublished(String genre, Integer releaseYear, int page, int size, MovieSort sort) {
+        String genreSlug = NameRequestValidator.genreFilterSlug(genre);
+        return toSummaries(movieRepository.findPublished(genreSlug, releaseYear, pageRequest(page, size, sort)));
     }
 
     /**
@@ -229,7 +245,23 @@ public class MovieService {
         Page<Movie> movies = status == null
                 ? movieRepository.findAll(pageable)
                 : movieRepository.findByStatus(status, pageable);
-        return movies.map(MovieMapper::toSummary);
+        return toSummaries(movies);
+    }
+
+    /**
+     * The one mapping path of movie lists: reads the genres of the whole page with a single query,
+     * then maps each movie, so the number of statements does not grow with the page size. Every
+     * list of {@link MovieSummary} goes through it. An empty page reads nothing more.
+     */
+    private Page<MovieSummary> toSummaries(Page<Movie> movies) {
+        Map<UUID, List<Genre>> genresByMovie = movies.isEmpty()
+                ? Map.of()
+                : movieRepository.findGenreAssignments(movies.map(Movie::getId).getContent()).stream()
+                        .collect(Collectors.groupingBy(
+                                MovieGenreAssignment::movieId,
+                                Collectors.mapping(MovieGenreAssignment::genre, Collectors.toList())
+                        ));
+        return movies.map(movie -> MovieMapper.toSummary(movie, genresByMovie.getOrDefault(movie.getId(), List.of())));
     }
 
     /**

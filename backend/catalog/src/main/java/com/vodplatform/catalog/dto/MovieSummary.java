@@ -7,7 +7,7 @@ import java.util.UUID;
 /**
  * Catalog fields of a movie list item ({@code MovieSummary} in the API contract). Fields owned by
  * other modules, such as the poster URL, average rating and video status, are added by the API
- * layer.
+ * layer ({@link MovieSummaryResponse}).
  *
  * @param genres genre names ordered by genre slug
  */

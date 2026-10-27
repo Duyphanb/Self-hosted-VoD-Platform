@@ -31,9 +31,6 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("hasRole('ADMIN')")
 public class PersonAdminController {
 
-    private static final String PAGE_RANGE = "must be between 0 and " + CatalogPaging.MAX_PAGE;
-    private static final String SIZE_RANGE = "must be between 1 and " + CatalogPaging.MAX_PAGE_SIZE;
-
     private final PersonService personService;
 
     public PersonAdminController(PersonService personService) {
@@ -44,11 +41,11 @@ public class PersonAdminController {
     public PersonPageResponse search(
             @RequestParam(name = "q", required = false) String q,
             @RequestParam(name = "page", defaultValue = "0")
-            @Min(value = 0, message = PAGE_RANGE)
-            @Max(value = CatalogPaging.MAX_PAGE, message = PAGE_RANGE) int page,
+            @Min(value = 0, message = CatalogParameters.PAGE_RANGE)
+            @Max(value = CatalogPaging.MAX_PAGE, message = CatalogParameters.PAGE_RANGE) int page,
             @RequestParam(name = "size", defaultValue = "" + CatalogPaging.DEFAULT_PAGE_SIZE)
-            @Min(value = 1, message = SIZE_RANGE)
-            @Max(value = CatalogPaging.MAX_PAGE_SIZE, message = SIZE_RANGE) int size
+            @Min(value = 1, message = CatalogParameters.SIZE_RANGE)
+            @Max(value = CatalogPaging.MAX_PAGE_SIZE, message = CatalogParameters.SIZE_RANGE) int size
     ) {
         return PersonPageResponse.of(personService.search(q, page, size));
     }

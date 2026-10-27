@@ -12,16 +12,20 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Validates the admin genre and person payloads and the people search term against the API
- * contract, without database access, with the same rules and messages as the genre and credit
- * names of a movie request.
+ * Validates the admin genre and person payloads, the people search term and the movie list genre
+ * filter against the API contract, without database access, with the same rules and messages as
+ * the genre and credit names of a movie request.
  */
 final class NameRequestValidator {
 
     static final int SEARCH_TERM_MAX_LENGTH = 100;
 
+    /** Maximum length of the movie list {@code genre} filter (API contract). */
+    static final int GENRE_FILTER_MAX_LENGTH = 120;
+
     private static final String NAME = "name";
     private static final String SEARCH_TERM = "q";
+    private static final String GENRE_FILTER = "genre";
 
     private NameRequestValidator() {
     }
@@ -81,5 +85,31 @@ final class NameRequestValidator {
         }
         String slug = SlugNormalizer.slugify(term);
         return slug.isEmpty() ? null : slug;
+    }
+
+    /**
+     * Returns the {@code genre} filter of the movie list normalized with the slug rule, the genre
+     * match key, or null when the filter is absent. Unlike the people search term, a present value
+     * must name a genre: an empty value or one whose slug is empty is rejected.
+     *
+     * @throws CatalogValidationException if the value is empty, longer than
+     *                                    {@value #GENRE_FILTER_MAX_LENGTH} characters, or has an
+     *                                    empty slug
+     */
+    static String genreFilterSlug(String genre) {
+        if (genre == null) {
+            return null;
+        }
+        int length = TextFields.length(genre);
+        if (length < 1 || length > GENRE_FILTER_MAX_LENGTH) {
+            throw new CatalogValidationException(
+                    List.of(new ApiFieldError(GENRE_FILTER, TextFields.size(1, GENRE_FILTER_MAX_LENGTH))));
+        }
+        String slug = SlugNormalizer.slugify(genre);
+        if (slug.isEmpty()) {
+            throw new CatalogValidationException(
+                    List.of(new ApiFieldError(GENRE_FILTER, MovieRequestValidator.GENRE_WITHOUT_SLUG)));
+        }
+        return slug;
     }
 }
