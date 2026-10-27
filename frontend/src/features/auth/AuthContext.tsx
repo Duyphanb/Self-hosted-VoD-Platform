@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState
@@ -85,34 +86,30 @@ export function AuthProvider({
     () => Promise.reject(new Error('Authentication provider is not ready'))
   );
   const authenticationFailureRef = useRef<(failure: unknown) => void>(() => undefined);
-  const apiClientRef = useRef<ApiClient | null>(null);
-
-  if (!apiClientRef.current) {
-    apiClientRef.current = new ApiClient(API_BASE_URL, {
-      getAuthenticationSnapshot: () => {
-        const currentSession = sessionRef.current;
-        const persistedSession = readAuthSession(storage);
-        const currentGeneration = readAuthGeneration(storage);
-        if (!currentSession
-          || !persistedSession
-          || currentSession.authGeneration !== currentGeneration
-          || persistedSession.authGeneration !== currentGeneration
-          || currentSession.user.id !== persistedSession.user.id
-          || currentSession.accessToken !== persistedSession.accessToken
-          || currentSession.refreshToken !== persistedSession.refreshToken) {
-          return null;
-        }
-        return {
-          userId: currentSession.user.id,
-          accessToken: currentSession.accessToken,
-          generation: currentSession.authGeneration
-        };
-      },
-      refreshAccessToken: () => refreshAccessTokenRef.current(),
-      onAuthenticationFailure: (failure) => authenticationFailureRef.current(failure)
-    });
-  }
-  const apiClient = apiClientRef.current;
+  // eslint-disable-next-line react-hooks/refs -- created once per provider; ApiClient calls these ref-reading callbacks only while a request runs, never during render.
+  const [apiClient] = useState(() => new ApiClient(API_BASE_URL, {
+    getAuthenticationSnapshot: () => {
+      const currentSession = sessionRef.current;
+      const persistedSession = readAuthSession(storage);
+      const currentGeneration = readAuthGeneration(storage);
+      if (!currentSession
+        || !persistedSession
+        || currentSession.authGeneration !== currentGeneration
+        || persistedSession.authGeneration !== currentGeneration
+        || currentSession.user.id !== persistedSession.user.id
+        || currentSession.accessToken !== persistedSession.accessToken
+        || currentSession.refreshToken !== persistedSession.refreshToken) {
+        return null;
+      }
+      return {
+        userId: currentSession.user.id,
+        accessToken: currentSession.accessToken,
+        generation: currentSession.authGeneration
+      };
+    },
+    refreshAccessToken: () => refreshAccessTokenRef.current(),
+    onAuthenticationFailure: (failure) => authenticationFailureRef.current(failure)
+  }));
 
   const commitSession = useCallback((nextSession: AuthSession, expectedGeneration: number) => {
     if (readAuthGeneration(storage) !== expectedGeneration) {
@@ -323,8 +320,12 @@ export function AuthProvider({
     return refreshPromise;
   }, [apiClient, clearMemorySession, commitSession, restoreSession, storage]);
 
-  refreshAccessTokenRef.current = async () => (await performRefresh()).accessToken;
-  authenticationFailureRef.current = handleAuthenticationFailure;
+  // ApiClient calls these only after awaiting a response, so publishing them during commit keeps every
+  // request on the latest callbacks without writing refs during render.
+  useLayoutEffect(() => {
+    refreshAccessTokenRef.current = async () => (await performRefresh()).accessToken;
+    authenticationFailureRef.current = handleAuthenticationFailure;
+  }, [handleAuthenticationFailure, performRefresh]);
 
   const refreshTokens = useCallback(async () => {
     beginOperation();
@@ -347,6 +348,7 @@ export function AuthProvider({
     bootstrapStartedRef.current = true;
     const storedSession = readAuthSession(storage);
     if (!storedSession) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time bootstrap: restoring a session clears storage and the query cache, so it cannot run during render.
       setIsInitializing(false);
       return;
     }
@@ -497,6 +499,7 @@ export function AuthProvider({
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- the hook shares this module's private context; edits here trigger a full reload instead of Fast Refresh.
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
   if (!context) {
@@ -505,6 +508,7 @@ export function useAuth(): AuthContextValue {
   return context;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- the hook shares this module's private context; edits here trigger a full reload instead of Fast Refresh.
 export function useApiClient(): ApiClient {
   const context = useContext(ApiClientContext);
   if (!context) {

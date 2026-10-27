@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthContext';
 
@@ -7,13 +7,17 @@ export function AppLayout() {
   const isAdmin = user?.roles.includes('ROLE_ADMIN') ?? false;
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [wasAuthenticated, setWasAuthenticated] = useState(isAuthenticated);
   const logoutInFlight = useRef(false);
 
-  useEffect(() => {
+  // Clear a stale sign-out warning as soon as a session appears, adjusting state during render
+  // (https://react.dev/learn/you-might-not-need-an-effect) instead of an extra effect pass.
+  if (isAuthenticated !== wasAuthenticated) {
+    setWasAuthenticated(isAuthenticated);
     if (isAuthenticated) {
       setLogoutError(null);
     }
-  }, [isAuthenticated]);
+  }
 
   const signOut = async () => {
     if (logoutInFlight.current) {

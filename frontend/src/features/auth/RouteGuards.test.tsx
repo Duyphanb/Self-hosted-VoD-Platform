@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
-import type { PropsWithChildren, ReactNode } from 'react';
+import { type PropsWithChildren, type ReactNode, useState } from 'react';
 import {
   MemoryRouter,
   Route,
@@ -124,7 +124,9 @@ function LoginDestination() {
 }
 
 function TestProviders({ children }: PropsWithChildren) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const [queryClient] = useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  );
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider redirectToLogin={vi.fn()}>{children}</AuthProvider>

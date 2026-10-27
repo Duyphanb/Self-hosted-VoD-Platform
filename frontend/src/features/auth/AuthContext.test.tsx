@@ -12,7 +12,7 @@ import {
   writeAuthSession
 } from './authStorage';
 import type { AuthResponse, UserProfile } from '../../lib/api/types';
-import { AuthenticationSupersededError } from '../../lib/api/client';
+import { ApiRequestError, AuthenticationSupersededError } from '../../lib/api/client';
 
 const user: UserProfile = {
   id: '3fcf25c2-f096-4462-ae63-4ba4702a9078',
@@ -840,6 +840,78 @@ describe('AuthProvider', () => {
     expect(result.current.accessToken).toBe('other-tab-access-token');
     expect(result.current.refreshToken).toBe('other-tab-refresh-token');
     expect(redirectToLogin).not.toHaveBeenCalled();
+  });
+
+  it('refreshes through the provider and retries a protected request after a 401', async () => {
+    writeAuthSession(createAuthSession(authResponse), window.localStorage);
+    const refreshedResponse: AuthResponse = {
+      ...authResponse,
+      accessToken: 'next-access-token',
+      refreshToken: 'next-refresh-token'
+    };
+    fetchMock.mockImplementation((input, init) => {
+      if (String(input).endsWith('/auth/refresh')) {
+        return Promise.resolve(jsonResponse(refreshedResponse));
+      }
+      const authorization = new Headers(init?.headers).get('Authorization');
+      return Promise.resolve(authorization === 'Bearer next-access-token'
+        ? jsonResponse(user)
+        : jsonResponse({ code: 'UNAUTHORIZED' }, 401));
+    });
+    const { result } = renderHook(() => ({
+      auth: useAuth(),
+      client: useApiClient()
+    }), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.auth.isInitializing).toBe(false));
+
+    let profile: unknown;
+    await act(async () => {
+      profile = await result.current.client.request('/users/me', { authenticated: true });
+    });
+
+    expect(profile).toEqual(user);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current.auth.accessToken).toBe('next-access-token');
+    expect(result.current.auth.refreshToken).toBe('next-refresh-token');
+  });
+
+  it('reports a failed protected-request refresh to the latest redirectToLogin', async () => {
+    writeAuthSession(createAuthSession(authResponse), window.localStorage);
+    fetchMock.mockImplementation(() => Promise.resolve(
+      jsonResponse({ code: 'INVALID_REFRESH_TOKEN' }, 401)
+    ));
+    const initialRedirect = vi.fn();
+    const latestRedirect = vi.fn();
+    let redirectToLogin = initialRedirect;
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(() => ({
+      auth: useAuth(),
+      client: useApiClient()
+    }), {
+      wrapper: ({ children }: PropsWithChildren) => (
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider storage={window.localStorage} redirectToLogin={redirectToLogin}>
+            {children}
+          </AuthProvider>
+        </QueryClientProvider>
+      )
+    });
+    await waitFor(() => expect(result.current.auth.isInitializing).toBe(false));
+    redirectToLogin = latestRedirect;
+    rerender();
+
+    let failure: unknown;
+    await act(async () => {
+      failure = await result.current.client
+        .request('/users/me', { authenticated: true })
+        .catch((error: unknown) => error);
+    });
+
+    expect(failure).toBeInstanceOf(ApiRequestError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.auth.isAuthenticated).toBe(false);
+    expect(latestRedirect).toHaveBeenCalledTimes(1);
+    expect(initialRedirect).not.toHaveBeenCalled();
   });
 });
 
