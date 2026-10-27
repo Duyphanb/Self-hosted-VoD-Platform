@@ -52,6 +52,7 @@ import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.AdditionalAnswers;
@@ -722,7 +723,7 @@ class MovieServiceTest {
 
         RecordingStatementInspector.clear();
         movieService.getMovie(uuid(1), MovieVisibility.PUBLISHED_ONLY);
-        movieService.listPublished(0, 10, MovieSort.LATEST);
+        movieService.listPublished(null, null, 0, 10, MovieSort.LATEST);
         movieService.listForAdmin(null, 0, 10, MovieSort.TITLE);
 
         assertThat(RecordingStatementInspector.statements()).isNotEmpty();
@@ -834,9 +835,9 @@ class MovieServiceTest {
         flushAndClear();
 
         List<UUID> ids = new ArrayList<>();
-        Page<MovieSummary> first = movieService.listPublished(0, 3, MovieSort.LATEST);
+        Page<MovieSummary> first = movieService.listPublished(null, null, 0, 3, MovieSort.LATEST);
         first.forEach(summary -> ids.add(summary.id()));
-        movieService.listPublished(1, 3, MovieSort.LATEST).forEach(summary -> ids.add(summary.id()));
+        movieService.listPublished(null, null, 1, 3, MovieSort.LATEST).forEach(summary -> ids.add(summary.id()));
 
         assertThat(first.getTotalElements()).isEqualTo(4);
         assertThat(first.getTotalPages()).isEqualTo(2);
@@ -854,7 +855,7 @@ class MovieServiceTest {
         persist(movie(4, "c", PUBLISHED, T0, "Cherry"));
         flushAndClear();
 
-        assertThat(movieService.listPublished(0, 10, MovieSort.TITLE).getContent())
+        assertThat(movieService.listPublished(null, null, 0, 10, MovieSort.TITLE).getContent())
                 .extracting(MovieSummary::id)
                 .containsExactly(uuid(2), uuid(3), uuid(1), uuid(4));
     }
@@ -877,11 +878,121 @@ class MovieServiceTest {
     }
 
     @Test
+    void publishedListFiltersByTheNormalizedGenreAndTheReleaseYear() {
+        Genre action = persist(new Genre(uuid(101), "Hành Động", "hanh-dong"));
+        Genre comedy = persist(new Genre(uuid(102), "Hài", "hai"));
+        Movie actionIn2024 = new Movie(uuid(1), "Phim 1", "phim-1", "Mô tả", 2024, null, PUBLISHED, T0);
+        actionIn2024.addGenre(action);
+        persist(actionIn2024);
+        Movie actionIn2023 = new Movie(uuid(2), "Phim 2", "phim-2", "Mô tả", 2023, null, PUBLISHED, T0);
+        actionIn2023.addGenre(action);
+        actionIn2023.addGenre(comedy);
+        persist(actionIn2023);
+        Movie draftAction = new Movie(uuid(3), "Phim 3", "phim-3", "Mô tả", 2024, null, DRAFT, T0);
+        draftAction.addGenre(action);
+        persist(draftAction);
+        flushAndClear();
+
+        assertThat(movieService.listPublished("  HÀNH   động ", null, 0, 10, MovieSort.TITLE).getContent())
+                .extracting(MovieSummary::id).containsExactly(uuid(1), uuid(2));
+        assertThat(movieService.listPublished("hanh-dong", 2024, 0, 10, MovieSort.TITLE).getContent())
+                .extracting(MovieSummary::id).containsExactly(uuid(1));
+        assertThat(movieService.listPublished(null, 2023, 0, 10, MovieSort.TITLE).getContent())
+                .extracting(MovieSummary::genres).containsExactly(List.of("Hài", "Hành Động"));
+        assertThat(movieService.listPublished("Kinh dị", null, 0, 10, MovieSort.TITLE)).isEmpty();
+        assertThat(movieService.listPublished("hai", 2024, 0, 10, MovieSort.TITLE)).isEmpty();
+        assertThat(movieService.listPublished("x".repeat(120), null, 0, 10, MovieSort.TITLE)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidGenreFilters")
+    void publishedListRejectsAGenreFilterThatCannotNameAGenre(String genre, String message) {
+        CatalogValidationException invalid = catchThrowableOfType(
+                CatalogValidationException.class,
+                () -> movieService.listPublished(genre, null, 0, 10, MovieSort.LATEST)
+        );
+
+        assertThat(invalid.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(invalid.getFieldErrors())
+                .extracting(ApiFieldError::field, ApiFieldError::message)
+                .containsExactly(tuple("genre", message));
+    }
+
+    static Stream<Arguments> invalidGenreFilters() {
+        return Stream.of(
+                Arguments.of("", "size must be between 1 and 120"),
+                Arguments.of("x".repeat(121), "size must be between 1 and 120"),
+                // 121 code points, 242 UTF-16 units: the contract counts characters.
+                Arguments.of("🎬".repeat(121), "size must be between 1 and 120"),
+                Arguments.of("!!!", "must contain at least one letter or digit"),
+                Arguments.of("   ", "must contain at least one letter or digit")
+        );
+    }
+
+    @Test
+    void listPagesReadTheGenresOfAllTheirMoviesWithOneQuery() {
+        Genre action = persist(new Genre(uuid(101), "Hành Động", "hanh-dong"));
+        Genre comedy = persist(new Genre(uuid(102), "Hài", "hai"));
+        for (int id = 1; id <= 12; id++) {
+            Movie movie = movie(id, "phim-" + id, id % 3 == 0 ? DRAFT : PUBLISHED, T0.plusSeconds(id));
+            movie.addGenre(action);
+            if (id % 2 == 0) {
+                movie.addGenre(comedy);
+            }
+            persist(movie);
+        }
+        persist(movie(13, "khong-the-loai", PUBLISHED, T0.plusSeconds(13)));
+        flushAndClear();
+
+        List<Integer> statementCounts = new ArrayList<>();
+        for (int size : List.of(2, 8)) {
+            RecordingStatementInspector.clear();
+            Page<MovieSummary> published = movieService.listPublished(null, null, 0, size, MovieSort.LATEST);
+            statementCounts.add(RecordingStatementInspector.statements().size());
+            assertThat(statementsReading("movie_genres")).hasSize(1);
+            assertThat(published.getContent()).hasSize(size);
+            entityManager.clear();
+
+            RecordingStatementInspector.clear();
+            Page<MovieSummary> everyStatus = movieService.listForAdmin(null, 0, size, MovieSort.LATEST);
+            statementCounts.add(RecordingStatementInspector.statements().size());
+            assertThat(statementsReading("movie_genres")).hasSize(1);
+            assertThat(everyStatus.getContent()).hasSize(size);
+            entityManager.clear();
+        }
+
+        // Page query, count query and one genre query, whatever the page size.
+        assertThat(statementCounts).containsOnly(3);
+        Page<MovieSummary> firstEight = movieService.listForAdmin(null, 0, 8, MovieSort.LATEST);
+        assertThat(firstEight.getContent())
+                .extracting(MovieSummary::id, MovieSummary::genres)
+                .containsExactly(
+                        tuple(uuid(13), List.of()),
+                        tuple(uuid(12), List.of("Hài", "Hành Động")),
+                        tuple(uuid(11), List.of("Hành Động")),
+                        tuple(uuid(10), List.of("Hài", "Hành Động")),
+                        tuple(uuid(9), List.of("Hành Động")),
+                        tuple(uuid(8), List.of("Hài", "Hành Động")),
+                        tuple(uuid(7), List.of("Hành Động")),
+                        tuple(uuid(6), List.of("Hài", "Hành Động"))
+                );
+    }
+
+    @Test
+    void anEmptyListPageReadsNoGenres() {
+        RecordingStatementInspector.clear();
+
+        assertThat(movieService.listPublished(null, null, 0, 10, MovieSort.LATEST)).isEmpty();
+        assertThat(movieService.listForAdmin(ARCHIVED, 0, 10, MovieSort.LATEST)).isEmpty();
+        assertThat(statementsReading("movie_genres")).isEmpty();
+    }
+
+    @Test
     void listsRejectPagesOutsideTheContractRange() {
-        assertThat(movieService.listPublished(MovieService.MAX_PAGE, MovieService.MAX_PAGE_SIZE, MovieSort.TITLE)).isEmpty();
-        assertThatIllegalArgumentException().isThrownBy(() -> movieService.listPublished(-1, 20, MovieSort.LATEST));
-        assertThatIllegalArgumentException().isThrownBy(() -> movieService.listPublished(10_001, 20, MovieSort.LATEST));
-        assertThatIllegalArgumentException().isThrownBy(() -> movieService.listPublished(0, 0, MovieSort.LATEST));
+        assertThat(movieService.listPublished(null, null, MovieService.MAX_PAGE, MovieService.MAX_PAGE_SIZE, MovieSort.TITLE)).isEmpty();
+        assertThatIllegalArgumentException().isThrownBy(() -> movieService.listPublished(null, null, -1, 20, MovieSort.LATEST));
+        assertThatIllegalArgumentException().isThrownBy(() -> movieService.listPublished(null, null, 10_001, 20, MovieSort.LATEST));
+        assertThatIllegalArgumentException().isThrownBy(() -> movieService.listPublished(null, null, 0, 0, MovieSort.LATEST));
         assertThatIllegalArgumentException().isThrownBy(() -> movieService.listForAdmin(null, 0, 101, MovieSort.LATEST));
     }
 
@@ -912,6 +1023,16 @@ class MovieServiceTest {
         assertThat(firstIndex).as("'%s' in %s", first, statements).isNotNegative();
         assertThat(thenIndex).as("'%s' in %s", then, statements).isNotNegative();
         assertThat(firstIndex).as("'%s' before '%s' in %s", first, then, statements).isLessThan(thenIndex);
+    }
+
+    /**
+     * Statements that mention the given table, which H2 and Hibernate render in lower case.
+     */
+    private static List<String> statementsReading(String table) {
+        return RecordingStatementInspector.statements().stream()
+                .map(sql -> sql.toLowerCase(Locale.ROOT))
+                .filter(sql -> sql.contains(" " + table + " "))
+                .toList();
     }
 
     private static List<String> statementsStartingWith(String prefix) {
