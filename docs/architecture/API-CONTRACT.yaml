@@ -185,7 +185,8 @@ paths:
           description: >
             Genre name or slug. The value is normalized with the slug rule (see
             UpsertGenreRequest) and matched against the genre slug. A value that is empty after
-            normalization returns 400; an unknown genre returns an empty page.
+            normalization returns 400; an unknown genre returns an empty page. The length
+            limits apply to the supplied value, before normalization (ADR-009).
           schema:
             type: string
             minLength: 1
@@ -1096,7 +1097,7 @@ components:
 
     MovieSummary:
       type: object
-      required: [id, title, slug, genres, status, videoStatus]
+      required: [id, title, slug, description, releaseYear, posterUrl, genres, averageRating, status, videoStatus]
       properties:
         id:
           type: string
@@ -1110,6 +1111,8 @@ components:
         releaseYear:
           type: integer
           nullable: true
+          minimum: 1888
+          maximum: 2100
         posterUrl:
           type: string
           nullable: true
@@ -1121,6 +1124,8 @@ components:
           type: number
           format: float
           nullable: true
+          minimum: 1
+          maximum: 5
         status:
           $ref: "#/components/schemas/MovieStatus"
         videoStatus:
@@ -1145,6 +1150,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/MovieSummary"
         - type: object
+          required: [maturityRating, people, userRating, inWatchlist]
           properties:
             maturityRating:
               $ref: "#/components/schemas/MaturityRating"
@@ -1156,6 +1162,8 @@ components:
             userRating:
               type: integer
               nullable: true
+              minimum: 1
+              maximum: 5
             inWatchlist:
               type: boolean
             playbackProgress:
