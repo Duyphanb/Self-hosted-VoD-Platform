@@ -17,7 +17,7 @@ const PASSWORD_MAX_LENGTH = 72;
 const DISPLAY_NAME_MIN_LENGTH = 2;
 const DISPLAY_NAME_MAX_LENGTH = 100;
 const EMAIL_LOCAL_ATOM_PATTERN = /^[a-z0-9!#$%&'*+/=?^_`{|}~\u0080-\uFFFF-]+$/i;
-const EMAIL_QUOTED_ATOM_PATTERN = /^[a-z0-9!#$%&'*.(),<>\[\]:; @+/=?^_`{|}~\u0080-\uFFFF-]$/i;
+const EMAIL_QUOTED_ATOM_PATTERN = /^[a-z0-9!#$%&'*.(),<>[\]:; @+/=?^_`{|}~\u0080-\uFFFF-]$/i;
 const EMAIL_DOMAIN_ATOM_PATTERN = /^[a-z0-9!#$%&'*+/=?^_`{|}~\u0080-\uFFFF-]$/i;
 const IPV4_DOMAIN_PATTERN = /^\[[0-9]{1,3}(?:\.[0-9]{1,3}){3}\]$/;
 
@@ -189,7 +189,7 @@ function validEmailDomain(domain: string): boolean {
   if (!labels.every(validDomainLabel)) {
     return false;
   }
-  if (/^[\u0000-\u007f]+$/.test(domain)) {
+  if (/^\p{ASCII}+$/u.test(domain)) {
     return domain.length <= 255 && labels.every((label) => label.length <= 63);
   }
   try {
@@ -224,6 +224,7 @@ function validIpv6Address(address: string): boolean {
 function safeInternalPath(path: string): string {
   if (!path.startsWith('/')
     || path.startsWith('//')
+    // eslint-disable-next-line no-control-regex -- rejecting backslashes, C0 control characters and DEL in redirect targets is the point.
     || /[\\\u0000-\u001f\u007f]/.test(path)) {
     return '/';
   }

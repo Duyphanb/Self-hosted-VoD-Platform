@@ -25,7 +25,7 @@ Frozen requirements and architecture govern implementation. Planning/status docu
 - [Implementation conventions](../Codex_Usage_Notes.md#implementation-conventions): backend, frontend, and worker rules; read the applicable section when changing code.
 - Current code and tests live in `backend/`, `frontend/`, `worker/`, and `deploy/`. Inspect the paths needed to understand and verify the change.
 - [README.md](../README.md): local stack commands and runtime limitations. Check destinations and data persistence before running commands that mutate state.
-- [CI workflow](../.github/workflows/ci.yml), module POMs, and [frontend scripts](../frontend/package.json): current build/test commands. Select relevant checks rather than treating the entire CI workflow as a per-edit checklist.
+- [CI workflow](../.github/workflows/ci.yml), module POMs, and [frontend scripts](../frontend/package.json): current build/lint/test commands. Select relevant checks rather than treating the entire CI workflow as a per-edit checklist.
 - [Testing docs](testing/README.md): test evidence and hardening guides. [Dependency security](testing/DEPENDENCY-SECURITY.md) covers dependency scans.
 - [Deployment docs](deployment/README.md): deployment and production preflight guidance. Reading a runbook does not authorize production operations.
 
