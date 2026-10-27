@@ -37,8 +37,9 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * The application-wide UUID binding through the assembled application: a UUID request parameter
  * or JSON body property is accepted in canonical 8-4-4-4-12 form only. The API's own path
- * variables are covered by the movie, genre and person API tests; no API operation reads a UUID
- * from a query parameter or a request body yet, so a test-only probe controller stands in.
+ * variables are covered by the movie, genre and person API tests, and the body property
+ * {@code people[].personId} of the movie writes by {@code MovieAdminApiIntegrationTests}. No API
+ * operation reads a UUID from a query parameter yet, so a test-only probe controller stands in.
  */
 @SpringBootTest(
         properties = {

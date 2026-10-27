@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: vod-backend
+  jackson:
+    deserialization:
+      # An integer field of a request body, such as releaseYear, rejects a number with a fraction
+      # (400 MALFORMED_REQUEST) instead of silently truncating it.
+      accept-float-as-int: false
   jpa:
     # Lazy associations load inside service transactions only; no connection is held while a
     # response is rendered or streamed.
