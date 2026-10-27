@@ -21,6 +21,7 @@ import com.vodplatform.catalog.persistence.PersonRepository;
 import com.vodplatform.catalog.web.MovieAdminController;
 import com.vodplatform.common.support.MovieVisibilityRule;
 import jakarta.persistence.EntityManager;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -382,6 +383,33 @@ class MovieApiIntegrationTests {
     void aMovieIdThatIsNotAUuidIsAValidationErrorForEveryRole() throws Exception {
         for (String role : List.of("ROLE_USER", "ROLE_ADMIN")) {
             perform(MOVIES + "/not-a-uuid", bearerToken(role))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(validationError("movieId", "must be a valid UUID"));
+        }
+    }
+
+    @Test
+    void aMovieIdThatIsNotInCanonicalFormIsAValidationErrorEvenWhenItWouldNameAPublishedMovie() throws Exception {
+        // UUID.fromString reads each of these forms as the id of this published movie.
+        UUID movieId = UUID.fromString("0000000a-000b-000c-000d-00000000000e");
+        movieRepository.save(movie(movieId, "Short Id", "short-id", "Id with short groups", null, null,
+                MovieStatus.PUBLISHED, 1));
+        entityManager.flush();
+        entityManager.clear();
+
+        for (String role : List.of("ROLE_USER", "ROLE_ADMIN")) {
+            String authorization = bearerToken(role);
+            perform(MOVIES + "/0000000A-000B-000C-000D-00000000000E", authorization)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(movieId.toString()));
+            for (String nonCanonical : List.of("a-b-c-d-e", "+a-b-c-d-e", "0000000a-000b-000c-000d-0000000000e")) {
+                perform(MOVIES + "/" + nonCanonical, authorization)
+                        .andExpect(status().isBadRequest())
+                        .andExpect(validationError("movieId", "must be a valid UUID"));
+            }
+            // Surrounding whitespace is rejected, not trimmed.
+            mockMvc.perform(get(URI.create(MOVIES + "/%20" + movieId))
+                            .header(HttpHeaders.AUTHORIZATION, authorization))
                     .andExpect(status().isBadRequest())
                     .andExpect(validationError("movieId", "must be a valid UUID"));
         }

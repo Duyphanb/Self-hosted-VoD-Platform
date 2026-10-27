@@ -13,6 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import com.vodplatform.catalog.dto.GenreResponse;
+import com.vodplatform.catalog.persistence.Genre;
+import com.vodplatform.catalog.persistence.GenreRepository;
 import com.vodplatform.catalog.web.GenreAdminController;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -74,6 +76,9 @@ class GenreAdminApiIntegrationTests {
 
     @Autowired
     private GenreAdminController genreAdminController;
+
+    @Autowired
+    private GenreRepository genreRepository;
 
     @AfterEach
     void clearSecurityContext() {
@@ -163,6 +168,25 @@ class GenreAdminApiIntegrationTests {
         perform(json(post(GENRES), "{\"name\": "), admin)
                 .andExpect(status().isBadRequest())
                 .andExpect(apiError(400, "MALFORMED_REQUEST", "Request body is missing or malformed", null));
+    }
+
+    @Test
+    void aGenreIdThatIsNotInCanonicalFormIsAValidationErrorEvenWhenItWouldNameAGenre() throws Exception {
+        // UUID.fromString reads each of these forms as the id of this genre.
+        UUID genreId = UUID.fromString("0000000a-000b-000c-000d-00000000000e");
+        genreRepository.saveAndFlush(new Genre(genreId, "Kinh Dị", "kinh-di"));
+        String admin = bearerToken("ROLE_ADMIN");
+
+        for (String nonCanonical : List.of("a-b-c-d-e", "+a-b-c-d-e", "0000000a-000b-000c-000d-0000000000e")) {
+            perform(json(put(GENRES + "/" + nonCanonical), "{\"name\": \"Hài\"}"), admin)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(validationError("genreId", "must be a valid UUID"));
+        }
+        perform(json(put(GENRES + "/0000000A-000B-000C-000D-00000000000E"), "{\"name\": \"Hài\"}"), admin)
+                .andExpect(status().isOk())
+                .andExpect(content().json("""
+                        {"id": "%s", "name": "Hài", "slug": "hai"}
+                        """.formatted(genreId), JsonCompareMode.STRICT));
     }
 
     @Test
