@@ -96,7 +96,7 @@ jobs:
       - name: Build compose application images
         run: docker compose -f deploy/docker-compose.yml build backend worker frontend
 
-      - name: Verify auth against PostgreSQL and Nginx
+      - name: Verify auth and catalog against PostgreSQL and Nginx
         env:
           NGINX_HTTP_PORT: 127.0.0.1:18087
           JWT_SECRET: ci-audit-only-signing-key-not-for-production-0917
@@ -104,7 +104,7 @@ jobs:
         run: |
           cleanup() { docker compose --env-file /dev/null -f deploy/docker-compose.yml down --volumes; }
           trap cleanup EXIT
-          # Auth needs PostgreSQL and the edge, not the future media storage flow.
+          # Auth and catalog need PostgreSQL and the edge, not the future media storage flow.
           # Keep this fixture independent of the object-store lifecycle decision (#14).
           docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build postgres redis rabbitmq frontend
           docker compose --env-file /dev/null -f deploy/docker-compose.yml run --rm --no-deps flyway
@@ -117,6 +117,9 @@ jobs:
             echo "FAIL Newman Sprint 2 auth collection (response details withheld)"
             exit 1
           fi
+          # Same project after the auth checks: the catalog smoke needs an empty catalog, not an empty
+          # users table, and promotes its admin with the documented first-administrator SQL.
+          python3 deploy/tests/catalog-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087
 
   frontend-build:
     name: Frontend build

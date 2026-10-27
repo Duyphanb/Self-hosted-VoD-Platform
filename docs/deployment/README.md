@@ -55,6 +55,10 @@ SQL
 statement is idempotent. Roles are carried in the access token, so the new role
 applies after the next token refresh or sign-in.
 
+The catalog runtime smoke in CI (`deploy/tests/catalog-runtime-smoke.py`)
+promotes its administrator by running the `sh -c` command and the SQL of this
+block as written here, so keep the block's form when editing it.
+
 To remove the role, delete the `user_roles` row and revoke the user's active
 refresh tokens (`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = ...
 AND revoked_at IS NULL`). An access token already issued stays valid until it
