@@ -197,6 +197,12 @@ def main():
                                 [{"field": field, "message": message}]), f"{method} with NUL in {field} must be 400"
     for raw in (b"{", json.dumps(movie("smoke-nul", releaseYear=2019.5)).encode()):
         assert is_api_error(call(MOVIES, token=admin, raw=raw), 400, "MALFORMED_REQUEST")
+    # An enum ordinal is never read as a constant: status 1 or "1" would otherwise publish the movie.
+    for body in (movie("smoke-nul", status=1), movie("smoke-nul", status="1"), movie("smoke-nul", maturityRating=0),
+                 movie("smoke-nul", people=[{"name": "Smoke Ordinal", "role": "1"}])):
+        for method, path in (("POST", MOVIES), ("PUT", f"{MOVIES}/{published_id}")):
+            assert is_api_error(call(path, body, admin, method), 400, "MALFORMED_REQUEST"), \
+                f"{method} with an enum ordinal must be 400 MALFORMED_REQUEST"
     assert sql("SELECT count(*) FROM movies;") == "2"
     assert sql("SELECT count(*) FROM genres;") == "3" and sql("SELECT count(*) FROM people;") == "2"
     assert call(f"{MOVIES}/{published_id}", token=admin)[1] == published, "A rejected PUT changed the movie"

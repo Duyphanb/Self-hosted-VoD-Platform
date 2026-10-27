@@ -481,7 +481,17 @@ class MovieAdminApiIntegrationTests {
                 // releaseYear is an integer: a number with a fraction is rejected, never truncated.
                 Arguments.of("release year with a fraction", body(movie -> movie.put("releaseYear", 2019.5))),
                 Arguments.of("release year written as a decimal", body(movie -> movie.put("releaseYear", 2019.0))),
-                Arguments.of("release year that is a boolean", body(movie -> movie.put("releaseYear", true)))
+                Arguments.of("release year that is a boolean", body(movie -> movie.put("releaseYear", true))),
+                // An enum is read only from its constant name, never from an ordinal: 1 or "1" would
+                // otherwise be PUBLISHED and publish the movie.
+                Arguments.of("status as an ordinal number", body(movie -> movie.put("status", 1))),
+                Arguments.of("status as an ordinal string", body(movie -> movie.put("status", "1"))),
+                Arguments.of("maturity rating as an ordinal number", body(movie -> movie.put("maturityRating", 0))),
+                Arguments.of("maturity rating as an ordinal string", body(movie -> movie.put("maturityRating", "0"))),
+                Arguments.of("role as an ordinal number", body(movie -> movie.putArray("people")
+                        .add(JSON.createObjectNode().put("name", "Trúc Anh").put("role", 1)))),
+                Arguments.of("role as an ordinal string", body(movie -> movie.putArray("people")
+                        .add(credit("Trúc Anh", "1"))))
         );
     }
 
@@ -490,6 +500,8 @@ class MovieAdminApiIntegrationTests {
     void unreadableBodiesAreMalformedRequestsAndWriteNothing(String name, String body) throws Exception {
         persistPeopleGenresAndExistingMovie();
         String admin = bearerToken("ROLE_ADMIN");
+        long genres = genreRepository.count();
+        long people = personRepository.count();
 
         perform(json(post(MOVIES), body), admin)
                 .andExpect(status().isBadRequest())
@@ -500,7 +512,11 @@ class MovieAdminApiIntegrationTests {
 
         clearPersistenceContext();
         assertThat(movieRepository.count()).isEqualTo(1);
-        assertThat(movieRepository.findById(EXISTING_MOVIE).orElseThrow().getTitle()).isEqualTo("Existing Movie");
+        assertThat(genreRepository.count()).isEqualTo(genres);
+        assertThat(personRepository.count()).isEqualTo(people);
+        Movie existing = movieRepository.findById(EXISTING_MOVIE).orElseThrow();
+        assertThat(existing.getTitle()).isEqualTo("Existing Movie");
+        assertThat(existing.getStatus()).isEqualTo(MovieStatus.PUBLISHED);
     }
 
     @Test

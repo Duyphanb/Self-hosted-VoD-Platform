@@ -9,6 +9,12 @@ spring:
       # An integer field of a request body, such as releaseYear, rejects a number with a fraction
       # (400 MALFORMED_REQUEST) instead of silently truncating it.
       accept-float-as-int: false
+    datatype:
+      enum:
+        # An enum field of a request body, such as status, accepts only its constant names: a JSON
+        # number or a numeric string such as 1 or "1" is rejected (400 MALFORMED_REQUEST) instead of
+        # being read as an ordinal.
+        fail-on-numbers-for-enums: true
   jpa:
     # Lazy associations load inside service transactions only; no connection is held while a
     # response is rendered or streamed.
