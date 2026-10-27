@@ -11,7 +11,7 @@ export default defineConfig([
   globalIgnores(['dist/']),
   {
     // Application code, tests and TypeScript config files such as vite.config.ts.
-    files: ['**/*.{ts,tsx}'],
+    files: ['**/*.{ts,tsx,mts,cts}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
@@ -21,12 +21,33 @@ export default defineConfig([
     ],
     rules: {
       // Match TypeScript's noUnusedLocals: a property destructured beside a rest element omits it from the rest.
-      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }]
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
+      // The shared ApiClient (`useApiClient()`, or an API function's `client: ApiClient` parameter) lives
+      // as long as AuthProvider and is not query input. Putting it in a queryKey would hash its
+      // in-flight refresh state and split the cache mid-refresh; every other queryFn variable stays required.
+      '@tanstack/query/exhaustive-deps': [
+        'error',
+        { allowlist: { variables: ['apiClient'], types: ['ApiClient'] } }
+      ]
     }
   },
   {
-    // ES module config files (this file, PostCSS and Tailwind).
-    files: ['**/*.js'],
+    // JavaScript config files (this file, PostCSS and Tailwind).
+    files: ['**/*.{js,mjs,cjs}'],
     extends: [js.configs.recommended]
+  },
+  {
+    // tsc never checks JavaScript here (allowJs is false) while Vite would still bundle it.
+    files: ['src/**/*.{js,jsx,mjs,cjs}', '**/*.jsx'],
+    languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } },
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Program',
+          message: 'Write frontend application code in TypeScript (.ts or .tsx); tsc does not check JavaScript files.'
+        }
+      ]
+    }
   }
 ]);
