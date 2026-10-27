@@ -1,4 +1,5 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { LoadingState } from '../../components/StateViews';
 import { useAuth } from './AuthContext';
 
 const ADMIN_ROLE = 'ROLE_ADMIN';
@@ -11,22 +12,25 @@ export function AdminRoute() {
   return <AuthRouteGuard requireAdmin />;
 }
 
+/** Renders guest pages such as the landing page; a signed-in user goes to `signedInPath` instead. */
+export function GuestRoute({ signedInPath }: { signedInPath: string }) {
+  const { isAuthenticated, isInitializing } = useAuth();
+
+  if (isInitializing) {
+    return <LoadingState label="Checking authentication…" />;
+  }
+  if (isAuthenticated) {
+    return <Navigate replace to={signedInPath} />;
+  }
+  return <Outlet />;
+}
+
 function AuthRouteGuard({ requireAdmin }: { requireAdmin: boolean }) {
   const { isAuthenticated, isInitializing, user } = useAuth();
   const location = useLocation();
 
   if (isInitializing) {
-    return (
-      <div className="flex min-h-48 items-center justify-center" role="status">
-        <span className="inline-flex items-center gap-3 text-sm text-slate-300">
-          <span
-            aria-hidden="true"
-            className="h-4 w-4 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400"
-          />
-          Checking authentication…
-        </span>
-      </div>
-    );
+    return <LoadingState label="Checking authentication…" />;
   }
 
   if (!isAuthenticated) {
