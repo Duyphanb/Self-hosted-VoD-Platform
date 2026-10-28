@@ -3,6 +3,7 @@ import { AppLayout } from '../components/AppLayout';
 import { AdminRoute, GuestRoute, ProtectedRoute } from '../features/auth/RouteGuards';
 import { LoginPage } from '../features/auth/pages/LoginPage';
 import { RegisterPage } from '../features/auth/pages/RegisterPage';
+import { MovieDetailPage } from '../features/movies/pages/MovieDetailPage';
 import { MovieListPage } from '../features/movies/pages/MovieListPage';
 import { AccountPage, AdminPage, ForbiddenPage } from '../pages/AccessPages';
 import { HomePage } from '../pages/HomePage';
@@ -20,6 +21,7 @@ export function AppRoutes() {
         <Route path="forbidden" element={<ForbiddenPage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="movies" element={<MovieListPage />} />
+          <Route path="movies/:movieId" element={<MovieDetailPage />} />
           <Route path="account" element={<AccountPage />} />
         </Route>
         <Route element={<AdminRoute />}>

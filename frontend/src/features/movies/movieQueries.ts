@@ -1,6 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
+import { isCanonicalUuid } from '../../lib/uuid';
 import { useApiClient } from '../auth/AuthContext';
-import { listMovies, movieKeys, type MovieListQuery, type MoviePage } from './moviesApi';
+import { getMovie, listMovies, movieKeys, type MovieListQuery, type MoviePage } from './moviesApi';
+
+/** Route UUIDs are case-insensitive; requests and cache entries always use lower-case IDs. */
+export function useMovieDetail(movieId: string) {
+  const apiClient = useApiClient();
+  const canonicalId = movieId.toLowerCase();
+  return useQuery({
+    queryKey: movieKeys.detail(canonicalId),
+    queryFn: ({ signal }) => getMovie(apiClient, canonicalId, signal),
+    enabled: isCanonicalUuid(canonicalId)
+  });
+}
 
 /**
  * Published movie page. While another page of the same filters loads, the previous movies stay on
