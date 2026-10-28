@@ -348,6 +348,8 @@ Verified against merged implementation `b6ad022507108079d182b2d9941cdc1c0e38625e
 
 ### Issue 3.1: Backend Movie Entity and Repository
 
+**GitHub:** [#84](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/84), delivered by [PR #148](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/148)
+
 **Description:**  
 Create JPA entities for movies, genres, people, movie_genres, movie_credits. Implement repositories with pagination and basic queries. Do not expose entities directly; use DTOs.
 
@@ -363,6 +365,8 @@ Create JPA entities for movies, genres, people, movie_genres, movie_credits. Imp
 ---
 
 ### Issue 3.2: Backend Movie Service - CRUD Operations
+
+**GitHub:** [#85](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/85), delivered by [PR #149](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/149)
 
 **Description:**  
 Implement movie service with create, update, read, list (paginated), and archive operations. Validate required fields. Leave `search_vector` null; Issue 7.2 rebuilds and backfills it.
@@ -381,6 +385,8 @@ Implement movie service with create, update, read, list (paginated), and archive
 
 ### Issue 3.3: Backend Genre and People Management
 
+**GitHub:** [#86](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/86), delivered by [PR #150](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/150)
+
 **Description:**  
 Implement genre and people endpoints for admin (`/api/v1/admin/genres`, `/api/v1/admin/people`; no delete). Support adding genres and people to movies through movie_genres and movie_credits junction tables, using the matching rules in ADR-009.
 
@@ -397,6 +403,8 @@ Implement genre and people endpoints for admin (`/api/v1/admin/genres`, `/api/v1
 ---
 
 ### Issue 3.4: Backend Movie List and Detail APIs
+
+**GitHub:** [#87](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/87), delivered by [PR #152](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/152)
 
 **Description:**  
 Implement `GET /api/v1/movies` (paginated, authenticated users, `PUBLISHED` only for every role), `GET /api/v1/admin/movies` (any status, `ROLE_ADMIN`), and `GET /api/v1/movies/{id}` (detail with genres, credits, rating summary, video status). Apply the movie visibility rule in `SECURITY.md`.
@@ -415,6 +423,8 @@ Implement `GET /api/v1/movies` (paginated, authenticated users, `PUBLISHED` only
 
 ### Issue 3.5: Backend Admin Movie CRUD Endpoints
 
+**GitHub:** [#88](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/88), delivered by [PR #155](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/155)
+
 **Description:**  
 Implement admin-only movie CRUD endpoints per API-CONTRACT.yaml (Movies + Admin tags): `POST /api/v1/movies` (create), `PUT /api/v1/movies/{movieId}` (update), `DELETE /api/v1/movies/{movieId}` (archive). Require `ROLE_ADMIN`.
 
@@ -431,6 +441,8 @@ Implement admin-only movie CRUD endpoints per API-CONTRACT.yaml (Movies + Admin 
 ---
 
 ### Issue 3.6: Frontend Movie List Page
+
+**GitHub:** [#89](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/89), delivered by [PR #157](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/157)
 
 **Description:**  
 Create movie list page with pagination. Display movie cards with title, poster placeholder, release year, genres. Handle loading, empty, and error states.
@@ -449,6 +461,8 @@ Create movie list page with pagination. Display movie cards with title, poster p
 
 ### Issue 3.7: Frontend Movie Detail Page
 
+**GitHub:** [#90](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/90), delivered by [PR #158](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/158)
+
 **Description:**  
 Create movie detail page showing title, description, release year, genres, cast, director, rating, video availability status. Display "Watch" button if video is ready.
 
@@ -465,6 +479,8 @@ Create movie detail page showing title, description, release year, genres, cast,
 ---
 
 ### Issue 3.8: Frontend Admin Movie CRUD UI
+
+**GitHub:** [#91](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/91), delivered by [PR #159](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/159)
 
 **Description:**  
 Create admin pages for movie listing, create, edit, archive, and restore. Include genre and people assignment. Forms validate required fields.
@@ -487,16 +503,18 @@ Create admin pages for movie listing, create, edit, archive, and restore. Includ
 
 ### Sprint 3 Definition of Done
 
-- [ ] Backend movie CRUD APIs work with pagination and DTOs
-- [ ] Genre and people management works for admin
-- [ ] Movie list and detail APIs return correct data with status filtering
-- [ ] Admin movie CRUD endpoints enforce `ROLE_ADMIN`
-- [ ] Frontend movie list page displays paginated movies
-- [ ] Frontend movie detail page shows full metadata and video status
-- [ ] Admin UI for movie CRUD is functional and protected
-- [ ] Unit and integration tests cover movie service and APIs
-- [ ] Postman collection includes movie endpoints
-- [ ] No JPA entities exposed in API responses
+- [x] Backend movie CRUD APIs work with pagination and DTOs
+- [x] Genre and people management works for admin
+- [x] Movie list and detail APIs return correct data with status filtering
+- [x] Admin movie CRUD endpoints enforce `ROLE_ADMIN`
+- [x] Frontend movie list page displays paginated movies
+- [x] Frontend movie detail page shows full metadata and video status
+- [x] Admin UI for movie CRUD is functional and protected
+- [x] Unit and integration tests cover movie service and APIs
+- [x] Postman collection includes movie endpoints
+- [x] No JPA entities exposed in API responses
+
+Verified against `main` at `7e9668e` on 2026-10-28; see the [Sprint 3 closeout evidence](../testing/SPRINT-3-CLOSEOUT.md) for the mapping of each item to its issue, tests, Newman requests, the manual UI pass and the limits. Upload, encoding and playback are out of scope; [#14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14) blocks Sprint 4.
 
 ---
 

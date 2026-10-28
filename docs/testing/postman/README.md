@@ -1,4 +1,4 @@
-# Sprint 2 Auth Postman Collection
+# Postman Collections
 
 This folder contains the executable Sprint 2 authentication subset:
 
@@ -52,6 +52,23 @@ npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-2-auth.postm
 Newman exits nonzero when a request, assertion, or script fails. `--silent` prevents failed assertions from printing token-bearing response values. The command does not write runtime tokens back to the committed environment file unless an explicit export option is added.
 
 CI runs this collection after the PostgreSQL auth regression script against a unique, disposable Compose project and removes its volumes on exit. It starts only the Auth dependencies and Nginx/frontend; it does not verify object storage or the media pipeline. The object-store image availability and maintenance decision remains tracked in Issue #14.
+
+## Sprint 3 Catalog Collection
+
+`vod-platform-sprint-3-catalog.postman_collection.json` (**VoD Platform - Sprint 3 Catalog**) checks the catalog through Nginx in 31 numbered requests:
+
+- administrator CRUD for genres (including a duplicate `409 GENRE_CONFLICT`), people (create and search) and movies;
+- visibility: a draft, an archived and a restored draft movie return `404 MOVIE_NOT_FOUND` to a regular user, while the administrator still reads them;
+- `403` for a regular user on admin genres, people, movies and movie creation, and `401` without a token;
+- the public list: Vietnamese title order (Ánh Sáng < Avatar < Đất Rừng Phương Nam < Zootopia, which needs the ICU collation of ADR-009), page metadata, `size=1` paging and an empty page beyond the end, and the archived movie dropping out.
+
+It needs an administrator. Register an account and grant `ROLE_ADMIN` with the SQL in [docs/deployment/README.md](../../deployment/README.md#first-administrator), or run `deploy/tests/newman-catalog-admin.py`, which does both against a disposable Compose project, using `NEWMAN_ADMIN_EMAIL` and `NEWMAN_ADMIN_PASSWORD`. Then pass the credentials at run time instead of saving them in the environment file:
+
+```bash
+npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-3-catalog.postman_collection.json   -e docs/testing/postman/vod-platform-local.postman_environment.json   --env-var baseUrl=http://127.0.0.1:18087   --env-var "adminEmail=$NEWMAN_ADMIN_EMAIL" --env-var "adminPassword=$NEWMAN_ADMIN_PASSWORD" --silent
+```
+
+Every run creates its own genre, person and movies with a unique suffix, so it tolerates existing catalog data. Use a fresh admin email per run: the helper accepts an existing account but cannot change its password.
 
 ## Test Data and Secret Safety
 

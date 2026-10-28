@@ -120,6 +120,18 @@ jobs:
           # Same project after the auth checks: the catalog smoke needs an empty catalog, not an empty
           # users table, and promotes its admin with the documented first-administrator SQL.
           python3 deploy/tests/catalog-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087
+          # The catalog collection signs in as an administrator promoted with the documented SQL.
+          # The password is generated for this run only and never printed.
+          NEWMAN_ADMIN_EMAIL="newman-admin-${GITHUB_RUN_ID}@example.com"
+          NEWMAN_ADMIN_PASSWORD="$(python3 -c 'import secrets; print("Newman-" + secrets.token_urlsafe(18))')"
+          export NEWMAN_ADMIN_EMAIL NEWMAN_ADMIN_PASSWORD
+          python3 deploy/tests/newman-catalog-admin.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087
+          if npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-3-catalog.postman_collection.json -e docs/testing/postman/vod-platform-local.postman_environment.json --env-var baseUrl=http://127.0.0.1:18087 --env-var "adminEmail=$NEWMAN_ADMIN_EMAIL" --env-var "adminPassword=$NEWMAN_ADMIN_PASSWORD" --silent; then
+            echo "PASS Newman Sprint 3 catalog collection"
+          else
+            echo "FAIL Newman Sprint 3 catalog collection (response details withheld)"
+            exit 1
+          fi
 
   frontend-build:
     name: Frontend build
