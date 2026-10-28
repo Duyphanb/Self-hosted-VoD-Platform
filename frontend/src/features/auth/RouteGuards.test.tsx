@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { type PropsWithChildren, type ReactNode, useState } from 'react';
 import {
   MemoryRouter,
@@ -10,8 +10,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthResponse, UserProfile } from '../../lib/api/types';
 import { AuthProvider } from './AuthContext';
-import { AdminRoute, ProtectedRoute } from './RouteGuards';
-import { createAuthSession, writeAuthSession } from './authStorage';
+import { AdminRoute, GuestRoute, ProtectedRoute } from './RouteGuards';
+import { AUTH_SESSION_STORAGE_KEY, createAuthSession, writeAuthSession } from './authStorage';
 
 const regularUser: UserProfile = {
   id: '3fcf25c2-f096-4462-ae63-4ba4702a9078',
@@ -91,7 +91,95 @@ describe('route guards', () => {
     expect(await screen.findByTestId('login-destination')).toHaveTextContent('/admin');
     expect(screen.queryByText('Admin content')).not.toBeInTheDocument();
   });
+
+  it('keeps protected page state for the same user and remounts the page for a different user', async () => {
+    persistSession(authResponse);
+    renderGuardRoutes('/counter', <ProtectedRoute />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Count 0' }));
+    expect(screen.getByRole('button', { name: 'Count 1' })).toBeInTheDocument();
+
+    // Another tab rotates the tokens of the same user.
+    switchStoredSession({ ...authResponse, accessToken: 'rotated-access', refreshToken: 'rotated-refresh' });
+    expect(screen.getByRole('button', { name: 'Count 1' })).toBeInTheDocument();
+
+    // Another tab signs in as someone else.
+    switchStoredSession({
+      ...authResponse,
+      user: { ...regularUser, id: 'b5f7c0f4-1d2e-4c3b-9a8f-7e6d5c4b3a21', email: 'other@example.com' },
+      accessToken: 'other-access',
+      refreshToken: 'other-refresh'
+    });
+    expect(await screen.findByRole('button', { name: 'Count 0' })).toBeInTheDocument();
+  });
 });
+
+describe('GuestRoute', () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('renders guest content for an anonymous visitor', async () => {
+    renderGuestRoutes();
+
+    expect(await screen.findByText('Landing content')).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends a signed-in user to the signed-in path', async () => {
+    persistSession(authResponse);
+    renderGuestRoutes();
+
+    expect(await screen.findByText('Signed-in destination')).toBeInTheDocument();
+    expect(screen.queryByText('Landing content')).not.toBeInTheDocument();
+  });
+
+  it('renders nothing but a status until auth initialization finishes', async () => {
+    persistSession(authResponse, Date.now() + 1_000);
+    fetchMock.mockReturnValue(new Promise<Response>(() => undefined));
+    renderGuestRoutes();
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Checking authentication…');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Landing content')).not.toBeInTheDocument();
+    expect(screen.queryByText('Signed-in destination')).not.toBeInTheDocument();
+  });
+});
+
+function renderGuestRoutes() {
+  return render(
+    <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }} initialEntries={['/']}>
+      <TestProviders>
+        <Routes>
+          <Route element={<GuestRoute signedInPath="/movies" />}>
+            <Route index element={<div>Landing content</div>} />
+          </Route>
+          <Route path="/movies" element={<div>Signed-in destination</div>} />
+        </Routes>
+      </TestProviders>
+    </MemoryRouter>
+  );
+}
+
+function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)} type="button">Count {count}</button>;
+}
+
+function switchStoredSession(response: AuthResponse) {
+  act(() => {
+    persistSession(response);
+    window.dispatchEvent(new StorageEvent('storage', { key: AUTH_SESSION_STORAGE_KEY }));
+  });
+}
 
 function renderGuardRoutes(initialEntry: string, guard: ReactNode) {
   return render(
@@ -104,6 +192,7 @@ function renderGuardRoutes(initialEntry: string, guard: ReactNode) {
           <Route element={guard}>
             <Route path="/account" element={<div>Protected content</div>} />
             <Route path="/admin" element={<div>Admin content</div>} />
+            <Route path="/counter" element={<Counter />} />
           </Route>
           <Route path="/login" element={<LoginDestination />} />
           <Route path="/forbidden" element={<div>Forbidden destination</div>} />

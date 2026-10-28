@@ -1,3 +1,7 @@
+import { Link } from 'react-router-dom';
+import { primaryButtonClass, secondaryButtonClass } from '../components/buttonStyles';
+
+/** Landing page for visitors who are not signed in; GuestRoute sends a signed-in user to /movies. */
 export function HomePage() {
   return (
     <section className="grid gap-6">
@@ -6,17 +10,12 @@ export function HomePage() {
           Your self-hosted video library
         </h1>
         <p className="mt-4 text-base leading-7 text-slate-300">
-          Account registration, sign-in, and shared authentication state are ready.
-          Protected library, playback, and administration screens arrive in later sprint issues.
+          Sign in to browse the movie library. New here? Register for an account first.
         </p>
       </div>
-      <div className="grid gap-3 rounded border border-slate-800 bg-slate-900 p-5 text-sm text-slate-300">
-        <div className="font-medium text-slate-100">Current auth scope</div>
-        <ul className="grid gap-2">
-          <li>Create an account with your email and display name.</li>
-          <li>Sign in securely and return to your intended app route.</li>
-          <li>Authentication errors stay explicit without exposing credentials.</li>
-        </ul>
+      <div className="flex flex-wrap gap-3">
+        <Link className={primaryButtonClass} to="/login">Sign in</Link>
+        <Link className={secondaryButtonClass} to="/register">Register</Link>
       </div>
     </section>
   );

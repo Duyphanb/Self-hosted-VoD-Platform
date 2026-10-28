@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthResponse, UserProfile } from '../lib/api/types';
@@ -46,6 +46,48 @@ describe('AppRoutes guard wiring', () => {
     renderRoutes('/admin');
 
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
+  });
+
+  it('sends a signed-in user from the landing page to the movie list', async () => {
+    persistUser(regularUser);
+    fetchMock.mockResolvedValue(jsonResponse({
+      items: [],
+      page: { page: 0, size: 20, totalElements: 0, totalPages: 0 }
+    }));
+    renderRoutes('/');
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Movies' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Your self-hosted video library' }))
+      .not.toBeInTheDocument();
+  });
+
+  it('keeps an anonymous visitor on the landing page with sign-in and register links', async () => {
+    renderRoutes('/');
+
+    expect(await screen.findByRole('heading', { name: 'Your self-hosted video library' }))
+      .toBeInTheDocument();
+    const main = screen.getByRole('main');
+    expect(main).toHaveTextContent('Sign in to browse the movie library.');
+    expect(main).not.toHaveTextContent(/later sprint/i);
+    expect(within(main).getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
+    expect(within(main).getByRole('link', { name: 'Register' })).toHaveAttribute('href', '/register');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends a guest from /movies to the login page without calling the API', async () => {
+    renderRoutes('/movies?genre=Drama');
+
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('renders a not-found page with navigation for an unknown route', async () => {
+    renderRoutes('/no-such-page');
+
+    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Return home' })).toHaveAttribute('href', '/');
   });
 
   it('redirects to login after logout from a protected route', async () => {

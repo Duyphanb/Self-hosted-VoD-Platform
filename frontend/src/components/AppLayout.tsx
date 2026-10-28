@@ -39,19 +39,20 @@ export function AppLayout() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-950/95">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link className="text-base font-semibold tracking-normal text-white" to="/">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-6 py-4">
+          <Link className="whitespace-nowrap text-base font-semibold tracking-normal text-white" to="/">
             VoD Platform
           </Link>
           <nav
             aria-busy={isInitializing}
             aria-label="Primary navigation"
-            className="flex min-h-5 items-center gap-4 text-sm"
+            className="flex min-h-5 items-center gap-4 whitespace-nowrap text-sm"
           >
             {!isInitializing && (isAuthenticated || isLoggingOut) ? (
               <>
                 {isAuthenticated ? (
                   <>
+                    <NavLink className={navLinkClass} to="/movies">Movies</NavLink>
                     <NavLink className={navLinkClass} to="/account">Account</NavLink>
                     {isAdmin ? <NavLink className={navLinkClass} to="/admin">Admin</NavLink> : null}
                   </>

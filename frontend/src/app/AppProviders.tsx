@@ -1,16 +1,10 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { type PropsWithChildren, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider } from '../features/auth/AuthContext';
+import { createQueryClient } from './queryClient';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false
-    }
-  }
-});
+const queryClient = createQueryClient();
 
 export function AppProviders({ children }: PropsWithChildren) {
   const location = useLocation();

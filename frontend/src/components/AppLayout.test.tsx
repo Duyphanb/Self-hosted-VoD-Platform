@@ -32,6 +32,7 @@ describe('AppLayout auth navigation', () => {
 
     expect(await screen.findByRole('link', { name: 'Sign in' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Register' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Movies' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Account' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
@@ -42,6 +43,7 @@ describe('AppLayout auth navigation', () => {
     renderLayout();
 
     expect(await screen.findByRole('link', { name: 'Account' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Movies' })).toHaveAttribute('href', '/movies');
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeEnabled();
@@ -51,7 +53,9 @@ describe('AppLayout auth navigation', () => {
     persistUser({ ...regularUser, roles: ['ROLE_USER', 'ROLE_ADMIN'] });
     renderLayout();
 
+    // /admin until #91 adds /admin/movies and redirects /admin there.
     expect(await screen.findByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(screen.getByRole('link', { name: 'Movies' })).toHaveAttribute('href', '/movies');
   });
 
   it('sends the refresh token once and keeps a stable disabled control while logout is pending', async () => {

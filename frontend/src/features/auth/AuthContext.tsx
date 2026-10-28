@@ -35,6 +35,7 @@ import {
   readAuthSession,
   writeAuthSession
 } from './authStorage';
+import { useSupersededQueryRecovery } from './supersededQueryRecovery';
 
 const REFRESH_WINDOW_MILLISECONDS = 30_000;
 const AUTH_SESSION_LOCK_NAME = 'vod.auth.session.v1';
@@ -110,6 +111,10 @@ export function AuthProvider({
     refreshAccessToken: () => refreshAccessTokenRef.current(),
     onAuthenticationFailure: (failure) => authenticationFailureRef.current(failure)
   }));
+
+  // Queries cancelled by a session change run again once the new session is in place.
+  const readCurrentSession = useCallback(() => sessionRef.current, []);
+  useSupersededQueryRecovery(queryClient, session, readCurrentSession);
 
   const commitSession = useCallback((nextSession: AuthSession, expectedGeneration: number) => {
     if (readAuthGeneration(storage) !== expectedGeneration) {
