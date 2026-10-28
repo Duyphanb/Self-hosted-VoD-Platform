@@ -1,9 +1,19 @@
 import type { ApiClient } from '../../lib/api/client';
 import type { PageMeta } from '../../lib/api/types';
+import { isCanonicalUuid } from '../../lib/uuid';
 
-export type MovieStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
-export type VideoAssetStatus = 'UPLOADED' | 'QUEUED' | 'PROCESSING' | 'READY' | 'FAILED';
+export const MOVIE_STATUSES = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
+export const VIDEO_ASSET_STATUSES = ['UPLOADED', 'QUEUED', 'PROCESSING', 'READY', 'FAILED'] as const;
+export type MovieStatus = typeof MOVIE_STATUSES[number];
+export type VideoAssetStatus = typeof VIDEO_ASSET_STATUSES[number];
 export type MovieSort = 'latest' | 'title';
+
+/**
+ * Decoded in place of an enum value this client does not know, such as a status added to the API
+ * later. It is part of the response types, so a switch or `Record` over a status must handle it.
+ */
+export const UNKNOWN_ENUM_VALUE = 'UNKNOWN';
+export type UnknownEnumValue = typeof UNKNOWN_ENUM_VALUE;
 
 export const MOVIE_SORTS: readonly MovieSort[] = ['latest', 'title'];
 
@@ -11,6 +21,7 @@ export const MOVIE_SORTS: readonly MovieSort[] = ['latest', 'title'];
 export const MOVIE_PAGE_SIZE = 20;
 
 export interface MovieSummary {
+  /** Canonical lower-case UUID; the decoder rejects anything else, so it is safe in a route path. */
   id: string;
   title: string;
   slug: string;
@@ -20,8 +31,9 @@ export interface MovieSummary {
   posterUrl: string | null;
   genres: string[];
   averageRating: number | null;
-  status: MovieStatus;
-  videoStatus: VideoAssetStatus | null;
+  status: MovieStatus | UnknownEnumValue;
+  /** Null while the movie has no video asset, which is always the case until upload exists. */
+  videoStatus: VideoAssetStatus | UnknownEnumValue | null;
 }
 
 export interface MoviePage {
@@ -102,10 +114,10 @@ function decodePageMeta(value: unknown): PageMeta | null {
   };
 }
 
-// Checks shapes only. Enum values are not checked, so views must handle an unknown status.
+// Checks the shape of every contract field. An unknown status string decodes to UNKNOWN_ENUM_VALUE.
 function decodeMovieSummary(value: unknown): MovieSummary | null {
   if (!isRecord(value)
-    || typeof value.id !== 'string'
+    || !isCanonicalUuid(value.id)
     || typeof value.title !== 'string'
     || typeof value.slug !== 'string'
     || typeof value.description !== 'string'
@@ -127,9 +139,13 @@ function decodeMovieSummary(value: unknown): MovieSummary | null {
     posterUrl: value.posterUrl,
     genres: [...value.genres] as string[],
     averageRating: value.averageRating,
-    status: value.status as MovieStatus,
-    videoStatus: value.videoStatus as VideoAssetStatus | null
+    status: knownOrUnknown(MOVIE_STATUSES, value.status),
+    videoStatus: value.videoStatus === null ? null : knownOrUnknown(VIDEO_ASSET_STATUSES, value.videoStatus)
   };
+}
+
+function knownOrUnknown<T extends string>(known: readonly T[], value: string): T | UnknownEnumValue {
+  return known.find((candidate) => candidate === value) ?? UNKNOWN_ENUM_VALUE;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
