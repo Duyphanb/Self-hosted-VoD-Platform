@@ -2,10 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import contract from '../../../../docs/architecture/API-CONTRACT.yaml?raw';
 import { ApiClient, type AuthenticationSnapshot } from '../../lib/api/client';
 import {
+  getMovie,
   InvalidMovieResponseError,
   listMovies,
+  type MovieCredit,
+  type MovieDetail,
   movieKeys,
   type MovieSummary,
+  type PlaybackProgress,
   UNKNOWN_ENUM_VALUE
 } from './moviesApi';
 
@@ -123,13 +127,175 @@ describe('listMovies', () => {
   });
 });
 
+const detail: MovieDetail = {
+  ...movie,
+  maturityRating: 'T16',
+  people: [
+    { personId: '0b8f3a52-6a3e-4d0c-9a4b-3f2e1d0c9b8a', name: 'Trần Anh Hùng', role: 'DIRECTOR' },
+    { personId: '1c9e4b63-7b4f-4e1d-8b5c-4a3f2e1d0c9b', name: 'Đỗ Thị Hải Yến', role: 'ACTOR' }
+  ],
+  userRating: 4,
+  inWatchlist: true,
+  playbackProgress: {
+    movieId: movie.id,
+    currentSeconds: 754,
+    durationSeconds: 5400,
+    finished: false,
+    lastPlayedAt: '2026-10-27T09:15:00Z'
+  }
+};
+
+describe('getMovie', () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('sends an authenticated GET for the movie and decodes every field', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(detail));
+
+    const result = await getMovie(apiClient(), movie.id);
+
+    const [input, init] = fetchMock.mock.calls[0];
+    expect(new URL(String(input), 'http://localhost').pathname).toBe(`/api/v1/movies/${movie.id}`);
+    expect(init?.method ?? 'GET').toBe('GET');
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer access-token');
+    expect(result).toEqual(detail);
+  });
+
+  it('reads an omitted or null playbackProgress, and omitted progress fields, as absent', async () => {
+    const { playbackProgress: _omitted, ...withoutProgress } = detail;
+    fetchMock.mockResolvedValueOnce(jsonResponse(withoutProgress));
+    expect((await getMovie(apiClient(), movie.id)).playbackProgress).toBeNull();
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ...detail, playbackProgress: null }));
+    expect((await getMovie(apiClient(), movie.id)).playbackProgress).toBeNull();
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...detail,
+      playbackProgress: { movieId: movie.id, currentSeconds: 0, finished: true }
+    }));
+    expect((await getMovie(apiClient(), movie.id)).playbackProgress).toEqual({
+      movieId: movie.id,
+      currentSeconds: 0,
+      durationSeconds: null,
+      finished: true,
+      lastPlayedAt: null
+    });
+  });
+
+  it('accepts the nullable detail fields as null', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ...detail, maturityRating: null, userRating: null, people: [] }));
+
+    const result = await getMovie(apiClient(), movie.id);
+
+    expect(result).toMatchObject({ maturityRating: null, userRating: null, people: [] });
+  });
+
+  it('decodes unknown maturity ratings and credit roles to the UNKNOWN sentinel', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      ...detail,
+      maturityRating: 'C',
+      people: [{ ...detail.people[0], role: 'WRITER' }, detail.people[1]]
+    }));
+
+    const result = await getMovie(apiClient(), movie.id);
+
+    expect(result.maturityRating).toBe(UNKNOWN_ENUM_VALUE);
+    expect(result.people.map((credit) => credit.role)).toEqual([UNKNOWN_ENUM_VALUE, 'ACTOR']);
+  });
+
+  it.each(rejectedDetails())('rejects a detail response with %s', async (_label, body) => {
+    fetchMock.mockResolvedValue(jsonResponse(body));
+
+    const request = getMovie(apiClient(), movie.id);
+
+    await expect(request).rejects.toBeInstanceOf(InvalidMovieResponseError);
+    await expect(request).rejects.toThrow('Server returned an invalid movie');
+  });
+
+  it('has a wrong-type value for every required field of the contract', () => {
+    expect(Object.keys(WRONG_DETAIL_VALUES).sort()).toEqual(contractAllOfRequired('MovieDetail').sort());
+    expect(Object.keys(WRONG_CREDIT_VALUES).sort()).toEqual(contractRequired('MovieCredit').sort());
+    expect(Object.keys(WRONG_PROGRESS_VALUES).sort()).toEqual(contractRequired('ProgressResponse').sort());
+  });
+});
+
 describe('movieKeys', () => {
-  it('nests every list key under the shared movies key', () => {
+  it('nests every list and detail key under the shared movies key', () => {
     const query = { page: 1, size: 20, genre: 'Drama', year: null, sort: 'latest' as const };
     expect(movieKeys.list(query)).toEqual(['movies', 'list', query]);
     expect(movieKeys.list(query).slice(0, 1)).toEqual(movieKeys.all);
+    expect(movieKeys.detail(movie.id)).toEqual(['movies', 'detail', movie.id]);
   });
 });
+
+// A value of the wrong type for each required field the detail adds to MovieSummary.
+const WRONG_DETAIL_VALUES: Partial<Record<keyof MovieDetail, unknown>> = {
+  maturityRating: 16,
+  people: 'cast',
+  userRating: '4',
+  inWatchlist: 'yes'
+};
+
+const WRONG_CREDIT_VALUES: Partial<Record<keyof MovieCredit, unknown>> = {
+  personId: 7,
+  name: null,
+  role: 1
+};
+
+const WRONG_PROGRESS_VALUES: Partial<Record<keyof PlaybackProgress, unknown>> = {
+  movieId: 'not-a-uuid',
+  currentSeconds: -1,
+  finished: 'no'
+};
+
+function rejectedDetails(): Array<[string, unknown]> {
+  const progress = detail.playbackProgress as PlaybackProgress;
+  const rows: Array<[string, unknown]> = [
+    ['a body that is not an object', [detail]],
+    ['a summary field of the wrong type', { ...detail, title: 1 }],
+    ['an upper-case id', { ...detail, id: movie.id.toUpperCase() }],
+    ['a rating below 1', { ...detail, userRating: 0 }],
+    ['a rating above 5', { ...detail, userRating: 6 }],
+    ['a fractional rating', { ...detail, userRating: 4.5 }],
+    ['a credit that is not an object', { ...detail, people: ['Trần Anh Hùng'] }],
+    ['a credit with a non-canonical personId', { ...detail, people: [{ ...detail.people[0], personId: '../admin' }] }],
+    ['progress that is not an object', { ...detail, playbackProgress: 754 }],
+    ['a fractional progress position', { ...detail, playbackProgress: { ...progress, currentSeconds: 1.5 } }],
+    ['a string progress duration', { ...detail, playbackProgress: { ...progress, durationSeconds: '5400' } }],
+    ['a numeric lastPlayedAt', { ...detail, playbackProgress: { ...progress, lastPlayedAt: 5 } }]
+  ];
+  for (const field of contractAllOfRequired('MovieDetail')) {
+    const { [field]: _omitted, ...withoutField } = detail as unknown as Record<string, unknown>;
+    rows.push([`MovieDetail.${field} missing`, withoutField]);
+    rows.push([`MovieDetail.${field} of the wrong type`, { ...detail, [field]: WRONG_DETAIL_VALUES[field as keyof MovieDetail] }]);
+  }
+  for (const field of contractRequired('MovieCredit')) {
+    const { [field]: _omitted, ...withoutField } = detail.people[0] as unknown as Record<string, unknown>;
+    rows.push([`MovieCredit.${field} missing`, { ...detail, people: [withoutField] }]);
+    rows.push([
+      `MovieCredit.${field} of the wrong type`,
+      { ...detail, people: [{ ...detail.people[0], [field]: WRONG_CREDIT_VALUES[field as keyof MovieCredit] }] }
+    ]);
+  }
+  for (const field of contractRequired('ProgressResponse')) {
+    const { [field]: _omitted, ...withoutField } = progress as unknown as Record<string, unknown>;
+    rows.push([`ProgressResponse.${field} missing`, { ...detail, playbackProgress: withoutField }]);
+    rows.push([
+      `ProgressResponse.${field} of the wrong type`,
+      { ...detail, playbackProgress: { ...progress, [field]: WRONG_PROGRESS_VALUES[field as keyof PlaybackProgress] } }
+    ]);
+  }
+  return rows;
+}
 
 // A value of the wrong type for each required MovieSummary field of API-CONTRACT.yaml.
 const WRONG_SUMMARY_VALUES: Record<keyof MovieSummary, unknown> = {
@@ -181,6 +347,16 @@ function contractRequired(schema: string): string[] {
   const match = pattern.exec(contract.replace(/\r\n/g, '\n'));
   if (!match) {
     throw new Error(`${schema} has no required list in API-CONTRACT.yaml`);
+  }
+  return match[1].split(',').map((field) => field.trim());
+}
+
+/** The `required` list of the object part of an `allOf` schema in the frozen contract. */
+function contractAllOfRequired(schema: string): string[] {
+  const pattern = new RegExp(String.raw`\n {4}${schema}:\n {6}allOf:\n[\s\S]*?\n {10}required: \[([^\]]*)\]`);
+  const match = pattern.exec(contract.replace(/\r\n/g, '\n'));
+  if (!match) {
+    throw new Error(`${schema} has no allOf required list in API-CONTRACT.yaml`);
   }
   return match[1].split(',').map((field) => field.trim());
 }
