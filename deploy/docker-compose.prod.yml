@@ -11,6 +11,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Set a non-default production MinIO secret key}
       JWT_SECRET: ${JWT_SECRET:?Set a non-default production JWT signing secret}
       NGINX_HTTP_PORT: ${NGINX_HTTP_PORT:?Set NGINX_HTTP_PORT=80 to publish the production edge}
+      MINIO_BROWSER: "off"
     volumes:
       - ./tests/production-config-check.sh:/checks/production-config-check.sh:ro
     network_mode: none
@@ -61,6 +62,7 @@ services:
 
   minio:
     environment:
+      MINIO_BROWSER: "off"
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set a non-default production MinIO access key}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set a non-default production MinIO secret key}
     depends_on:

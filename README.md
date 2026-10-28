@@ -8,7 +8,7 @@ Current status: Phase 3 implementation. Sprint 1 (foundation) and Sprint 2 (auth
 
 - Java 21, Spring Boot 4.x, Maven multi-module
 - React 18, TypeScript, Vite, Tailwind CSS, TanStack Query
-- PostgreSQL, Redis, RabbitMQ, MinIO
+- PostgreSQL, Redis, RabbitMQ, PGSTY Silo (MinIO-compatible object storage)
 - FFmpeg, FFprobe, HLS, Nginx
 - Docker Compose for local development and the Oracle Cloud Free Tier VPS demo baseline
 
@@ -34,7 +34,7 @@ See `AGENTS.md` for repository rules and `docs/INDEX.md` for the source-of-truth
 
 Run all commands from the repository root.
 
-**Fresh-machine limitation (verified 2026-09-21):** the current `minio/minio:latest` reference returns a registry access error. A cached image can make an existing local stack work, but does not prove that a clean machine can start the full stack. Track the storage decision and recovery in [Issue #14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14); do not substitute an unreviewed image or delete existing volumes. The PostgreSQL-backed Auth CI fixture does not exercise MinIO or the media pipeline. This limitation does not reopen Sprint 2 or block Sprint 3 catalog development against the verified Auth/database baseline.
+Object storage uses digest-pinned PGSTY Silo for both server and initialization, with its admin console disabled. See the [ADR-004 addendum](docs/architecture/adr/ADR-004.md#runtime-addendum) and [backup/restore runbook](docs/deployment/README.md#object-storage-backup-and-restore). The full stack can pull storage on a clean machine; this does not implement the media pipeline.
 
 ### 1. Create the local environment file
 
@@ -62,20 +62,7 @@ Do not commit `.env`. Credentials stored in existing named volumes do not change
 docker compose --env-file .env -f deploy/docker-compose.yml up --build -d
 ```
 
-The first start builds the backend, worker, and frontend images; applies the Flyway migration; creates the three private MinIO buckets; and starts the long-lived services.
-
-#### Fresh machine: auth-only stack
-
-The full stack needs the MinIO images, which a clean machine currently cannot pull ([Issue #14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14)). Until #14 is resolved, start only the services that authentication and the catalog need, in the same order as the CI auth check:
-
-```bash
-docker compose --env-file .env -f deploy/docker-compose.yml build backend frontend
-docker compose --env-file .env -f deploy/docker-compose.yml up -d --wait postgres redis rabbitmq frontend
-docker compose --env-file .env -f deploy/docker-compose.yml run --rm --no-deps flyway
-docker compose --env-file .env -f deploy/docker-compose.yml up -d --wait --no-deps backend nginx
-```
-
-Upload, encoding and playback need MinIO and the worker, so they are not available in this mode.
+The first start builds the backend, worker, and frontend images; applies the Flyway migration; creates the three private Silo buckets; and starts the long-lived services.
 
 ### 3. Check service status
 
@@ -87,8 +74,6 @@ Expected result for the full stack:
 
 - `postgres`, `redis`, `rabbitmq`, `minio`, `backend`, `worker`, `frontend`, and `nginx` are running and healthy.
 - `flyway` and `minio-init` have exited successfully with status code 0.
-
-Expected result for the auth-only stack: `postgres`, `redis`, `rabbitmq`, `frontend`, `backend`, and `nginx` are running and healthy, and `flyway` has exited with status code 0. `minio`, `minio-init`, and `worker` are not started in this mode.
 
 ### 4. Verify the public routes
 
@@ -121,8 +106,7 @@ These service ports are available only inside the `vod_internal` Docker network:
 | PostgreSQL | 5432 |
 | Redis | 6379 |
 | RabbitMQ | 5672 |
-| MinIO S3 API | 9000 |
-| MinIO console | 9001 |
+| Silo S3 API (`minio`) | 9000 |
 | Backend | 8080 |
 | Worker | 8081 |
 | Frontend | 80 |
@@ -175,4 +159,4 @@ The last command is destructive and cannot recover data from the deleted Docker 
 
 The current worker is a runtime skeleton. A healthy local stack does not yet prove the complete upload -> RabbitMQ -> transcode -> HLS playback flow. That flow is implemented and verified in later sprint issues.
 
-The production Compose overlay is a baseline for the later VPS deployment phase. HTTPS certificate provisioning, backups, rollback, and public deployment remain deferred to Phase 5.
+The production Compose overlay is a baseline for the later VPS deployment phase. Object-storage backup/restore and digest rollback are documented; HTTPS provisioning and public deployment remain deferred to Phase 5.

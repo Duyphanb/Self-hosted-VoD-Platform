@@ -104,6 +104,8 @@ Deferred safeguards:
 
 MinIO buckets are private by default.
 
+PGSTY Silo currently implements this MinIO-compatible contract ([ADR-004 addendum](adr/ADR-004.md#runtime-addendum)). Server and init use the same immutable image digest, with source-bound signed provenance and architecture SBOM verification in CI. `MINIO_BROWSER: "off"` disables the admin console in both local and production Compose; storage publishes no ports. Storage root credentials are still shared by backend/worker pending least-privilege accounts in Issue 4.1; running the image as non-root remains #54.
+
 - `vod-raw` contains original uploads and is never public.
 - `vod-hls` contains generated HLS artifacts and is read only by backend HLS proxy.
 - `vod-thumbnails` is reserved for the deferred thumbnail feature.

@@ -19,7 +19,7 @@ Nginx is the only public edge in both local Compose and VPS runtime.
 | `postgres` | PostgreSQL | Source-of-truth database | Internal only |
 | `redis` | Redis | Cache and playback-progress buffer | Internal only |
 | `rabbitmq` | RabbitMQ | Encoding job queue | Internal only |
-| `minio` | MinIO | Private object storage | Internal only |
+| `minio` | PGSTY Silo (MinIO-compatible, digest pinned) | Private object storage | Internal only; console disabled |
 
 ## Public Routing
 
@@ -59,8 +59,7 @@ Application configuration must use service names instead of hardcoded IP address
 | Redis | 6379 | none | none |
 | RabbitMQ | 5672 | none | none |
 | RabbitMQ management | 15672 | none by default | none |
-| MinIO API | 9000 | none | none |
-| MinIO console | 9001 | none by default | none |
+| Silo S3 API (`minio`) | 9000 | none | none |
 
 Development-only direct port exposure may be added in a local override file, not in the MVP base Compose file.
 
@@ -75,6 +74,8 @@ Required named volumes:
 Redis persistence is not required for MVP because Redis is a cache/progress buffer. Durable playback progress belongs in PostgreSQL.
 
 ## MinIO Buckets
+
+PGSTY Silo provides this contract under the existing `minio` service name; see the [ADR-004 addendum](adr/ADR-004.md#runtime-addendum). Server and initialization share one verified digest. `MINIO_BROWSER: "off"` disables the console in local and production stacks; no storage port is published. The curl `/minio/health/live` probe and all backend/worker `MINIO_*` settings remain unchanged. [Backup/restore and a temporary local console](../deployment/README.md#object-storage-backup-and-restore) are documented separately.
 
 | Bucket | Purpose | Access |
 |---|---|---|

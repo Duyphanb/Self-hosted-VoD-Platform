@@ -75,6 +75,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify storage supply chain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 deploy/tests/storage-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --verify-only
+
       - name: Verify production configuration fails closed
         run: sh deploy/tests/production-config-smoke.sh
 
@@ -98,17 +103,17 @@ jobs:
 
       - name: Verify auth and catalog against PostgreSQL and Nginx
         env:
+          GH_TOKEN: ${{ github.token }}
           NGINX_HTTP_PORT: 127.0.0.1:18087
-          JWT_SECRET: ci-audit-only-signing-key-not-for-production-0917
           CORS_ALLOWED_ORIGINS: http://localhost:18087
         run: |
-          cleanup() { docker compose --env-file /dev/null -f deploy/docker-compose.yml down --volumes; }
+          cleanup() { docker compose --env-file /dev/null -f deploy/docker-compose.yml down --volumes --remove-orphans; }
           trap cleanup EXIT
-          # Auth and catalog need PostgreSQL and the edge, not the future media storage flow.
-          # Keep this fixture independent of the object-store lifecycle decision (#14).
-          docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build postgres redis rabbitmq frontend
-          docker compose --env-file /dev/null -f deploy/docker-compose.yml run --rm --no-deps flyway
-          docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build --no-deps backend nginx
+          JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          export JWT_SECRET
+          python3 deploy/tests/storage-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME"
+          # Fresh full stack, including private storage/init and the dedicated worker.
+          docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build
           python3 deploy/tests/auth-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087
           # Assertion diagnostics can include response tokens. Keep only the exit status.
           if npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-2-auth.postman_collection.json -e docs/testing/postman/vod-platform-local.postman_environment.json --env-var baseUrl=http://127.0.0.1:18087 --silent; then
