@@ -95,7 +95,7 @@ Phase 3 - Feature Development is active.
 
 - This is a personal, open-ended project with no external deadline. Sprints run in `BACKLOG.md` order with the full MVP scope, and progress is measured by each sprint's Definition of Done, not by issue counts.
 
-- Sprint 1 - Foundation and Sprint 2 - Auth are complete.
+- Sprint 1 - Foundation, Sprint 2 - Auth and Sprint 3 - Movie CRUD are complete; Sprint 3 is verified in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md). Sprint 4 - Upload starts with the object-storage decision in Issue #14.
 - Sprint 2 acceptance criteria and DoD were independently verified on merged `main`; see [closeout evidence](../testing/SPRINT-2-CLOSEOUT.md). The fresh-machine full-stack MinIO limitation in Issue #14 remains separate from the verified Auth/catalog prerequisites.
 - Resolve open P0/P1 security or repository-governance gates that explicitly block the selected feature batch before starting that batch.
 - Pre-production support, architecture, and deployment gates may remain tracked while feature development continues on the approved baseline, but must be resolved before public deployment. Priority alone does not make an issue a feature-development blocker.
