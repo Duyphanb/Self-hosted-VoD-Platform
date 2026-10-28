@@ -306,8 +306,31 @@ describe('MovieListPage', () => {
 
       await waitFor(() => expect(currentLocation()).toBe('/movies'));
       expect(await screen.findByRole('heading', { level: 2, name: 'Movie 1' })).toBeInTheDocument();
-      expect(genre).toHaveValue('');
+      // The form is rebuilt by the clear, so the field is looked up again.
+      expect(screen.getByLabelText('Genre')).toHaveValue('');
       expect(apiQueries().map((query) => query.genre)).toEqual(['Western', undefined]);
+    });
+
+    it('drops a year typed but never applied when the empty result clears the filters', async () => {
+      serveMovies((query) => (query.genre ? moviePage([]) : moviePage([movieSummary(1)])));
+      renderMovieList(['/movies?genre=Western']);
+
+      const heading = await screen.findByRole('heading', { level: 2, name: 'No movies match these filters' });
+      fireEvent.change(screen.getByLabelText('Year'), { target: { value: '20x' } });
+      expect(screen.getByRole('alert')).toHaveTextContent('Enter a year from 1888 to 2100.');
+      fireEvent.change(screen.getByLabelText('Year'), { target: { value: '2000' } });
+      fireEvent.click(within(heading.parentElement as HTMLElement).getByRole('button', { name: 'Clear filters' }));
+
+      await waitFor(() => expect(currentLocation()).toBe('/movies'));
+      expect(screen.getByLabelText('Year')).toHaveValue('');
+      expect(screen.getByLabelText('Genre')).toHaveValue('');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      // A later sort change must not bring the discarded year back.
+      fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'title' } });
+      await waitFor(() => expect(currentLocation()).toBe('/movies?sort=title'));
+      await waitFor(() => expect(lastApiQuery()).toEqual({ page: '0', size: '20', sort: 'title' }));
+      expect(apiQueries().some((query) => query.year !== undefined)).toBe(false);
     });
 
     it('shows the loading state, not the previous result or pagination, while a filter change loads', async () => {

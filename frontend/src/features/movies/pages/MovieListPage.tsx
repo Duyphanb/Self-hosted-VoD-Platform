@@ -34,6 +34,8 @@ export function MovieListPage() {
   const { data, error, isError, isFetching, isPlaceholderData, refetch } = useMovieList(toMovieListQuery(params));
   const [notice, setNotice] = useState<FiltersRejectedNotice>(null);
   const [noticeLocationKey, setNoticeLocationKey] = useState(location.key);
+  // Changing the key remounts the filter form, dropping every typed value and error with it.
+  const [filtersFormKey, setFiltersFormKey] = useState(0);
 
   // Adjusting state during render (https://react.dev/learn/you-might-not-need-an-effect).
   if (location.key !== noticeLocationKey) {
@@ -72,9 +74,11 @@ export function MovieListPage() {
     focusListHeading();
   };
 
-  // The button disappears with the empty result, so focus moves to the list heading.
+  // Clears what the toolbar shows as well, including a value typed but never applied. The button
+  // disappears with the empty result, so focus moves to the list heading.
   const clearFiltersFromEmptyResult = () => {
     changeFilters({ genre: null, year: null, sort: params.sort });
+    setFiltersFormKey((key) => key + 1);
     focusListHeading();
   };
 
@@ -160,7 +164,7 @@ export function MovieListPage() {
           The server did not accept those filters, so they were cleared.
         </p>
       ) : null}
-      <MovieFilters filters={params} onFiltersChange={changeFilters} />
+      <MovieFilters filters={params} key={filtersFormKey} onFiltersChange={changeFilters} />
       {content}
     </section>
   );
