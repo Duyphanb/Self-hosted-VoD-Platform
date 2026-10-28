@@ -1,6 +1,7 @@
 package com.vodplatform.catalog.text;
 
 import com.vodplatform.shared.validation.ControlCharacters;
+import com.vodplatform.shared.validation.UnicodeWhitespace;
 
 /**
  * Catalog text rules from the API contract.
@@ -35,7 +36,7 @@ public final class TextNormalizer {
         if (ControlCharacters.containsControlCharacter(value)) {
             throw new InvalidTextException(InvalidTextException.Reason.CONTROL_CHARACTER);
         }
-        return requireNotBlank(collapseWhitespace(trim(value)));
+        return requireNotBlank(collapseWhitespace(UnicodeWhitespace.trim(value)));
     }
 
     /**
@@ -48,7 +49,7 @@ public final class TextNormalizer {
         if (ControlCharacters.containsControlCharacter(value)) {
             throw new InvalidTextException(InvalidTextException.Reason.CONTROL_CHARACTER);
         }
-        return requireNotBlank(trim(value));
+        return requireNotBlank(UnicodeWhitespace.trim(value));
     }
 
     /**
@@ -63,7 +64,7 @@ public final class TextNormalizer {
         if (ControlCharacters.containsControlCharacterOtherThanTabOrLineBreak(value)) {
             throw new InvalidTextException(InvalidTextException.Reason.CONTROL_CHARACTER);
         }
-        return requireNotBlank(trim(value));
+        return requireNotBlank(UnicodeWhitespace.trim(value));
     }
 
     private static String requireNotBlank(String value) {
@@ -73,24 +74,12 @@ public final class TextNormalizer {
         return value;
     }
 
-    private static String trim(String value) {
-        int start = 0;
-        int end = value.length();
-        while (start < end && isWhitespace(value.charAt(start))) {
-            start++;
-        }
-        while (end > start && isWhitespace(value.charAt(end - 1))) {
-            end--;
-        }
-        return value.substring(start, end);
-    }
-
     private static String collapseWhitespace(String value) {
         StringBuilder collapsed = new StringBuilder(value.length());
         boolean previousWasWhitespace = false;
         for (int index = 0; index < value.length(); index++) {
             char character = value.charAt(index);
-            if (isWhitespace(character)) {
+            if (UnicodeWhitespace.isWhitespace(character)) {
                 if (!previousWasWhitespace) {
                     collapsed.append(' ');
                 }
@@ -103,11 +92,4 @@ public final class TextNormalizer {
         return collapsed.toString();
     }
 
-    /**
-     * Unicode white space. Every white space character is in the BMP. Java's whitespace test
-     * excludes the no-break spaces, which {@link Character#isSpaceChar(char)} covers.
-     */
-    private static boolean isWhitespace(char character) {
-        return Character.isWhitespace(character) || Character.isSpaceChar(character);
-    }
 }

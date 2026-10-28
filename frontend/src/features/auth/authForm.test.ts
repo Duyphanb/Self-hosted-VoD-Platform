@@ -26,10 +26,18 @@ describe('auth form validation', () => {
     }
   });
 
-  it.each(['AB', 'A'.repeat(100), 'Tên  Việt', 'A\u200b\u202e\ufeffB'])('validates the trimmed wire value and preserves Cf: %j', (name) => {
+  it.each(['AB', 'A'.repeat(94), 'Tên  Việt', 'A\u200b\u202e\ufeffB'])('validates the trimmed wire value within the raw bound and preserves Cf: %j', (name) => {
     const displayName = `\u00a0\u2007 ${name} \u202f\u3000`;
     expect(validateRegistrationForm({ email: 'a@b.co', password: 'password', displayName })).toEqual({});
     expect(trimDisplayName(displayName)).toBe(name);
+  });
+
+  it.each(['😀', ' 😀 ', '😀'.repeat(101), ` ${'A'.repeat(100)} `, `${' '.repeat(10000)}AB`])('rejects code-point length violations: %j', (displayName) => {
+    expect(validateRegistrationForm({ email: 'a@b.co', password: 'password', displayName }).displayName).toBeTruthy();
+  });
+
+  it.each(['😀'.repeat(2), '😀'.repeat(51), '😀'.repeat(100), ` ${'😀'.repeat(98)} `, 'A'.repeat(100)])('accepts code-point boundaries: %j', (displayName) => {
+    expect(validateRegistrationForm({ email: 'a@b.co', password: 'password', displayName })).toEqual({});
   });
 
   it('matches the login request constraints', () => {

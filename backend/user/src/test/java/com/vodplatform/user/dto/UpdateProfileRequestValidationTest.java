@@ -20,8 +20,8 @@ class UpdateProfileRequestValidationTest {
     }
 
     @Test
-    void usesTrimmedBoundsAndPreservesFormatCharactersLikeCatalog() {
-        for (String name : new String[]{" AB ", "\u00a0" + "A".repeat(100) + "\u202f", "A\u200b\u202e\ufeffB", "Tên  Việt"}) {
+    void usesRawCodePointBoundsAndPreservesFormatCharactersLikeCatalog() {
+        for (String name : new String[]{" AB ", "\u00a0" + "A".repeat(98) + "\u202f", "😀".repeat(2), "😀".repeat(51), "😀".repeat(100), "A\u200b\u202e\ufeffB", "Tên  Việt"}) {
             assertThat(validator.validate(new UpdateProfileRequest(name))).isEmpty();
         }
         for (int codePoint = 0; codePoint <= 0x9f; codePoint++) {
@@ -29,6 +29,14 @@ class UpdateProfileRequestValidationTest {
                 assertThat(validator.validate(new UpdateProfileRequest("A" + (char) codePoint + "B")))
                         .as("Cc U+%04X", codePoint).isNotEmpty();
             }
+        }
+    }
+
+    @Test
+    void rejectsRawOverflowAndSingleCodePointAfterTrimming() {
+        for (String name : new String[]{"😀", " 😀 ", "😀".repeat(101), " " + "A".repeat(100) + " ", " ".repeat(10000) + "AB"}) {
+            assertThat(validator.validate(new UpdateProfileRequest(name)))
+                    .extracting(violation -> violation.getMessage()).containsExactly("size must be between 2 and 100");
         }
     }
 

@@ -55,12 +55,12 @@ export function trimDisplayName(value: string): string {
 }
 
 export function validateDisplayName(value: string): string | null {
+  if ([...value].length > DISPLAY_NAME_MAX_LENGTH) return `Display name must be ${DISPLAY_NAME_MAX_LENGTH} characters or fewer.`;
   // Inspect raw input so trimming cannot hide a control character at either end.
   if (/\p{Cc}/u.test(value)) return 'Display name must not contain control characters.';
-  const length = trimDisplayName(value).length;
+  const length = [...trimDisplayName(value)].length;
   if (length === 0) return 'Display name is required.';
   if (length < DISPLAY_NAME_MIN_LENGTH) return `Display name must be at least ${DISPLAY_NAME_MIN_LENGTH} characters.`;
-  if (length > DISPLAY_NAME_MAX_LENGTH) return `Display name must be ${DISPLAY_NAME_MAX_LENGTH} characters or fewer.`;
   return null;
 }
 

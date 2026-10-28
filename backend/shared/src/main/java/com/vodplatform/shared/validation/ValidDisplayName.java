@@ -7,12 +7,12 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-/** Shared registration/profile rule; length is measured after Unicode whitespace trimming. */
+/** Shared rule: at most 100 raw code points, no Cc, and at least 2 code points after trimming. */
 @Target({ElementType.FIELD, ElementType.PARAMETER, ElementType.RECORD_COMPONENT})
 @Retention(RetentionPolicy.RUNTIME)
 @Constraint(validatedBy = DisplayNameValidator.class)
 public @interface ValidDisplayName {
-    String message() default "must contain 2 to 100 characters after trimming and no control characters";
+    String message() default "invalid display name";
 
     Class<?>[] groups() default {};
 

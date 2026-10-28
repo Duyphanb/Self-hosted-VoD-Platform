@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--project", required=True)
     parser.add_argument("--base-url", required=True)
     args = parser.parse_args()
-    assert args.project == "vod93" or args.project.startswith("vod-auth-audit-"), "Use a dedicated audit project"
+    assert args.project.startswith("vod-auth-audit-"), "Use a dedicated audit project"
     assert urllib.parse.urlparse(args.base_url).hostname in ("localhost", "127.0.0.1")
     container = args.project + "-postgres-1"
     label = subprocess.check_output([
@@ -64,7 +64,8 @@ def main():
     password = "Audit-fixture-only!0917"
     email = "Viewer@example.test"
     invalid_names = ["  ", "\u00a0\u2007\u202f", "\0Viewer", "Viewer\0", "View\rer", "View\ner",
-                     "\tViewer", "View\u007fer", "View\u009fer", " A "]
+                     "\tViewer", "View\u007fer", "View\u009fer", " A ", "\U0001f600", " \U0001f600 ",
+                     " " + "A" * 100 + " ", " " * 10000 + "AB", "\U0001f600" * 101]
 
     def assert_name_error(result):
         status, body = result
@@ -152,6 +153,27 @@ def main():
     assert status == 201 and registered["displayName"] == valid_name
     assert sql("SELECT display_name FROM users WHERE email = 'trimmed-name@example.test';") == valid_name
     print("PASS PostgreSQL profile rejects invalid names without writes; both endpoints trim and preserve Cf")
+
+    # H2 varchar counts UTF-16 units; verify the contract's astral code-point bounds on PostgreSQL.
+    for count in (2, 51, 100):
+        name = "\U0001f600" * count
+        address = f"emoji-{count}@example.test"
+        status, registered = request("/api/v1/auth/register", {
+            "email": address, "password": password, "displayName": name
+        })
+        assert status == 201 and registered["displayName"] == name
+        assert sql(f"SELECT char_length(display_name) FROM users WHERE email = '{address}';") == str(count)
+        status, updated = request("/api/v1/users/me", {"displayName": name}, access, "PUT")
+        assert status == 200 and updated["displayName"] == name
+        assert sql(f"SELECT char_length(display_name) FROM users WHERE id = '{user_id}';") == str(count)
+    padded = " " + "\U0001f600" * 98 + " "
+    status, registered = request("/api/v1/auth/register", {
+        "email": "emoji-padded@example.test", "password": password, "displayName": padded
+    })
+    assert status == 201 and registered["displayName"] == "\U0001f600" * 98
+    status, updated = request("/api/v1/users/me", {"displayName": padded}, access, "PUT")
+    assert status == 200 and updated["displayName"] == "\U0001f600" * 98
+    print("PASS PostgreSQL code-point bounds: reject single/101 emoji and raw overflow; store 2/51/100 and trim raw-100 padding")
 
     outcomes = concurrent([lambda: refresh(original), lambda: refresh(original)])
     assert sorted(status for status, _ in outcomes) == [200, 401]
