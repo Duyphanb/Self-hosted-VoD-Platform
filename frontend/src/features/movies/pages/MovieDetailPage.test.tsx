@@ -431,7 +431,10 @@ describe('MovieDetailPage through AppRoutes', () => {
     expect(fieldValue('Slug')).toHaveTextContent(movie.slug);
     expect(headingSection('Cast')).toHaveTextContent('<svg onload=alert(3)>');
     expect(container.querySelector('img, script, svg, b')).toBeNull();
-    expect([...container.querySelectorAll('a')].some((link) => link.href.startsWith('javascript:'))).toBe(false);
+    // Every link stays an ordinary same-origin http URL, so no javascript:, data: or other scheme gets in.
+    expect(container.querySelectorAll('a').length).toBeGreaterThan(0);
+    expect([...container.querySelectorAll('a')].every((link) => new URL(link.href).origin === window.location.origin))
+      .toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect((window as Window & { __detailXss?: number }).__detailXss).toBeUndefined();
   });
