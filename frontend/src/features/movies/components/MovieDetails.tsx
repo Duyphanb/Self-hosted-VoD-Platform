@@ -43,13 +43,13 @@ export function MovieDetails({ movie }: { movie: MovieDetail }) {
           <MetadataField label="Availability">
             <div className="flex flex-wrap items-center gap-3">
               <VideoStatusBadge status={movie.videoStatus} />
-              {availability.canWatch ? (
+              {availability.canWatch && movie.status === 'PUBLISHED' ? (
                 <Link className={primaryButtonClass} to={`/movies/${movie.id}/watch`}>Watch</Link>
               ) : null}
             </div>
           </MetadataField>
           <MetadataField label="Average rating">
-            {movie.averageRating === null ? 'No ratings yet' : `${movie.averageRating} / 5`}
+            {movie.averageRating === null ? 'No ratings yet' : `${movie.averageRating.toFixed(1)} / 5`}
           </MetadataField>
         </dl>
         <section aria-labelledby="movie-description-heading">
@@ -87,7 +87,7 @@ function Credits({ credits, heading, id }: { credits: MovieCredit[]; heading: st
       <h2 className="text-lg font-semibold text-white" id={id}>{heading}</h2>
       {credits.length ? (
         <ul className="mt-2 space-y-1 text-slate-300">
-          {credits.map((credit) => <li key={`${credit.personId}-${credit.role}`}>{credit.name}</li>)}
+          {credits.map((credit, index) => <li key={`${index}-${credit.personId}`}>{credit.name}</li>)}
         </ul>
       ) : <p className="mt-2 text-slate-400">Not listed</p>}
     </section>
