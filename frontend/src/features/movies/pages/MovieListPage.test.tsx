@@ -247,23 +247,67 @@ describe('MovieListPage', () => {
       await waitFor(() => expect(currentLocation()).toBe('/elsewhere'));
     });
 
-    it('applies a typed genre when the field loses focus, not while typing', async () => {
+    it('applies a typed genre with Apply, not while typing or when the field loses focus', async () => {
       serveMovies(() => moviePage([movieSummary(1)]));
       renderMovieList(['/movies?page=2']);
 
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
       const genre = screen.getByLabelText('Genre');
+      genre.focus();
       fireEvent.change(genre, { target: { value: 'Dra' } });
       fireEvent.change(genre, { target: { value: 'Drama' } });
+      const apply = screen.getByRole('button', { name: 'Apply' });
+      apply.focus();
       await settle();
       expect(currentLocation()).toBe('/movies?page=2');
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
-      fireEvent.blur(genre);
+      fireEvent.click(apply);
 
       await waitFor(() => expect(currentLocation()).toBe('/movies?genre=Drama'));
       await waitFor(() => expect(lastApiQuery()).toEqual({ page: '0', size: '20', genre: 'Drama', sort: 'latest' }));
       expect(apiQueries().some((query) => query.genre === 'Dra')).toBe(false);
+    });
+
+    it('opens a movie clicked while a genre is still being typed, without applying it', async () => {
+      serveMovies(() => moviePage([movieSummary(1), movieSummary(2)]));
+      renderMovieList();
+
+      await screen.findByRole('heading', { level: 2, name: 'Movie 2' });
+      const genre = screen.getByLabelText('Genre');
+      genre.focus();
+      fireEvent.change(genre, { target: { value: 'Noir' } });
+      // Pressing the mouse on the card moves focus there before the click lands.
+      const card = screen.getByRole('link', { name: /Movie 2/ });
+      card.focus();
+      await settle();
+      expect(card).toBeInTheDocument();
+
+      fireEvent.click(card);
+
+      await waitFor(() => expect(currentLocation()).toBe(`/movies/${movieSummary(2).id}`));
+      expect(apiQueries().some((query) => query.genre !== undefined)).toBe(false);
+    });
+
+    it('clears the filters from the empty result while another genre is still being typed', async () => {
+      serveMovies((query) => (query.genre ? moviePage([]) : moviePage([movieSummary(1)])));
+      renderMovieList(['/movies?genre=Western']);
+
+      const heading = await screen.findByRole('heading', { level: 2, name: 'No movies match these filters' });
+      const genre = screen.getByLabelText('Genre');
+      genre.focus();
+      fireEvent.change(genre, { target: { value: 'Westerns' } });
+      const clear = within(heading.parentElement as HTMLElement).getByRole('button', { name: 'Clear filters' });
+      clear.focus();
+      await settle();
+      expect(clear).toBeInTheDocument();
+
+      fireEvent.click(clear);
+
+      await waitFor(() => expect(currentLocation()).toBe('/movies'));
+      expect(await screen.findByRole('heading', { level: 2, name: 'Movie 1' })).toBeInTheDocument();
+      expect(genre).toHaveValue('');
+      expect(apiQueries().map((query) => query.genre)).toEqual(['Western', undefined]);
     });
 
     it('shows the loading state, not the previous result or pagination, while a filter change loads', async () => {
@@ -297,7 +341,7 @@ describe('MovieListPage', () => {
       const genre = screen.getByLabelText('Genre');
       fireEvent.change(genre, { target: { value: '#' } });
       fireEvent.keyDown(genre, { key: 'Enter' });
-      fireEvent.blur(genre);
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
       await settle();
 
       expect(screen.getByRole('alert')).toHaveTextContent('Enter a genre with at least one Latin letter (a–z) or digit.');

@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useId, useRef, useState } from 'react';
-import { secondaryButtonClass } from '../../../components/buttonStyles';
+import { primaryButtonClass, secondaryButtonClass } from '../../../components/buttonStyles';
 import {
   GENRE_MAX_LENGTH,
   hasActiveFilters,
@@ -33,7 +33,9 @@ interface MovieFiltersProps {
 }
 
 /**
- * Genre and Year apply on Enter, or when the field loses focus after a change; Sort applies at once.
+ * Genre and Year apply on Enter or Apply; Sort applies at once, together with the typed values.
+ * Leaving a field applies nothing: the click that moves focus elsewhere, on a movie card or Clear
+ * filters, would otherwise replace the list under the pointer and that click would be lost.
  * A value the API would reject is flagged next to its field and never sent, and the filter already
  * applied stays in effect until the value is corrected.
  */
@@ -98,7 +100,8 @@ export function MovieFilters({ filters, onFiltersChange }: MovieFiltersProps) {
     setYearDraft('');
     setGenreChecked(false);
     setYearChecked(false);
-    if (hasActiveFilters(filters)) {
+    // A filter this form asked for may not have reached the URL yet; it needs clearing as well.
+    if (hasActiveFilters(filters) || (requested !== null && hasActiveFilters(requested))) {
       setRequested({ genre: null, year: null });
       onFiltersChange({ genre: null, year: null, sort: filters.sort });
     }
@@ -139,11 +142,6 @@ export function MovieFilters({ filters, onFiltersChange }: MovieFiltersProps) {
           // Counts UTF-16 code units, so the field never exceeds the code-point limit of the API.
           maxLength={GENRE_MAX_LENGTH}
           name="genre"
-          onBlur={() => {
-            if (genreInvalid || nextGenre !== filters.genre) {
-              apply(filters.sort);
-            }
-          }}
           onChange={(event) => {
             setGenreDraft(event.target.value);
             setGenreChecked(false);
@@ -173,11 +171,6 @@ export function MovieFilters({ filters, onFiltersChange }: MovieFiltersProps) {
           inputMode="numeric"
           maxLength={YEAR_LENGTH}
           name="year"
-          onBlur={() => {
-            if (yearInvalid || nextYear !== filters.year) {
-              apply(filters.sort);
-            }
-          }}
           onChange={(event) => {
             setYearDraft(event.target.value);
             setYearChecked(false);
@@ -208,7 +201,10 @@ export function MovieFilters({ filters, onFiltersChange }: MovieFiltersProps) {
           ))}
         </select>
       </div>
-      <div className="flex items-start lg:pt-7">
+      <div className="flex flex-wrap items-start gap-2 lg:pt-7">
+        <button className={primaryButtonClass} type="submit">
+          Apply
+        </button>
         <button
           className={secondaryButtonClass}
           disabled={!canClear}

@@ -21,19 +21,33 @@ describe('MovieFilters', () => {
     expect(onFiltersChange.mock.calls).toEqual([[{ genre: 'Drama', year: null, sort: 'latest' }]]);
   });
 
-  it('applies a changed field when it loses focus, and nothing for an unchanged one', () => {
+  it('applies typed values with Apply, never when a field loses focus', () => {
     const { onFiltersChange } = renderFilters({ ...NO_FILTERS, year: 2001 });
     const genre = screen.getByLabelText('Genre');
     const year = screen.getByLabelText('Year');
+    const apply = screen.getByRole('button', { name: 'Apply' });
 
-    fireEvent.blur(genre);
-    fireEvent.blur(year);
-    expect(onFiltersChange).not.toHaveBeenCalled();
-
+    genre.focus();
+    fireEvent.change(genre, { target: { value: '#' } });
+    year.focus();
     fireEvent.change(year, { target: { value: '1999' } });
-    fireEvent.blur(year);
+    apply.focus();
+    expect(onFiltersChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
+    fireEvent.click(apply);
+
+    // The invalid genre is flagged and left out; the valid year is sent.
     expect(onFiltersChange.mock.calls).toEqual([[{ genre: null, year: 1999, sort: 'latest' }]]);
+    expect(screen.getByRole('alert')).toHaveTextContent(GENRE_ERROR);
+  });
+
+  it('sends nothing when Apply has nothing new to apply', () => {
+    const { onFiltersChange } = renderFilters({ ...NO_FILTERS, year: 2001 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(onFiltersChange).not.toHaveBeenCalled();
   });
 
   it('does not apply on the Enter that ends an IME composition', () => {
@@ -57,7 +71,7 @@ describe('MovieFilters', () => {
     fireEvent.change(genre, { target: { value } });
     expect(screen.queryByText(GENRE_ERROR)).not.toBeInTheDocument();
     fireEvent.keyDown(genre, { key: 'Enter' });
-    fireEvent.blur(genre);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     expect(onFiltersChange).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent(GENRE_ERROR);
@@ -92,7 +106,7 @@ describe('MovieFilters', () => {
     expect(screen.getByText(GENRE_ERROR)).toBeInTheDocument();
   });
 
-  it('shows no year error while a year is being typed, but flags it on Enter or blur', () => {
+  it('shows no year error while a year is being typed, but flags it on Enter or Apply', () => {
     const { onFiltersChange } = renderFilters();
     const year = screen.getByLabelText('Year');
 
@@ -107,6 +121,8 @@ describe('MovieFilters', () => {
     fireEvent.change(year, { target: { value: '199' } });
     expect(screen.queryByText(YEAR_ERROR)).not.toBeInTheDocument();
     fireEvent.blur(year);
+    expect(screen.queryByText(YEAR_ERROR)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(screen.getByText(YEAR_ERROR)).toBeInTheDocument();
 
     expect(onFiltersChange).not.toHaveBeenCalled();
@@ -146,7 +162,7 @@ describe('MovieFilters', () => {
     const year = screen.getByLabelText('Year');
     fireEvent.change(year, { target: { value: '20' } });
 
-    fireEvent.blur(year);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(onFiltersChange).not.toHaveBeenCalled();
     expect(screen.getByText(YEAR_ERROR)).toBeInTheDocument();
 
@@ -170,7 +186,10 @@ describe('MovieFilters', () => {
     const clear = screen.getByRole('button', { name: 'Clear filters' });
     expect(clear).toBeDisabled();
 
+    // Real focus moves, so leaving a field on the way to Clear is exercised as well.
+    genre.focus();
     fireEvent.change(genre, { target: { value: 'Noir' } });
+    year.focus();
     fireEvent.change(year, { target: { value: '19x' } });
     expect(clear).toBeEnabled();
     clear.focus();
@@ -193,6 +212,22 @@ describe('MovieFilters', () => {
 
     expect(onFiltersChange.mock.calls).toEqual([[{ genre: null, year: null, sort: 'title' }]]);
     expect(screen.getByLabelText('Genre')).toHaveFocus();
+  });
+
+  it('clears a filter it asked for that has not reached the URL yet', () => {
+    const { onFiltersChange } = renderFilters();
+    const genre = screen.getByLabelText('Genre');
+    fireEvent.change(genre, { target: { value: 'Noir' } });
+    fireEvent.keyDown(genre, { key: 'Enter' });
+
+    // The router has not rendered ?genre=Noir yet, so the applied filters are still empty.
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+
+    expect(onFiltersChange.mock.calls).toEqual([
+      [{ genre: 'Noir', year: null, sort: 'latest' }],
+      [{ genre: null, year: null, sort: 'latest' }]
+    ]);
+    expect(genre).toHaveValue('');
   });
 
   it('follows filters changed elsewhere, such as Back or a rejected filter', () => {
@@ -246,6 +281,7 @@ describe('MovieFilters', () => {
     expect(screen.getByLabelText('Genre')).toHaveClass('placeholder:text-slate-400');
     expect(screen.getByRole('option', { name: 'Recently added' })).toHaveValue('latest');
     expect(screen.getByRole('option', { name: 'Title A–Z' })).toHaveValue('title');
+    expect(screen.getByRole('button', { name: 'Apply' })).toHaveAttribute('type', 'submit');
   });
 });
 
