@@ -1,3 +1,5 @@
+import { parseListPage } from '../../lib/pagination';
+import { slugify } from '../../lib/slug';
 import {
   MOVIE_PAGE_SIZE,
   MOVIE_SORTS,
@@ -5,11 +7,10 @@ import {
   type MovieSort
 } from './moviesApi';
 
+/** Contract limit of the `genre` filter, counted in Unicode code points as the backend counts it. */
 export const GENRE_MAX_LENGTH = 120;
 export const MIN_RELEASE_YEAR = 1888;
 export const MAX_RELEASE_YEAR = 2100;
-/** The API accepts 0-based pages up to 10000, so the 1-based URL page stops at 10001. */
-export const MAX_LIST_PAGE = 10_001;
 
 /** Movie list state as it appears in the URL; `page` is 1-based. */
 export interface MovieListParams {
@@ -71,10 +72,37 @@ export function hasActiveFilters(params: Pick<MovieListParams, 'genre' | 'year'>
   return params.genre !== null || params.year !== null;
 }
 
-/** Trimmed genre of 1-120 characters, otherwise null (no genre filter). */
+/**
+ * The URL state after the API rejected the filters with 400: the active filters that the error's
+ * `fieldErrors` name are cleared, or both genre and year when it names no field, and the list starts
+ * again at page 1. Null when no active filter can be cleared, so the error is shown instead.
+ */
+export function clearRejectedFilters(
+  params: MovieListParams,
+  rejectedFields: readonly string[]
+): MovieListParams | null {
+  const namesFields = rejectedFields.length > 0;
+  const clearGenre = params.genre !== null && (!namesFields || rejectedFields.includes('genre'));
+  const clearYear = params.year !== null && (!namesFields || rejectedFields.includes('year'));
+  if (!clearGenre && !clearYear) {
+    return null;
+  }
+  return {
+    ...params,
+    genre: clearGenre ? null : params.genre,
+    year: clearYear ? null : params.year,
+    page: DEFAULT_MOVIE_LIST_PARAMS.page
+  };
+}
+
+/**
+ * Trimmed genre of 1-120 code points that has a non-empty ADR-009 slug, otherwise null (no genre
+ * filter). The API answers a genre whose slug is empty with 400, so such a value is never sent.
+ */
 export function parseGenre(value: string | null): string | null {
   const genre = value?.trim() ?? '';
-  return genre.length >= 1 && genre.length <= GENRE_MAX_LENGTH ? genre : null;
+  const length = Array.from(genre).length;
+  return length >= 1 && length <= GENRE_MAX_LENGTH && slugify(genre) !== '' ? genre : null;
 }
 
 /** Four-digit year from 1888 to 2100, otherwise null (no year filter). */
@@ -89,16 +117,4 @@ export function parseReleaseYear(value: string | null): number | null {
 
 export function parseMovieSort(value: string | null): MovieSort {
   return MOVIE_SORTS.find((sort) => sort === value) ?? DEFAULT_MOVIE_LIST_PARAMS.sort;
-}
-
-/** Whole page number from 1; larger values are clamped to the last page the API accepts. */
-function parseListPage(value: string | null): number {
-  if (value === null || !/^\d+$/.test(value)) {
-    return DEFAULT_MOVIE_LIST_PARAMS.page;
-  }
-  const page = Number(value);
-  if (page < 1) {
-    return DEFAULT_MOVIE_LIST_PARAMS.page;
-  }
-  return Math.min(page, MAX_LIST_PAGE);
 }

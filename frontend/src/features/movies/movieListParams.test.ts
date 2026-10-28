@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_LIST_PAGE } from '../../lib/pagination';
 import {
+  clearRejectedFilters,
   DEFAULT_MOVIE_LIST_PARAMS,
   hasActiveFilters,
-  MAX_LIST_PAGE,
+  type MovieListParams,
   movieListSearchParams,
   parseMovieListParams,
   toMovieListQuery
@@ -29,6 +31,22 @@ describe('parseMovieListParams', () => {
     expect(parse(`?genre=${'a'.repeat(121)}`).genre).toBeNull();
     expect(parse('?genre=').genre).toBeNull();
     expect(parse('?genre=%20%20%20').genre).toBeNull();
+  });
+
+  it('counts the genre length in code points, as the API does', () => {
+    // 1 + 119 emoji: 120 code points but 239 UTF-16 code units.
+    const genre = `a${'😀'.repeat(119)}`;
+    expect(parse(`?genre=${encodeURIComponent(genre)}`).genre).toBe(genre);
+    expect(parse(`?genre=${encodeURIComponent(`${genre}😀`)}`).genre).toBeNull();
+  });
+
+  it('drops a genre whose slug is empty, which the API would reject', () => {
+    for (const genre of ['!!!', '#', '-', '"', 'Драма', '東京', '😀']) {
+      expect(parse(`?genre=${encodeURIComponent(genre)}`).genre, genre).toBeNull();
+    }
+    for (const genre of ['Hài', 'Sci-Fi & Fantasy', '#1', 'Ωmega 2']) {
+      expect(parse(`?genre=${encodeURIComponent(genre)}`).genre, genre).toBe(genre);
+    }
   });
 
   it('keeps years from 1888 to 2100 and drops anything else', () => {
@@ -90,6 +108,30 @@ describe('movieListSearchParams', () => {
   it('round-trips every value through the URL', () => {
     const params = { genre: 'Hài & Drama', year: 2024, sort: 'title' as const, page: 4 };
     expect(parseMovieListParams(movieListSearchParams(params))).toEqual(params);
+  });
+});
+
+describe('clearRejectedFilters', () => {
+  const filtered: MovieListParams = { genre: 'Western', year: 2000, sort: 'title', page: 3 };
+
+  it.each([
+    ['genre', ['genre'], { genre: null, year: 2000 }],
+    ['year', ['year'], { genre: 'Western', year: null }],
+    ['genre and year', ['year', 'genre'], { genre: null, year: null }],
+    ['no field, so both', [], { genre: null, year: null }]
+  ])('clears the filters an error names: %s', (_label, fields, expected) => {
+    expect(clearRejectedFilters(filtered, fields)).toEqual({ ...expected, sort: 'title', page: 1 });
+  });
+
+  it('keeps the filters when the error names only other fields', () => {
+    expect(clearRejectedFilters(filtered, ['page'])).toBeNull();
+    expect(clearRejectedFilters(filtered, ['size', 'sort'])).toBeNull();
+  });
+
+  it('returns null when no named filter is active, so the error is shown instead', () => {
+    expect(clearRejectedFilters({ ...filtered, genre: null, year: null }, [])).toBeNull();
+    expect(clearRejectedFilters({ ...filtered, genre: null }, ['genre'])).toBeNull();
+    expect(clearRejectedFilters({ ...filtered, year: null }, ['year'])).toBeNull();
   });
 });
 
