@@ -4,13 +4,14 @@ import { useApiClient } from '../auth/AuthContext';
 import { getMovie, listMovies, movieKeys, type MovieListQuery, type MoviePage } from './moviesApi';
 
 /** Route UUIDs are case-insensitive; requests and cache entries always use lower-case IDs. */
-export function useMovieDetail(movieId: string) {
+export function useMovieDetail(movieId: string, options: { refetchOnMount?: 'always' } = {}) {
   const apiClient = useApiClient();
   const canonicalId = movieId.toLowerCase();
   return useQuery({
     queryKey: movieKeys.detail(canonicalId),
     queryFn: ({ signal }) => getMovie(apiClient, canonicalId, signal),
-    enabled: isCanonicalUuid(canonicalId)
+    enabled: isCanonicalUuid(canonicalId),
+    refetchOnMount: options.refetchOnMount
   });
 }
 

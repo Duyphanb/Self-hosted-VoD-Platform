@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthResponse, UserProfile } from '../lib/api/types';
 import { AuthProvider } from '../features/auth/AuthContext';
 import { createAuthSession, writeAuthSession } from '../features/auth/authStorage';
 import { AppRoutes } from './AppRoutes';
-import { AppProviders } from './AppProviders';
+import { APP_ROUTER_FUTURE, APP_ROUTER_PROVIDER_FUTURE, createAppRoutes } from './AppRouter';
 
 const regularUser: UserProfile = {
   id: '3fcf25c2-f096-4462-ae63-4ba4702a9078',
@@ -41,11 +41,31 @@ describe('AppRoutes guard wiring', () => {
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
   });
 
+  const adminMovieRoutes = ['/admin/movies', '/admin/movies/new', '/admin/movies/6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21/edit'];
+  it.each(adminMovieRoutes)('rejects a regular user on the production route %s before any request', async (path) => {
+    persistUser(regularUser);
+    renderProductionRoutes(path);
+    expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(adminMovieRoutes)('sends a guest from the production route %s to sign in before any request', async (path) => {
+    renderProductionRoutes(path);
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('current-location')).toHaveTextContent('/login');
+  });
+
   it('renders /admin for ROLE_ADMIN', async () => {
     persistUser({ ...regularUser, roles: ['ROLE_USER', 'ROLE_ADMIN'] });
+    fetchMock.mockResolvedValue(jsonResponse({
+      items: [],
+      page: { page: 0, size: 20, totalElements: 0, totalPages: 0 }
+    }));
     renderRoutes('/admin');
 
-    expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Movies' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'New movie' })).toHaveAttribute('href', '/admin/movies/new');
   });
 
   it('sends a signed-in user from the landing page to the movie list', async () => {
@@ -147,17 +167,10 @@ function renderRoutes(initialEntry: string) {
 }
 
 function renderProductionRoutes(initialEntry: string) {
-  return render(
-    <MemoryRouter
-      future={{ v7_relativeSplatPath: true, v7_startTransition: true }}
-      initialEntries={[initialEntry]}
-    >
-      <AppProviders>
-        <LocationProbe />
-        <AppRoutes />
-      </AppProviders>
-    </MemoryRouter>
-  );
+  const router = createMemoryRouter(createAppRoutes(<LocationProbe />), {
+    initialEntries: [initialEntry], future: APP_ROUTER_FUTURE
+  });
+  return { ...render(<RouterProvider future={APP_ROUTER_PROVIDER_FUTURE} router={router} />), router };
 }
 
 function LocationProbe() {
