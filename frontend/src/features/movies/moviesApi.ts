@@ -7,6 +7,11 @@ export const VIDEO_ASSET_STATUSES = ['UPLOADED', 'QUEUED', 'PROCESSING', 'READY'
 export type MovieStatus = typeof MOVIE_STATUSES[number];
 export type VideoAssetStatus = typeof VIDEO_ASSET_STATUSES[number];
 export type MovieSort = 'latest' | 'title';
+/** Vietnamese film classification; null means not classified. */
+export const MATURITY_RATINGS = ['P', 'K', 'T13', 'T16', 'T18'] as const;
+export type MaturityRating = typeof MATURITY_RATINGS[number];
+export const CREDIT_ROLES = ['ACTOR', 'DIRECTOR'] as const;
+export type CreditRole = typeof CREDIT_ROLES[number];
 
 /**
  * Decoded in place of an enum value this client does not know, such as a status added to the API
@@ -36,6 +41,31 @@ export interface MovieSummary {
   videoStatus: VideoAssetStatus | UnknownEnumValue | null;
 }
 
+export interface MovieCredit {
+  personId: string;
+  name: string;
+  role: CreditRole | UnknownEnumValue;
+}
+
+export interface PlaybackProgress {
+  movieId: string;
+  currentSeconds: number;
+  durationSeconds: number | null;
+  finished: boolean;
+  lastPlayedAt: string | null;
+}
+
+export interface MovieDetail extends MovieSummary {
+  maturityRating: MaturityRating | UnknownEnumValue | null;
+  /** Credits in the display order the API returns. */
+  people: MovieCredit[];
+  /** The caller's own rating, 1-5; null until ratings exist or when the caller has not rated. */
+  userRating: number | null;
+  inWatchlist: boolean;
+  /** Null when the API omits it: the caller has no saved progress for the movie. */
+  playbackProgress: PlaybackProgress | null;
+}
+
 export interface MoviePage {
   items: MovieSummary[];
   page: PageMeta;
@@ -53,7 +83,8 @@ export interface MovieListQuery {
 /** Every movie query key starts with `movieKeys.all`, so invalidating it refreshes all movie views. */
 export const movieKeys = {
   all: ['movies'] as const,
-  list: (query: MovieListQuery) => [...movieKeys.all, 'list', query] as const
+  list: (query: MovieListQuery) => [...movieKeys.all, 'list', query] as const,
+  detail: (movieId: string) => [...movieKeys.all, 'detail', movieId] as const
 };
 
 export async function listMovies(
@@ -79,9 +110,25 @@ export async function listMovies(
   return decodeMoviePage(response);
 }
 
+/**
+ * Movie detail; `movieId` must be a UUID. The API answers 404 MOVIE_NOT_FOUND alike for a missing
+ * movie and, unless the caller is an admin, for one that is not published.
+ */
+export async function getMovie(client: ApiClient, movieId: string, signal?: AbortSignal): Promise<MovieDetail> {
+  const response = await client.request<unknown>(`/movies/${encodeURIComponent(movieId)}`, {
+    authenticated: true,
+    signal
+  });
+  const movie = decodeMovieDetail(response);
+  if (!movie) {
+    throw new InvalidMovieResponseError('Server returned an invalid movie');
+  }
+  return movie;
+}
+
 export class InvalidMovieResponseError extends Error {
-  constructor() {
-    super('Server returned an invalid movie page');
+  constructor(message = 'Server returned an invalid movie page') {
+    super(message);
     this.name = 'InvalidMovieResponseError';
   }
 }
@@ -142,6 +189,68 @@ function decodeMovieSummary(value: unknown): MovieSummary | null {
     status: knownOrUnknown(MOVIE_STATUSES, value.status),
     videoStatus: value.videoStatus === null ? null : knownOrUnknown(VIDEO_ASSET_STATUSES, value.videoStatus)
   };
+}
+
+function decodeMovieDetail(value: unknown): MovieDetail | null {
+  const summary = decodeMovieSummary(value);
+  if (!summary
+    || !isRecord(value)
+    || !(value.maturityRating === null || typeof value.maturityRating === 'string')
+    || !Array.isArray(value.people)
+    || !(value.userRating === null || isRating(value.userRating))
+    || typeof value.inWatchlist !== 'boolean') {
+    return null;
+  }
+  const people = value.people.map(decodeMovieCredit);
+  // Omitted when there is no saved progress; null is read the same way.
+  const playbackProgress = value.playbackProgress === undefined || value.playbackProgress === null
+    ? null
+    : decodePlaybackProgress(value.playbackProgress);
+  if (people.some((credit) => credit === null) || playbackProgress === undefined) {
+    return null;
+  }
+  return {
+    ...summary,
+    maturityRating: value.maturityRating === null ? null : knownOrUnknown(MATURITY_RATINGS, value.maturityRating),
+    people: people as MovieCredit[],
+    userRating: value.userRating,
+    inWatchlist: value.inWatchlist,
+    playbackProgress
+  };
+}
+
+function decodeMovieCredit(value: unknown): MovieCredit | null {
+  if (!isRecord(value)
+    || !isCanonicalUuid(value.personId)
+    || typeof value.name !== 'string'
+    || typeof value.role !== 'string') {
+    return null;
+  }
+  return { personId: value.personId, name: value.name, role: knownOrUnknown(CREDIT_ROLES, value.role) };
+}
+
+// Undefined marks an invalid value, because null is a valid "no progress".
+function decodePlaybackProgress(value: unknown): PlaybackProgress | undefined {
+  if (!isRecord(value)
+    || !isCanonicalUuid(value.movieId)
+    || !nonNegativeInteger(value.currentSeconds)
+    || !(value.durationSeconds === undefined || value.durationSeconds === null
+      || nonNegativeInteger(value.durationSeconds))
+    || typeof value.finished !== 'boolean'
+    || !(value.lastPlayedAt === undefined || value.lastPlayedAt === null || typeof value.lastPlayedAt === 'string')) {
+    return undefined;
+  }
+  return {
+    movieId: value.movieId,
+    currentSeconds: value.currentSeconds,
+    durationSeconds: (value.durationSeconds ?? null) as number | null,
+    finished: value.finished,
+    lastPlayedAt: (value.lastPlayedAt ?? null) as string | null
+  };
+}
+
+function isRating(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 5;
 }
 
 function knownOrUnknown<T extends string>(known: readonly T[], value: string): T | UnknownEnumValue {
