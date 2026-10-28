@@ -31,16 +31,23 @@ export function LoadingState({ label, children }: LoadingStateProps) {
   );
 }
 
+/**
+ * Level of a state view's title: 2 below a page's own `h1` (the default), or 1 when the state view is
+ * the whole page, such as a detail page that has no title of its own before its data loads.
+ */
+export type StateHeadingLevel = 1 | 2;
+
 interface EmptyStateProps extends PropsWithChildren {
   title: string;
   description?: string;
+  headingLevel?: StateHeadingLevel;
 }
 
 /** Message for a result with nothing to show; `children` holds the follow-up actions. */
-export function EmptyState({ title, description, children }: EmptyStateProps) {
+export function EmptyState({ title, description, headingLevel = 2, children }: EmptyStateProps) {
   return (
     <div className="rounded-lg border border-dashed border-slate-700 bg-slate-900/60 px-6 py-12 text-center">
-      <h2 className="text-lg font-semibold text-white">{title}</h2>
+      <StateHeading className="text-lg font-semibold text-white" level={headingLevel}>{title}</StateHeading>
       {description ? <p className="mt-2 text-sm text-slate-300">{description}</p> : null}
       {children ? <div className="mt-6 flex flex-wrap justify-center gap-3">{children}</div> : null}
     </div>
@@ -52,14 +59,15 @@ interface ErrorStateProps {
   error: unknown;
   onRetry?: () => void;
   isRetrying?: boolean;
+  headingLevel?: StateHeadingLevel;
 }
 
 /** Failed request: the server message, its request id when present, and an optional Retry. */
-export function ErrorState({ title, error, onRetry, isRetrying = false }: ErrorStateProps) {
+export function ErrorState({ title, error, onRetry, isRetrying = false, headingLevel = 2 }: ErrorStateProps) {
   const { message, requestId } = errorDetails(error);
   return (
     <div className="rounded-lg border border-rose-500/50 bg-rose-500/10 p-6" role="alert">
-      <h2 className="text-lg font-semibold text-rose-100">{title}</h2>
+      <StateHeading className="text-lg font-semibold text-rose-100" level={headingLevel}>{title}</StateHeading>
       <p className="mt-2 text-sm text-rose-200">{message}</p>
       {requestId ? (
         <p className="mt-2 text-xs text-rose-200">
@@ -78,4 +86,16 @@ export function ErrorState({ title, error, onRetry, isRetrying = false }: ErrorS
       ) : null}
     </div>
   );
+}
+
+interface StateHeadingProps {
+  level: StateHeadingLevel;
+  className: string;
+  children: ReactNode;
+}
+
+function StateHeading({ level, className, children }: StateHeadingProps) {
+  return level === 1
+    ? <h1 className={className}>{children}</h1>
+    : <h2 className={className}>{children}</h2>;
 }

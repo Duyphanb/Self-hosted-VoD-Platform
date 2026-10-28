@@ -1,5 +1,25 @@
 export type PaginationItem = number | 'start-ellipsis' | 'end-ellipsis';
 
+/** The contract `Page` parameter accepts 0-based pages up to 10000, so a 1-based URL page stops at 10001. */
+export const MAX_LIST_PAGE = 10_001;
+
+const FIRST_PAGE = 1;
+
+/**
+ * Reads the 1-based page of a list URL (`?page=`): a whole number from 1, clamped to the last page
+ * the API accepts. A missing or invalid value is page 1.
+ */
+export function parseListPage(value: string | null): number {
+  if (value === null || !/^\d+$/.test(value)) {
+    return FIRST_PAGE;
+  }
+  const page = Number(value);
+  if (page < FIRST_PAGE) {
+    return FIRST_PAGE;
+  }
+  return Math.min(page, MAX_LIST_PAGE);
+}
+
 /**
  * Page buttons for a 1-based `page` of `totalPages`: the first and last page, the current page with
  * `siblings` neighbours on each side, and an ellipsis for each gap of two or more pages. The item

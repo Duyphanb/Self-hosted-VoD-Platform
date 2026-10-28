@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { paginationItems } from './pagination';
+import { MAX_LIST_PAGE, paginationItems, parseListPage } from './pagination';
+
+describe('parseListPage', () => {
+  it('reads whole pages from 1', () => {
+    expect(parseListPage('1')).toBe(1);
+    expect(parseListPage('2')).toBe(2);
+    expect(parseListPage('007')).toBe(7);
+    expect(parseListPage('10000')).toBe(10_000);
+  });
+
+  it('keeps the last page the API accepts and clamps anything above it', () => {
+    expect(MAX_LIST_PAGE).toBe(10_001);
+    expect(parseListPage('10001')).toBe(MAX_LIST_PAGE);
+    expect(parseListPage('10002')).toBe(MAX_LIST_PAGE);
+    expect(parseListPage('99999999999999999999')).toBe(MAX_LIST_PAGE);
+  });
+
+  it.each([null, '', '0', '00', '-1', '1.5', ' 2', '2 ', '+2', '2e3', '0x10', 'abc', '١'])(
+    'turns %j into page 1',
+    (value) => {
+      expect(parseListPage(value)).toBe(1);
+    }
+  );
+});
 
 describe('paginationItems', () => {
   it('lists every page when they fit', () => {
