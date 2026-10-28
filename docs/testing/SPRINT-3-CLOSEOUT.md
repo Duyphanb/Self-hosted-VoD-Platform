@@ -33,8 +33,25 @@ The ten checklist entries in [BACKLOG.md](../requirements/BACKLOG.md#sprint-3-de
 | Frontend movie detail page shows full metadata and video status | 3.7. |
 | Admin UI for movie CRUD is functional and protected | 3.8, and the manual UI pass below. |
 | Unit and integration tests cover movie service and APIs | Backend: 725 tests (auth 68, catalog 321 with 7 opt-in skips, common 255, shared 76, user 5). Frontend: 580 tests. Contract validation of responses (#120). |
-| Postman collection includes movie endpoints | [Sprint 3 catalog collection](postman/README.md#sprint-3-catalog-collection): 31 requests and 50 assertions. CI runs it with `--silent` after promoting an admin through the documented SQL. |
+| Postman collection includes movie endpoints | [Sprint 3 catalog collection](postman/README.md#sprint-3-catalog-collection): 31 requests and 51 assertions. CI runs it with `--silent` after promoting an admin through the documented SQL. |
 | No JPA entities exposed in API responses | Controllers return DTO records only, and the frozen-contract response validator (#120) rejects any extra field. |
+
+### Global Definition of Done
+
+The [Global DoD](../requirements/BACKLOG.md#global-definition-of-done-all-sprints) items hold for the Sprint 3 changes:
+
+| Global DoD item | Status for Sprint 3 |
+|---|---|
+| AGENTS.md rules (constructor injection, DTOs, no exposed entities) | Met. There is no field `@Autowired` in backend main sources, and controllers return DTO records only. |
+| Unit tests cover service logic | Met. Catalog service, validation, visibility and credit-matching unit tests run in the catalog module (321 tests). |
+| Integration tests cover API endpoints | Met. MockMvc integration tests cover every catalog endpoint, including authorization (common module, 255 tests). The JVM suite runs on H2, and PostgreSQL behaviour is covered by the runtime smoke and Newman instead ([#119](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/119) tracks moving it to PostgreSQL). |
+| SLF4J logging, no `System.out` | Met. There is no `System.out`, `System.err` or `printStackTrace` in backend main sources. |
+| Secrets externalised; none committed | Met. Runtime secrets come from environment variables (`.env.example` holds placeholders). CI uses run-only values, and the new Newman admin password is generated per run and never printed. No credential files are tracked. |
+| `API-CONTRACT.yaml` updated or confirmed; responses validated in tests | Met. Contract-first per the owner decision in [#120](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/120): controller responses are validated against the frozen `API-CONTRACT.yaml` in tests, and #153 completed the movie response schemas. The frontend decoders are also tested against the contract's required fields. Serving the contract in Swagger UI is Issue 10.2 (Sprint 10). |
+| Frontend loading, error, empty and success states | Met. Covered for the list, detail and admin pages by page tests and the browser checks in each PR. |
+| Protected and admin routes enforced | Met. `ProtectedRoute` and `AdminRoute` on the frontend; URL authorization on the backend (#83) with 401 and 403 checks in integration tests and Newman. |
+| Docs updated with behaviour, config and contracts | Met. ADR-009 (catalog visibility and collation), API-CONTRACT updates (#95, #153), the deployment README (first administrator, collation), and this closeout. |
+| Conventional commits; git status reviewed before staging | Met for Sprint 3. Every Sprint 3 pull request (#146-#160) is squash-merged with a conventional title. The only non-conventional subjects on `main` are older merge commits from before the squash-only rule (#81). |
 
 ### Manual UI pass
 
@@ -47,7 +64,7 @@ Done on 2026-10-28 on a disposable Compose stack built from this branch (Postgre
 5. **Admin archives:** archived through the confirmation dialog; the list shows "Archived". The admin's detail view shows the "archived and not visible to viewers" banner.
 6. **Viewer, archived:** the detail page shows "Movie not found" again, and the genre list shows "0 movies".
 
-The same stack ran the Newman collection: 31 requests, 50 assertions, 0 failures.
+The same stack ran the Newman collection: 31 requests, 51 assertions, 0 failures.
 
 ## Verification
 

@@ -1492,6 +1492,11 @@
               "",
               "pm.test('The archived movie is listed for administration', () => {",
               "  pm.expect(pm.response.json().items.map((movie) => movie.id)).to.include(pm.environment.get('movieId'));",
+              "});",
+              "pm.test('Every listed movie is archived, so the status filter applies', () => {",
+              "  const statuses = pm.response.json().items.map((movie) => movie.status);",
+              "  pm.expect(statuses).to.not.be.empty;",
+              "  pm.expect(statuses.every((status) => status === 'ARCHIVED')).to.equal(true);",
               "});"
             ]
           }
