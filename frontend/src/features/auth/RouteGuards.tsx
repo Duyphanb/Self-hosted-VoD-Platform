@@ -47,7 +47,9 @@ function AuthRouteGuard({ requireAdmin }: { requireAdmin: boolean }) {
     return <Navigate replace to="/forbidden" />;
   }
 
-  return <Outlet />;
+  // A different user's session remounts the protected page: AuthProvider has cleared the query cache,
+  // so the page fetches again as the new user and keeps nothing of the previous user's state.
+  return <Outlet key={user?.id} />;
 }
 
 function intendedPath(pathname: string, search: string, hash: string): string {
