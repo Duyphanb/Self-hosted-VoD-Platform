@@ -48,6 +48,26 @@ describe('GenreEditor', () => {
     expect(screen.getByTestId('genres-value')).toHaveTextContent('[]');
   });
 
+  it('keeps keyboard focus on the next chip or genre input after removing a focused chip', async () => {
+    renderEditor({ initial: ['Drama', 'Comedy'] });
+    const removeDrama = await screen.findByRole('button', { name: 'Remove genre Drama' });
+    removeDrama.focus();
+    fireEvent.click(removeDrama);
+    expect(screen.getByRole('button', { name: 'Remove genre Comedy' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove genre Comedy' }));
+    expect(screen.getByLabelText('Add genre')).toHaveFocus();
+  });
+
+  it('accepts whitespace-padded genre names when their normalized payload is within the limit', async () => {
+    renderEditor();
+    const input = await screen.findByLabelText('Add genre');
+    fireEvent.change(input, { target: { value: `  ${'a'.repeat(49)}   ${'b'.repeat(50)}  ` } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add genre' }));
+    expect(screen.getByTestId('genres-value')).toHaveTextContent(JSON.stringify([`${'a'.repeat(49)} ${'b'.repeat(50)}`]));
+    expect(input).toHaveValue('');
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+  });
+
   it('rejects slug duplicates, empty slugs, controls, oversize names and an eleventh chip', async () => {
     renderEditor({ initial: ['Hai', ...Array.from({ length: 9 }, (_, index) => `Genre ${index}`)] });
     const input = await screen.findByLabelText('Add genre');

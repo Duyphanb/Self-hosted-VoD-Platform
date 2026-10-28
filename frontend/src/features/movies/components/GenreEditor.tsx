@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { secondaryButtonClass } from '../../../components/buttonStyles';
 import { ApiRequestError, AuthenticationSupersededError } from '../../../lib/api/client';
 import { errorDetails } from '../../../lib/api/errorDetails';
@@ -18,6 +18,8 @@ interface GenreEditorProps {
 export function GenreEditor({ value, onChange, errors = {}, disabled = false, onForbidden, onDraftChange }: GenreEditorProps) {
   const [draft, setDraft] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const removalFocus = useRef<number | null>(null);
   const genres = useAdminGenres();
   const forbidden = genres.error instanceof ApiRequestError && genres.error.status === 403;
   const failed = genres.isError && !(genres.error instanceof AuthenticationSupersededError);
@@ -29,6 +31,15 @@ export function GenreEditor({ value, onChange, errors = {}, disabled = false, on
   useEffect(() => {
     if (forbidden) onForbidden?.();
   }, [forbidden, onForbidden]);
+
+  useLayoutEffect(() => {
+    if (removalFocus.current === null) return;
+    const index = removalFocus.current;
+    removalFocus.current = null;
+    const nextChip = document.getElementById(`movie-genre-${index}-remove`);
+    if (nextChip) nextChip.focus();
+    else inputRef.current?.focus();
+  }, [value]);
 
   const changeDraft = (next: string) => {
     setDraft(next);
@@ -61,7 +72,12 @@ export function GenreEditor({ value, onChange, errors = {}, disabled = false, on
               aria-label={`Remove genre ${genre}`}
               className="ml-2 rounded px-1 text-slate-300 hover:text-white focus-visible:ring-2 focus-visible:ring-sky-400"
               disabled={disabled}
-              onClick={() => { onChange(value.filter((_, position) => position !== index)); setLocalError(null); }}
+              id={`movie-genre-${index}-remove`}
+              onClick={() => {
+                removalFocus.current = Math.min(index, value.length - 2);
+                onChange(value.filter((_, position) => position !== index));
+                setLocalError(null);
+              }}
               type="button"
             >×</button>
             {indexedErrors[index] ? <p className="mt-1 text-rose-300" id={`movie-genres-${index}-error`}>{indexedErrors[index]}</p> : null}
@@ -76,6 +92,7 @@ export function GenreEditor({ value, onChange, errors = {}, disabled = false, on
           disabled={disabled}
           id="movie-genres"
           list="movie-genre-suggestions"
+          ref={inputRef}
           onChange={(event) => changeDraft(event.target.value)}
           onKeyDown={(event) => {
             if (disabled || event.nativeEvent.isComposing) return;

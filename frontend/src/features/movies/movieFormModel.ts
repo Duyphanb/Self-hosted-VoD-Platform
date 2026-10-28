@@ -45,12 +45,12 @@ export function toMoviePayload(values: MovieFormValues): UpsertMovieRequest {
 
 export function validateMovieForm(values: MovieFormValues): MovieFormErrors {
   const errors: MovieFormErrors = {};
-  const titleError = requiredText(values.title, 'Title', 255);
+  const titleError = requiredText(values.title, 'Title', 255, false, trimCatalogText(values.title));
   if (titleError) errors.title = titleError;
   if ([...values.slug].length > 255 || !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(values.slug)) {
     errors.slug = 'Enter a slug of 1–255 lowercase letters, digits, and single hyphens.';
   }
-  const descriptionError = requiredText(values.description, 'Description', 5000, true);
+  const descriptionError = requiredText(values.description, 'Description', 5000, true, trimCatalogText(values.description));
   if (descriptionError) errors.description = descriptionError;
   const year = values.releaseYear.trim();
   if (year !== '' && (!/^\d+$/.test(year) || !Number.isSafeInteger(Number(year)) || Number(year) < 1888 || Number(year) > 2100)) {
@@ -87,7 +87,7 @@ export function normalizeCatalogName(value: string): string {
 }
 
 export function validateGenreName(value: string): string | null {
-  const error = requiredText(value, 'Genre name', 100);
+  const error = requiredText(value, 'Genre name', 100, false, normalizeCatalogName(value));
   return error ?? (slugify(normalizeCatalogName(value)) ? null : 'Genre name must contain a letter or digit.');
 }
 
@@ -129,12 +129,12 @@ function knownField(field: string, values?: Pick<MovieFormValues, 'genres' | 'pe
   return person !== null && Number(person[1]) < (values?.people.length ?? 50);
 }
 
-function trimCatalogText(value: string): string {
+export function trimCatalogText(value: string): string {
   return value.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '');
 }
 
-function requiredText(value: string, label: string, maximum: number, multiline = false): string | null {
-  if ([...value].length > maximum) return `${label} must be ${maximum} characters or fewer.`;
+function requiredText(value: string, label: string, maximum: number, multiline = false, wireValue = value): string | null {
+  if ([...wireValue].length > maximum) return `${label} must be ${maximum} characters or fewer.`;
   // Unicode Cc, with only TAB/LF/CR allowed for the multiline description, as in the backend.
   const withoutAllowed = multiline ? value.replace(/[\t\r\n]/g, '') : value;
   if (/\p{Cc}/u.test(withoutAllowed)) return `${label} must not contain control characters.`;

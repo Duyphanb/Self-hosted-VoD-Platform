@@ -134,7 +134,8 @@ describe('AdminMovieListPage', () => {
     fetchMock.mockImplementation(async () => moviePage([movie(1)], { totalPages: 2, totalElements: 21 }));
     renderList({ state: { message: 'Movie created' } });
     await screen.findByRole('table');
-    expect(screen.getByText('Movie created')).toHaveAttribute('role', 'status');
+    expect(await screen.findByText('Movie created')).toHaveAttribute('role', 'status');
+    expect(screen.getByRole('heading', { level: 1, name: 'Movies' })).toHaveFocus();
     await waitFor(() => expect(screen.getByTestId('location-state')).toHaveTextContent('null'));
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() => expect(currentLocation()).toContain('page=2'));
@@ -165,6 +166,86 @@ describe('AdminMovieListPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps document-level focus and Escape inside archive after a backdrop or outside-focus attempt', async () => {
+    fetchMock.mockResolvedValue(moviePage([movie(1)]));
+    renderList();
+    const trigger = await screen.findByRole('button', { name: 'Archive Movie 1' });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog');
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
+    const confirm = within(dialog).getByRole('button', { name: 'Archive' });
+    const outside = screen.getByRole('button', { name: 'History back' });
+    expect(outside).toHaveAttribute('inert');
+    fireEvent.mouseDown(dialog.parentElement as HTMLElement);
+    outside.focus();
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(document.body, { key: 'Tab', shiftKey: true });
+    expect(confirm).toHaveFocus();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(outside).not.toHaveAttribute('inert');
+    expect(trigger).toHaveFocus();
+  });
+
+  it('cannot replace an open or pending archive target with a different movie', async () => {
+    const held = deferredResponse();
+    fetchMock.mockImplementation(async (_input, init) => init?.method === 'DELETE' ? held.promise : moviePage([movie(1), movie(2)]));
+    renderList();
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive Movie 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive Movie 2' }));
+    expect(screen.getByRole('dialog')).toHaveAccessibleName("Archive 'Movie 1'?");
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive Movie 2' }));
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.getByRole('dialog')).toHaveAccessibleName("Archive 'Movie 1'?");
+    const deletes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE');
+    expect(deletes).toHaveLength(1);
+    expect(new URL(String(deletes[0][0]), 'http://localhost').pathname).toBe(`/api/v1/movies/${movie(1).id}`);
+    held.release(new Response(null, { status: 204 }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('keeps an initially empty status region mounted and re-announces repeated archive feedback', async () => {
+    const held = deferredResponse();
+    const archived = new Set<string>();
+    let initial = true;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (init?.method === 'DELETE') {
+        archived.add(String(input).split('/').pop() ?? '');
+        return new Response(null, { status: 204 });
+      }
+      if (initial) { initial = false; return held.promise; }
+      return moviePage([movie(1), movie(2)].map((entry) => archived.has(entry.id) ? { ...entry, status: 'ARCHIVED' as const } : entry));
+    });
+    renderList();
+    const region = await screen.findByRole('status', { name: 'Movie updates' });
+    expect(region).toBeEmptyDOMElement();
+    held.release(moviePage([movie(1), movie(2)]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive Movie 1' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive' }));
+    await waitFor(() => expect(region).toHaveTextContent('Archived'));
+    expect(screen.getByRole('status', { name: 'Movie updates' })).toBe(region);
+    const updates: string[] = [];
+    const observer = new MutationObserver(() => updates.push(region.textContent ?? ''));
+    observer.observe(region, { childList: true, characterData: true, subtree: true });
+    try {
+      fireEvent.click(await screen.findByRole('button', { name: 'Archive Movie 2' }));
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive' }));
+      await waitFor(() => expect(updates).toContain(''));
+      await waitFor(() => expect(updates).toContain('Archived'));
+    } finally { observer.disconnect(); }
+  });
+
+  it.each(['New movie', 'Edit Movie 1', 'Movie 1'])(
+    'carries the current filtered list URL through %s navigation', async (label) => {
+      fetchMock.mockResolvedValue(moviePage([movie(1)], { page: 1, totalPages: 3, totalElements: 41 }));
+      const path = '/admin/movies?status=PUBLISHED&page=2&sort=title';
+      renderList({ path });
+      fireEvent.click(await screen.findByRole('link', { name: label }));
+      expect(screen.getByTestId('location-state')).toHaveTextContent(JSON.stringify({ returnTo: path }));
+    }
+  );
+
   it('archives once during a double submit, refreshes all movie queries and focuses the heading', async () => {
     const held = deferredResponse();
     let archived = false;
@@ -186,9 +267,9 @@ describe('AdminMovieListPage', () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
     held.release(new Response(null, { status: 204 }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(screen.getByRole('status')).toHaveTextContent('Archived');
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Movie updates' })).toHaveTextContent('Archived'));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Archive Movie 1' })).not.toBeInTheDocument());
-    expect(queryClient.getQueryState(movieKeys.detail(movie(1).id))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(movieKeys.detail(movie(1).id))).toBeUndefined();
     expect(screen.getByRole('heading', { level: 1, name: 'Movies' })).toHaveFocus();
   });
 

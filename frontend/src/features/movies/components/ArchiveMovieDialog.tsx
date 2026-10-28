@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { secondaryButtonClass } from '../../../components/buttonStyles';
 import { ErrorState } from '../../../components/StateViews';
+import { useModalFocus } from '../../../components/useModalFocus';
 import { ApiRequestError, AuthenticationSupersededError } from '../../../lib/api/client';
 import { useApiClient } from '../../auth/AuthContext';
 import { archiveMovie } from '../adminMoviesApi';
@@ -26,13 +27,14 @@ export function ArchiveMovieDialog({ movie, returnFocusTo, onClose, onArchived, 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
-  useEffect(() => {
-    cancelRef.current?.focus();
-    return () => {
+  useModalFocus({
+    dialogRef, initialFocusRef: cancelRef,
+    onEscape: () => { if (!inFlight.current) onClose(); },
+    returnFocus: () => {
       if (!completed.current && returnFocusTo.isConnected) returnFocusTo.focus();
       else document.getElementById('admin-movies-heading')?.focus();
-    };
-  }, [returnFocusTo]);
+    }
+  });
 
   const confirm = async () => {
     if (inFlight.current) return;
@@ -43,11 +45,13 @@ export function ArchiveMovieDialog({ movie, returnFocusTo, onClose, onArchived, 
     setError(null);
     try {
       await archiveMovie(apiClient, movie.id);
+      queryClient.removeQueries({ queryKey: movieKeys.detail(movie.id), exact: true });
       completed.current = true;
       onArchived('Archived');
       void queryClient.invalidateQueries({ queryKey: movieKeys.all });
     } catch (failure) {
       if (failure instanceof ApiRequestError && failure.status === 404) {
+        queryClient.removeQueries({ queryKey: movieKeys.detail(movie.id), exact: true });
         completed.current = true;
         onArchived('Movie no longer exists');
         void queryClient.invalidateQueries({ queryKey: movieKeys.all });
@@ -63,37 +67,12 @@ export function ArchiveMovieDialog({ movie, returnFocusTo, onClose, onArchived, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) event.preventDefault(); }}>
       <div
         aria-describedby="archive-movie-description"
         aria-labelledby="archive-movie-title"
         aria-modal="true"
         className="grid w-full max-w-lg gap-5 rounded-lg border border-slate-700 bg-slate-900 p-6 shadow-xl"
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            if (!inFlight.current) onClose();
-          }
-          if (event.key !== 'Tab') return;
-          const buttons = dialogRef.current?.querySelectorAll<HTMLButtonElement>('button:not([disabled])');
-          if (!buttons?.length) {
-            event.preventDefault();
-            dialogRef.current?.focus();
-            return;
-          }
-          const first = buttons[0];
-          const last = buttons[buttons.length - 1];
-          if (![...buttons].some((button) => button === document.activeElement)) {
-            event.preventDefault();
-            (event.shiftKey ? last : first).focus();
-          } else if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
-        }}
         ref={dialogRef}
         role="dialog"
         tabIndex={-1}

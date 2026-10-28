@@ -40,12 +40,16 @@ describe('movie form model', () => {
     expect(validateMovieForm(valid({ slug })).slug).toBeDefined();
   });
 
-  it('counts raw Unicode code points and rejects raw overlong values even if trimming would shorten them', () => {
+  it('checks Unicode code-point limits against the movie payload while person requests retain their raw limit', () => {
     expect(validateMovieForm(valid({ title: '🎬'.repeat(255), description: 'x'.repeat(5000), slug: 'x'.repeat(255) }))).toEqual({});
-    expect(validateMovieForm(valid({ title: ` ${'x'.repeat(255)}` })).title).toBeDefined();
+    expect(validateMovieForm(valid({ title: ` ${'x'.repeat(255)} `, description: `\n${'x'.repeat(5000)}\t` }))).toEqual({});
+    expect(validateMovieForm(valid({ title: '🎬'.repeat(256) })).title).toBeDefined();
     expect(validateMovieForm(valid({ description: 'x'.repeat(5001) })).description).toBeDefined();
     expect(validatePersonName('🎭'.repeat(255))).toBeNull();
     expect(validatePersonName('🎭'.repeat(256))).not.toBeNull();
+    expect(validatePersonName(` ${'x'.repeat(255)}`)).not.toBeNull();
+    expect(validateGenreName(`  ${'a'.repeat(49)}   ${'b'.repeat(50)}  `)).toBeNull();
+    expect(validateGenreName(`${'a'.repeat(50)} ${'b'.repeat(50)}`)).not.toBeNull();
   });
 
   it('mirrors raw control character checks while allowing multiline description and Unicode format characters', () => {

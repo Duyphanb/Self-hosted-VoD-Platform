@@ -26,9 +26,11 @@ export function AdminMovieListPage() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const incomingMessage = savedMessage(location.state);
   const [notice, setNotice] = useState<Notice>(() => incomingMessage ? { text: incomingMessage, entryKey: null } : null);
+  const [statusText, setStatusText] = useState('');
   const [noticeLocationKey, setNoticeLocationKey] = useState(location.key);
   const [selected, setSelected] = useState<{ movie: MovieSummary; trigger: HTMLElement } | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const returnTo = `${location.pathname}${location.search}`;
   const failed = query.isError && !(query.error instanceof AuthenticationSupersededError);
   const rejected = failed && query.error instanceof ApiRequestError && query.error.status === 400
     ? clearRejectedAdminFilters(params, query.error.apiError?.fieldErrors?.map(({ field }) => field) ?? [])
@@ -37,11 +39,19 @@ export function AdminMovieListPage() {
   if (location.key !== noticeLocationKey) {
     setNoticeLocationKey(location.key);
     setNotice(notice?.entryKey === null ? { ...notice, entryKey: location.key } : null);
+    setStatusText('');
   }
+
+  // The region is present before its text changes. Clearing first also announces repeated messages.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setStatusText(notice?.text ?? ''), 0);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   // Consume navigation feedback so Back/Forward or reloading cannot replay it.
   useEffect(() => {
     if (incomingMessage) {
+      headingRef.current?.focus({ preventScroll: true });
       navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, { replace: true, state: null });
     }
   }, [incomingMessage, location.hash, location.pathname, location.search, navigate]);
@@ -77,7 +87,7 @@ export function AdminMovieListPage() {
           <tbody className="grid gap-4 md:table-row-group">
             {query.data.items.map((movie) => (
               <tr className="grid gap-3 rounded-lg border border-slate-700 bg-slate-900 p-4 md:table-row" key={movie.id}>
-                <td className="min-w-0 break-words md:p-3"><Link className="font-semibold text-sky-300 underline" to={`/admin/movies/${movie.id}/edit`}>{movie.title}</Link></td>
+                <td className="min-w-0 break-words md:p-3"><Link className="font-semibold text-sky-300 underline" state={{ returnTo }} to={`/admin/movies/${movie.id}/edit`}>{movie.title}</Link></td>
                 <td className="md:p-3"><span className="text-slate-400 md:hidden">Year: </span>{movie.releaseYear ?? 'Not specified'}</td>
                 <td className="break-words md:p-3"><span className="text-slate-400 md:hidden">Genres: </span>{movie.genres.join(' · ') || 'No genres listed'}</td>
                 <td className="md:p-3"><span className="text-slate-400 md:hidden">Status: </span><MovieStatusBadge status={movie.status} /></td>
@@ -85,13 +95,16 @@ export function AdminMovieListPage() {
                 <td className="md:p-3">
                   <div className="flex flex-wrap items-center gap-3">
                     <Link aria-label={`View ${movie.title}`} className="text-sky-300 underline" to={`/movies/${movie.id}`}>View</Link>
-                    <Link aria-label={`Edit ${movie.title}`} className="text-sky-300 underline" to={`/admin/movies/${movie.id}/edit`}>Edit</Link>
+                    <Link aria-label={`Edit ${movie.title}`} className="text-sky-300 underline" state={{ returnTo }} to={`/admin/movies/${movie.id}/edit`}>Edit</Link>
                     {movie.status !== 'ARCHIVED' ? (
                       <button
                         aria-label={`Archive ${movie.title}`}
                         className="text-rose-300 underline disabled:opacity-50"
                         disabled={query.isPlaceholderData}
-                        onClick={(event) => setSelected({ movie, trigger: event.currentTarget })}
+                        onClick={(event) => {
+                          const trigger = event.currentTarget;
+                          setSelected((current) => current ?? { movie, trigger });
+                        }}
                         type="button"
                       >Archive</button>
                     ) : null}
@@ -116,9 +129,9 @@ export function AdminMovieListPage() {
     <section aria-labelledby="admin-movies-heading" className="grid gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-3xl font-semibold text-white focus:outline-none" id="admin-movies-heading" ref={headingRef} tabIndex={-1}>Movies</h1>
-        <Link className={primaryButtonClass} to="/admin/movies/new">New movie</Link>
+        <Link className={primaryButtonClass} state={{ returnTo }} to="/admin/movies/new">New movie</Link>
       </div>
-      {notice ? <p className="rounded-md border border-emerald-700 bg-emerald-950/50 p-3 text-sm text-emerald-200" role="status">{notice.text}</p> : null}
+      <p aria-atomic="true" aria-label="Movie updates" className={notice ? 'rounded-md border border-emerald-700 bg-emerald-950/50 p-3 text-sm text-emerald-200' : 'sr-only'} role="status">{statusText}</p>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div aria-label="Movie status" className="flex flex-wrap gap-2" role="group">
           {STATUS_FILTERS.map(({ label, value }) => <button aria-pressed={params.status === value} className={secondaryButtonClass} key={label} onClick={() => changeStatus(value)} type="button">{label}</button>)}
@@ -126,7 +139,7 @@ export function AdminMovieListPage() {
         <label className="text-sm text-slate-300">Sort by{' '}<select className="rounded-md border border-slate-600 bg-slate-900 p-2 text-white" onChange={(event) => setSearchParams(adminMovieListSearchParams({ ...params, sort: event.target.value === 'title' ? 'title' : 'latest', page: 1 }), { replace: true })} value={params.sort}><option value="latest">Latest</option><option value="title">Title</option></select></label>
       </div>
       {content}
-      {selected ? <ArchiveMovieDialog movie={selected.movie} onArchived={(message) => { setNotice({ text: message, entryKey: location.key }); setSelected(null); }} onClose={() => setSelected(null)} onForbidden={() => { setSelected(null); setForbidden(true); }} returnFocusTo={selected.trigger} /> : null}
+      {selected ? <ArchiveMovieDialog key={selected.movie.id} movie={selected.movie} onArchived={(message) => { setStatusText(''); setNotice({ text: message, entryKey: location.key }); setSelected(null); }} onClose={() => setSelected(null)} onForbidden={() => { setSelected(null); setForbidden(true); }} returnFocusTo={selected.trigger} /> : null}
     </section>
   );
 }

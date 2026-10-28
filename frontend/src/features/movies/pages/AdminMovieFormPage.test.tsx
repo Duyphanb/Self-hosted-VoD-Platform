@@ -62,7 +62,7 @@ describe('AdminMovieFormPage through the data router', () => {
     fireEvent.blur(title);
     expect(screen.getByLabelText('Title')).toHaveAttribute('aria-invalid', 'true');
     expect(screen.getByLabelText('Slug')).toHaveFocus();
-    expect(errorSummary()).not.toHaveFocus();
+    expect(screen.queryByRole('heading', { name: 'The movie could not be saved' })).not.toBeInTheDocument();
     change('Title', 'A valid title');
     expect(screen.getByLabelText('Title')).toHaveAttribute('aria-invalid', 'false');
   });
@@ -117,9 +117,49 @@ describe('AdminMovieFormPage through the data router', () => {
     await waitFor(() => expect(screen.getByLabelText('Slug')).toHaveAttribute('aria-invalid', 'true'));
     expect(errorSummary()).toHaveFocus();
     expect(screen.getByLabelText('Slug')).toHaveAccessibleDescription('This slug is already used');
+    act(() => screen.getByLabelText('Slug').focus());
+    act(() => screen.getByLabelText('Title').focus());
+    expect(screen.getByLabelText('Slug')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Slug')).toHaveAccessibleDescription('This slug is already used');
+    expect(errorSummary()).toHaveTextContent('This slug is already used');
     change('Slug', 'a-unique-slug');
     expect(screen.getByLabelText('Slug')).toHaveAttribute('aria-invalid', 'false');
     expect(mutations()).toHaveLength(1);
+  });
+
+  it('retains a server error on another credit when focus or a different person changes', async () => {
+    serve((_url, init) => init?.method === 'PUT' ? apiError(400, 'VALIDATION_ERROR', [
+      { field: 'people[1].personId', message: 'must identify an existing person' }
+    ]) : undefined);
+    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    fireEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
+    const secondPerson = screen.getByLabelText('Person 2');
+    await waitFor(() => expect(secondPerson).toHaveAttribute('aria-invalid', 'true'));
+
+    act(() => screen.getByLabelText('Person 1').focus());
+    act(() => screen.getByLabelText('Role 1').focus());
+    expect(secondPerson).toHaveAttribute('aria-invalid', 'true');
+    change('Person 1', 'A different person to select');
+    expect(secondPerson).toHaveAttribute('aria-invalid', 'true');
+    expect(secondPerson).toHaveAccessibleDescription('must identify an existing person');
+    expect(errorSummary()).toHaveTextContent('must identify an existing person');
+  });
+
+  it('does not invalidate a newly added untouched credit or show a failed-save summary', async () => {
+    renderForm();
+    await fillCreate();
+    const add = screen.getByRole('button', { name: 'Add credit' });
+    act(() => add.focus());
+    fireEvent.click(add);
+    const person = screen.getByLabelText('Person 1');
+    act(() => person.focus());
+    expect(person).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.queryByRole('heading', { name: 'The movie could not be saved' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Pick an existing person or explicitly create a new person.')).not.toBeInTheDocument();
+    change('Person 1', 'A new person');
+    act(() => screen.getByRole('button', { name: "Create new person 'A new person'" }).focus());
+    expect(screen.queryByRole('heading', { name: 'The movie could not be saved' })).not.toBeInTheDocument();
+    expect(mutations()).toHaveLength(0);
   });
 
   it.each(['DRAFT', 'PUBLISHED'])('prefills every edit field and restores an archived movie to %s', async (status) => {
@@ -164,12 +204,51 @@ describe('AdminMovieFormPage through the data router', () => {
     if (!form) throw new Error('Movie form is missing');
     fireEvent.submit(form);
     fireEvent.submit(form);
-    expect(mutations()).toHaveLength(1);
+    await waitFor(() => expect(mutations()).toHaveLength(1));
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
     expect(screen.getByLabelText('Title')).toBeDisabled();
     held.release(json(movieDetail()));
     expect(await screen.findByText('Movie created')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it.each(['header', 'back', 'sign-out'] as const)('waits for an already-sent save when leaving through %s', async (departure) => {
+    const held = deferredResponse();
+    serve((_url, init) => init?.method === 'POST' ? held.promise : undefined);
+    const { router, queryClient } = renderForm({ entries: ['/account', '/admin/movies/new'] });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    await fillCreate();
+    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
+    if (departure === 'header') fireEvent.click(screen.getByRole('link', { name: 'Admin' }));
+    else if (departure === 'sign-out') fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    else await act(async () => { await router.navigate(-1); });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Saving movie…' });
+    expect(within(dialog).queryByRole('button', { name: /Discard/ })).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/admin/movies/new');
+    expect(screen.getByLabelText('Title')).toHaveValue('New movie title');
+    expect(mutations()).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Stay on page' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/admin/movies/new');
+    held.release(json(movieDetail(), 201));
+    expect(await screen.findByText('Movie created')).toBeInTheDocument();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: movieKeys.all });
+  });
+
+  it('still invalidates movie queries when a sent save completes after a forced unmount', async () => {
+    const held = deferredResponse();
+    serve((_url, init) => init?.method === 'POST' ? held.promise : undefined);
+    const view = renderForm();
+    const invalidate = vi.spyOn(view.queryClient, 'invalidateQueries');
+    await fillCreate();
+    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
+    await waitFor(() => expect(mutations()).toHaveLength(1));
+    const signal = mutations()[0][1]?.signal;
+    view.unmount();
+    expect(signal?.aborted ?? false).toBe(false);
+    held.release(json(movieDetail(), 201));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: movieKeys.all }));
   });
 
   it('searches for an existing person and sends their ID and selected role when creating a movie', async () => {
@@ -245,6 +324,98 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 
+  it('fetches after entering Edit instead of using cached public metadata, even when the cache is fresh', async () => {
+    const freshResponse = deferredResponse();
+    const freshMovie = movieDetail({ description: 'Description changed on the server.', genres: ['Comedy'] });
+    let detailReads = 0;
+    serve((url, init) => {
+      if (url.pathname === `/api/v1/movies/${movieId}` && !init?.method) {
+        detailReads += 1;
+        return detailReads === 1 ? json(movieDetail()) : freshResponse.promise;
+      }
+      if (init?.method === 'PUT') return json(movieDetail({ ...freshMovie, title: 'Retitled after a fresh GET' }));
+      return undefined;
+    });
+    const { queryClient } = renderForm({ path: `/movies/${movieId}` });
+    await screen.findByRole('heading', { level: 1, name: 'Existing movie' });
+    queryClient.setQueryDefaults(movieKeys.detail(movieId), { staleTime: Infinity });
+    fireEvent.click(screen.getByRole('link', { name: 'Edit movie' }));
+    await waitFor(() => expect(detailReads).toBe(2));
+    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
+    expect(screen.getByText('Loading movie…')).toBeInTheDocument();
+    freshResponse.release(json(freshMovie));
+    expect(await screen.findByLabelText('Description')).toHaveValue(freshMovie.description);
+    expect(screen.getByRole('button', { name: 'Remove genre Comedy' })).toBeInTheDocument();
+    change('Title', 'Retitled after a fresh GET');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Changes saved')).toBeInTheDocument();
+    expect(JSON.parse(String(mutations()[0][1]?.body))).toMatchObject({ description: freshMovie.description, genres: ['Comedy'] });
+  });
+
+  it('reopens Edit with Archived status after Cancel and Archive, without republishing on a metadata save', async () => {
+    let serverMovie = movieDetail();
+    serve((url, init) => {
+      if (url.pathname === '/api/v1/admin/movies') return adminPage(serverMovie);
+      if (url.pathname !== `/api/v1/movies/${movieId}`) return undefined;
+      if (init?.method === 'DELETE') {
+        serverMovie = { ...serverMovie, status: 'ARCHIVED' };
+        return new Response(null, { status: 204 });
+      }
+      if (init?.method === 'PUT') {
+        serverMovie = { ...serverMovie, ...JSON.parse(String(init.body)), people: serverMovie.people };
+      }
+      return json(serverMovie);
+    });
+    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    await screen.findByLabelText('Title');
+    fireEvent.click(screen.getByRole('link', { name: 'Cancel' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive Existing movie' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByRole('link', { name: 'Edit Existing movie' }));
+    expect(await screen.findByLabelText('Status')).toHaveValue('ARCHIVED');
+    expect(screen.getByText('This movie is archived. Choose Draft or Published to restore it.')).toBeInTheDocument();
+    change('Description', 'Metadata update while the movie stays archived.');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Changes saved')).toBeInTheDocument();
+    expect(JSON.parse(String(mutations()[0][1]?.body)).status).toBe('ARCHIVED');
+    expect(serverMovie.status).toBe('ARCHIVED');
+  });
+
+  it('caches the saved detail before a cancelled refetch and waits for a fresh GET on reopening', async () => {
+    let serverMovie = movieDetail();
+    let saved = false;
+    const delayedReads: ReturnType<typeof deferredResponse>[] = [];
+    serve((url, init) => {
+      if (url.pathname === '/api/v1/admin/movies') return adminPage(serverMovie);
+      if (url.pathname !== `/api/v1/movies/${movieId}`) return undefined;
+      if (init?.method === 'PUT') {
+        serverMovie = { ...serverMovie, ...JSON.parse(String(init.body)), people: serverMovie.people };
+        saved = true;
+        return json(serverMovie);
+      }
+      if (saved) {
+        const response = deferredResponse();
+        delayedReads.push(response);
+        return response.promise;
+      }
+      return json(serverMovie);
+    });
+    const { queryClient } = renderForm({ path: `/admin/movies/${movieId}/edit` });
+    await screen.findByLabelText('Title');
+    change('Title', 'The saved title');
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Changes saved')).toBeInTheDocument();
+    expect(queryClient.getQueryData<MovieDetail>(movieKeys.detail(movieId))?.title).toBe('The saved title');
+    const previousReads = delayedReads.length;
+    fireEvent.click(await screen.findByRole('link', { name: 'Edit The saved title' }));
+    await waitFor(() => expect(delayedReads.length).toBeGreaterThan(previousReads));
+    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
+    for (const response of delayedReads) response.release(json(serverMovie));
+    expect(await screen.findByLabelText('Title')).toHaveValue('The saved title');
+    expect(queryClient.getQueryData<MovieDetail>(movieKeys.detail(movieId))?.title).toBe('The saved title');
+  });
+
   it('keeps the initial archived status and its option when a background refresh returns Published', async () => {
     let currentStatus: MovieDetail['status'] = 'ARCHIVED';
     serve((url, init) => url.pathname === `/api/v1/movies/${movieId}` && !init?.method
@@ -292,6 +463,27 @@ describe('AdminMovieFormPage through the data router', () => {
     await fillCreate();
     fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows Movie not found when the edit PUT reports that the movie disappeared', async () => {
+    serve((_url, init) => init?.method === 'PUT' ? apiError(404, 'MOVIE_NOT_FOUND') : undefined);
+    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    fireEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByRole('heading', { name: 'Movie not found' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'The movie could not be saved' })).not.toBeInTheDocument();
+  });
+
+  it('shows Forbidden when explicit person creation is denied by the server', async () => {
+    serve((url, init) => url.pathname === '/api/v1/admin/people' && init?.method === 'POST'
+      ? apiError(403, 'FORBIDDEN') : undefined);
+    renderForm();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add credit' }));
+    change('Person 1', 'Someone');
+    fireEvent.click(screen.getByRole('button', { name: "Create new person 'Someone'" }));
+    expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
@@ -343,7 +535,9 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(discard).toHaveFocus();
     fireEvent.keyDown(discard, { key: 'Tab' });
     expect(keep).toHaveFocus();
-    fireEvent.keyDown(keep, { key: 'Escape' });
+    act(() => screen.getByLabelText('Title').focus());
+    expect(keep).toHaveFocus();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Title')).toHaveValue('Keep this draft');
     expect(cancel).toHaveFocus();
@@ -365,6 +559,25 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
   });
 
+  it('asks before a deliberate sign-out discards a draft and does not log out when editing continues', async () => {
+    serve((url) => url.pathname === '/api/v1/auth/logout' ? new Response(null, { status: 204 }) : undefined);
+    renderForm();
+    await screen.findByLabelText('Title');
+    change('Title', 'Keep this draft until sign-out is confirmed');
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Discard changes?' });
+    const logoutRequests = () => fetchMock.mock.calls.filter(([input]) => new URL(String(input), 'http://localhost').pathname === '/api/v1/auth/logout');
+    expect(logoutRequests()).toHaveLength(0);
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' })); });
+    expect(screen.getByLabelText('Title')).toHaveValue('Keep this draft until sign-out is confirmed');
+    expect(logoutRequests()).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeInTheDocument();
+    expect(logoutRequests()).toHaveLength(1);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('blocks browser Back while dirty and proceeds after the admin confirms', async () => {
     const { router } = renderForm({ entries: ['/account', '/admin/movies/new'] });
     await screen.findByLabelText('Title');
@@ -384,6 +597,26 @@ describe('AdminMovieFormPage through the data router', () => {
     const { router } = renderForm();
     fireEvent.click(await screen.findByRole('link', { name: 'Cancel' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/admin/movies'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it.each(['new', 'edit'] as const)('returns the %s form to its filtered list and replaces the submitted history entry', async (mode) => {
+    const listPath = '/admin/movies?status=PUBLISHED&page=2&sort=title';
+    serve((url, init) => url.pathname === '/api/v1/admin/movies'
+      ? adminPage(movieDetail(), 1)
+      : init?.method === 'PUT' ? json(movieDetail({ title: 'Saved from filtered list' })) : undefined);
+    const { router } = renderForm({ entries: ['/account', listPath] });
+    fireEvent.click(await screen.findByRole('link', { name: mode === 'new' ? 'New movie' : 'Edit Existing movie' }));
+    expect(await screen.findByRole('link', { name: 'Cancel' })).toHaveAttribute('href', listPath);
+    if (mode === 'new') await fillCreate();
+    else change('Title', 'Saved from filtered list');
+    fireEvent.click(screen.getByRole('button', { name: mode === 'new' ? 'Create movie' : 'Save changes' }));
+    expect(await screen.findByText(mode === 'new' ? 'Movie created' : 'Changes saved')).toBeInTheDocument();
+    expect(`${router.state.location.pathname}${router.state.location.search}`).toBe(listPath);
+    expect(screen.getByRole('heading', { level: 1, name: 'Movies' })).toHaveFocus();
+    await act(async () => { await router.navigate(-1); });
+    expect(`${router.state.location.pathname}${router.state.location.search}`).toBe(listPath);
+    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
@@ -460,6 +693,9 @@ function movieDetail(overrides: Partial<MovieDetail> = {}): MovieDetail {
       { personId: actorId, name: 'Existing actor', role: 'ACTOR' }, { personId: directorId, name: 'Existing director', role: 'DIRECTOR' }
     ], averageRating: null, posterUrl: null, status: 'PUBLISHED', videoStatus: null, userRating: null, inWatchlist: false, playbackProgress: null, ...overrides
   };
+}
+function adminPage(movie: MovieDetail, page = 0): Response {
+  return json({ items: [movie], page: { page, size: 20, totalElements: page * 20 + 1, totalPages: page + 1 } });
 }
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }); }
 function apiError(status: number, code: string, fieldErrors?: Array<{ field: string; message: string }>, requestId?: string) {

@@ -19,6 +19,73 @@ describe('CreditsEditor', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it('adds distinct credit rows when randomUUID is unavailable on an HTTP origin', async () => {
+    vi.stubGlobal('crypto', { randomUUID: undefined });
+    renderEditor();
+    const add = await screen.findByRole('button', { name: 'Add credit' });
+    fireEvent.click(add);
+    fireEvent.click(add);
+    expect(screen.getByLabelText('Person 1')).toHaveValue('');
+    expect(screen.getByLabelText('Person 2')).toHaveValue('');
+    expect(new Set(credits().map((row) => row.key)).size).toBe(2);
+  });
+
+  it('preserves both person IDs when two explicit creations finish in the same render batch', async () => {
+    let finishAlpha: (response: Response) => void = () => undefined;
+    let finishBeta: (response: Response) => void = () => undefined;
+    const alpha = new Promise<Response>((resolve) => { finishAlpha = resolve; });
+    const beta = new Promise<Response>((resolve) => { finishBeta = resolve; });
+    fetchMock.mockImplementation(async (_input, init) => init?.method === 'POST'
+      ? JSON.parse(String(init.body)).name === 'Alpha' ? alpha : beta
+      : peopleResponse());
+    renderEditor({ initial: [
+      { key: 'alpha', personId: '', name: 'Alpha', role: 'ACTOR' },
+      { key: 'beta', personId: '', name: 'Beta', role: 'DIRECTOR' }
+    ] });
+    fireEvent.click(await screen.findByRole('button', { name: "Create new person 'Alpha'" }));
+    fireEvent.click(screen.getByRole('button', { name: "Create new person 'Beta'" }));
+    await act(async () => {
+      finishAlpha(jsonResponse({ id: firstId, name: 'Alpha', slug: 'alpha' }, 201));
+      finishBeta(jsonResponse({ id: secondId, name: 'Beta', slug: 'beta' }, 201));
+    });
+    await waitFor(() => expect(credits().map((row) => row.personId)).toEqual([firstId, secondId]));
+    expect(screen.queryByRole('button', { name: /Create new person/ })).not.toBeInTheDocument();
+    expect(postRequests()).toHaveLength(2);
+  });
+
+  it('keeps search feedback in the same mounted live region from loading through no results', async () => {
+    let finishSearch: (response: Response) => void = () => undefined;
+    fetchMock.mockReturnValue(new Promise<Response>((resolve) => { finishSearch = resolve; }));
+    renderEditor();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add credit' }));
+    const status = screen.getByRole('status', { name: 'People search feedback for credit 1' });
+    expect(status).toBeEmptyDOMElement();
+    fireEvent.focus(screen.getByLabelText('Person 1'));
+    expect(screen.getByRole('status', { name: 'People search feedback for credit 1' })).toBe(status);
+    expect(status).toHaveTextContent('Searching people…');
+    await act(async () => finishSearch(jsonResponse({ items: [], page: { page: 0, size: 20, totalElements: 0, totalPages: 0 } })));
+    await waitFor(() => expect(status).toHaveTextContent('No matching people.'));
+    fireEvent.keyDown(screen.getByLabelText('Person 1'), { key: 'Escape' });
+    expect(screen.getByRole('status', { name: 'People search feedback for credit 1' })).toBe(status);
+    expect(status).toBeEmptyDOMElement();
+  });
+
+  it('keeps focus on the moved row controls without opening a people search', async () => {
+    renderEditor({ initial: [
+      { key: 'one', personId: '', name: '', role: 'ACTOR' },
+      { key: 'two', personId: '', name: '', role: 'ACTOR' }
+    ] });
+    const down = await screen.findByRole('button', { name: 'Move credit 1 down' });
+    down.focus();
+    fireEvent.click(down);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Move credit 2 up' })).toHaveFocus());
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Move credit 2 up' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Move credit 1 down' })).toHaveFocus());
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('debounces person search, supports keyboard selection and retains the selected person ID', async () => {
     renderEditor();
     fireEvent.click(await screen.findByRole('button', { name: 'Add credit' }, { timeout: 5_000 }));
@@ -119,13 +186,16 @@ describe('CreditsEditor', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Person 1' }), { target: { value: 'Brand New Person' } });
     expect(postRequests()).toHaveLength(0);
     const create = screen.getByRole('button', { name: "Create new person 'Brand New Person'" });
+    create.focus();
     fireEvent.click(create);
     fireEvent.click(create);
     expect(postRequests()).toHaveLength(1);
     expect(JSON.parse(String(postRequests()[0][1]?.body))).toEqual({ name: 'Brand New Person' });
     expect(screen.getByText(/saved immediately, even if you cancel/)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Credit 1' })).toHaveFocus();
     await act(async () => complete(jsonResponse({ id: secondId, name: 'Brand New Person', slug: 'brand-new-person' }, 201)));
     await waitFor(() => expect(credits()[0].personId).toBe(secondId));
+    await waitFor(() => expect(screen.getByLabelText('Person 1')).toHaveFocus());
   });
 
   it('rejects invalid person names locally and maps a create-person name error to that row', async () => {
@@ -140,19 +210,23 @@ describe('CreditsEditor', () => {
     expect(postRequests()).toHaveLength(0);
     expect(screen.getByRole('alert')).toHaveTextContent(/255/);
     fireEvent.change(input, { target: { value: 'Valid Name' } });
-    fireEvent.click(screen.getByRole('button', { name: /Create new person/ }));
+    const create = screen.getByRole('button', { name: /Create new person/ });
+    create.focus();
+    fireEvent.click(create);
     expect(await screen.findByRole('alert')).toHaveTextContent('Pick another name');
     expect(input).toHaveAccessibleDescription('Pick another name');
+    await waitFor(() => expect(input).toHaveFocus());
   });
 
   it('associates indexed server errors with person and role controls and respects the credit limit', async () => {
     renderEditor({ initial: Array.from({ length: 50 }, (_, index) => ({ ...credit(firstId, `Name ${index}`), key: String(index) })), errors: {
       'people[0].personId': 'Select a different person', 'people[0].role': 'Choose a supported role'
     } });
-    const input = await screen.findByRole('combobox', { name: 'Person 1' });
+    const input = await screen.findByLabelText('Person 1');
     expect(input).toHaveAccessibleDescription('Select a different person');
-    expect(screen.getByRole('combobox', { name: 'Role 1' })).toHaveAccessibleDescription('Choose a supported role');
-    expect(screen.getByRole('button', { name: 'Add credit' })).toBeDisabled();
+    expect(screen.getByLabelText('Role 1')).toHaveAccessibleDescription('Choose a supported role');
+    // Keep the 50-row boundary coverage without computing accessible names for every row control.
+    expect(screen.getByText('Add credit', { selector: 'button' })).toBeDisabled();
   });
 
   it('clears a selected ID when its name is edited and closes search with Escape', async () => {

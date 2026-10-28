@@ -16,9 +16,29 @@ interface CreditsEditorProps {
   onForbidden?: () => void;
 }
 
+let nextCreditKey = 0;
+
 export function CreditsEditor({ value, onChange, errors = {}, disabled = false, onForbidden }: CreditsEditorProps) {
   const latest = useRef(value);
-  useLayoutEffect(() => { latest.current = value; }, [value]);
+  const moveFocus = useRef<{ key: string; direction: 'up' | 'down' } | null>(null);
+  useLayoutEffect(() => {
+    latest.current = value;
+    const moved = moveFocus.current;
+    if (!moved) return;
+    moveFocus.current = null;
+    const position = value.findIndex((credit) => credit.key === moved.key);
+    if (position < 0) return;
+    const preferred = document.getElementById(`movie-people-${position}-move-${moved.direction}`);
+    const opposite = document.getElementById(`movie-people-${position}-move-${moved.direction === 'up' ? 'down' : 'up'}`);
+    if (preferred instanceof HTMLButtonElement && !preferred.disabled) preferred.focus();
+    else opposite?.focus();
+  }, [value]);
+
+  const change = (next: MovieFormCredit[]) => {
+    // Async creations can complete in one React batch; the next update must see this array now.
+    latest.current = next;
+    onChange(next);
+  };
 
   const update = (key: string, patch: Partial<MovieFormCredit>): string | null => {
     const credits = latest.current;
@@ -28,18 +48,18 @@ export function CreditsEditor({ value, onChange, errors = {}, disabled = false, 
     if (next.personId && credits.some((credit) => credit.key !== key && credit.personId === next.personId && credit.role === next.role)) {
       return 'This person already has this role.';
     }
-    onChange(credits.map((credit) => credit.key === key ? next : credit));
+    change(credits.map((credit) => credit.key === key ? next : credit));
     return null;
   };
 
   const move = (index: number, step: number) => {
     if (disabled) return;
-    const next = [...value];
+    const next = [...latest.current];
     const destination = index + step;
     if (destination < 0 || destination >= next.length) return;
     [next[index], next[destination]] = [next[destination], next[index]];
-    onChange(next);
-    window.setTimeout(() => document.getElementById(`movie-people-${destination}-personId`)?.focus(), 0);
+    moveFocus.current = { key: next[destination].key, direction: step < 0 ? 'up' : 'down' };
+    change(next);
   };
 
   return (
@@ -56,7 +76,7 @@ export function CreditsEditor({ value, onChange, errors = {}, disabled = false, 
           onMove={(step) => move(index, step)}
           onRemove={() => {
             if (disabled) return;
-            onChange(value.filter((row) => row.key !== credit.key));
+            change(latest.current.filter((row) => row.key !== credit.key));
             window.setTimeout(() => document.getElementById(index < value.length - 1 ? `movie-people-${index}-personId` : 'movie-people')?.focus(), 0);
           }}
           onUpdate={(patch) => update(credit.key, patch)}
@@ -69,7 +89,10 @@ export function CreditsEditor({ value, onChange, errors = {}, disabled = false, 
         className={`${secondaryButtonClass} justify-self-start`}
         disabled={disabled || value.length >= 50}
         id="movie-people"
-        onClick={() => onChange([...value, { key: crypto.randomUUID(), personId: '', name: '', role: 'ACTOR' }])}
+        onClick={() => {
+          if (disabled || latest.current.length >= 50) return;
+          change([...latest.current, { key: `new-credit-${++nextCreditKey}`, personId: '', name: '', role: 'ACTOR' }]);
+        }}
         type="button"
       >Add credit</button>
     </div>
@@ -100,6 +123,9 @@ function CreditRow({ credit, index, total, errors, disabled, onUpdate, onMove, o
   const createInFlight = useRef(false);
   const mounted = useRef(false);
   const latestUpdate = useRef(onUpdate);
+  const rowRef = useRef<HTMLFieldSetElement>(null);
+  const personRef = useRef<HTMLInputElement>(null);
+  const restoreCreationFocus = useRef(false);
   const listId = useId();
   const inputId = `movie-people-${index}-personId`;
   const errorId = `${inputId}-error`;
@@ -115,6 +141,12 @@ function CreditRow({ credit, index, total, errors, disabled, onUpdate, onMove, o
   const busy = disabled || creating;
 
   useLayoutEffect(() => { latestUpdate.current = onUpdate; }, [onUpdate]);
+  useLayoutEffect(() => {
+    if (!creating && !disabled && restoreCreationFocus.current) {
+      restoreCreationFocus.current = false;
+      personRef.current?.focus();
+    }
+  }, [creating, disabled]);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -141,6 +173,8 @@ function CreditRow({ credit, index, total, errors, disabled, onUpdate, onMove, o
     const invalid = validatePersonName(credit.name);
     if (invalid) { setLocalError(invalid); return; }
     createInFlight.current = true;
+    // Keep a stable focus target while this row's controls become disabled.
+    rowRef.current?.focus();
     setCreating(true);
     setLocalError(null);
     try {
@@ -158,12 +192,15 @@ function CreditRow({ credit, index, total, errors, disabled, onUpdate, onMove, o
       }
     } finally {
       createInFlight.current = false;
-      if (mounted.current) setCreating(false);
+      if (mounted.current) {
+        restoreCreationFocus.current = true;
+        setCreating(false);
+      }
     }
   };
 
   return (
-    <fieldset className="grid min-w-0 gap-3 rounded-md border border-slate-700 p-4" disabled={busy}>
+    <fieldset aria-busy={creating} className="grid min-w-0 gap-3 rounded-md border border-slate-700 p-4 focus:outline-none focus:ring-2 focus:ring-sky-400" disabled={busy} ref={rowRef} tabIndex={-1}>
       <legend className="px-1 text-sm font-medium">Credit {index + 1}</legend>
       <div className="relative grid gap-2" onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
@@ -201,6 +238,7 @@ function CreditRow({ credit, index, total, errors, disabled, onUpdate, onMove, o
             }
           }}
           role="combobox"
+          ref={personRef}
           value={credit.name}
         />
         {open ? (
@@ -214,8 +252,9 @@ function CreditRow({ credit, index, total, errors, disabled, onUpdate, onMove, o
             ))}
           </ul>
         ) : null}
-        {canSearch && people.isFetching ? <p className="text-sm text-slate-400" role="status">Searching people…</p> : null}
-        {canSearch && people.data && !options.length ? <p className="text-sm text-slate-400">No matching people.</p> : null}
+        <p aria-atomic="true" aria-label={`People search feedback for credit ${index + 1}`} className="text-sm text-slate-400" role="status">
+          {canSearch ? people.isFetching ? 'Searching people…' : people.data ? options.length ? `${people.data.page.totalElements} matching people.` : 'No matching people.' : '' : ''}
+        </p>
         {canSearch && people.data && people.data.page.totalPages > 1 ? (
           <div aria-label={`People search pages for credit ${index + 1}`} className="flex flex-wrap items-center gap-2" role="group">
             <button
@@ -264,8 +303,8 @@ function CreditRow({ credit, index, total, errors, disabled, onUpdate, onMove, o
       </select>
       {roleError ? <p className="text-sm text-rose-300" id={`${roleId}-error`} role="alert">{roleError}</p> : null}
       <div className="flex flex-wrap gap-2">
-        <button aria-label={`Move credit ${index + 1} up`} className={secondaryButtonClass} disabled={index === 0} onClick={() => onMove(-1)} type="button">Move up</button>
-        <button aria-label={`Move credit ${index + 1} down`} className={secondaryButtonClass} disabled={index === total - 1} onClick={() => onMove(1)} type="button">Move down</button>
+        <button aria-label={`Move credit ${index + 1} up`} className={secondaryButtonClass} disabled={index === 0} id={`movie-people-${index}-move-up`} onClick={() => onMove(-1)} type="button">Move up</button>
+        <button aria-label={`Move credit ${index + 1} down`} className={secondaryButtonClass} disabled={index === total - 1} id={`movie-people-${index}-move-down`} onClick={() => onMove(1)} type="button">Move down</button>
         <button aria-label={`Remove credit ${index + 1}`} className={secondaryButtonClass} onClick={onRemove} type="button">Remove</button>
       </div>
     </fieldset>
