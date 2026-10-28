@@ -64,6 +64,13 @@ refresh tokens (`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = ..
 AND revoked_at IS NULL`). An access token already issued stays valid until it
 expires (60 minutes by default); the accepted delay is tracked in issue #72.
 
+## Database Collation
+
+PostgreSQL clusters are created with Vietnamese ICU collation (`POSTGRES_INITDB_ARGS` in `deploy/docker-compose.yml`, ADR-009), so titles and names sort in Vietnamese alphabetical order. The setting only applies when a cluster is first initialised:
+
+- An existing `postgres_data` volume keeps the collation it was created with. To adopt the new one, dump the database, recreate the volume and restore the dump; recreating without a dump deletes the data. Check the active setting with `SELECT datlocprovider, daticulocale FROM pg_database WHERE datname = current_database();` (expect `i` and `vi`).
+- After an image change that upgrades ICU (including switching image variants, #54), run `REINDEX DATABASE` before serving traffic, because index order may change.
+
 ## Edge Port Binding
 
 `NGINX_HTTP_PORT` sets the host address and port that publish the Nginx edge.

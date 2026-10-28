@@ -167,6 +167,8 @@ jobs:
           POSTGRES_DB: vod
           POSTGRES_USER: vod
           POSTGRES_PASSWORD: vod
+          # Same cluster collation as deploy/docker-compose.yml (ADR-009).
+          POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=vi
         ports:
           - 5432:5432
         options: >-
