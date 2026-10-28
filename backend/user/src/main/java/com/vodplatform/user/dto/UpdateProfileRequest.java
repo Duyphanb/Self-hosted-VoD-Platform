@@ -1,9 +1,8 @@
 package com.vodplatform.user.dto;
 
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
+import com.vodplatform.shared.validation.ValidDisplayName;
 
 public record UpdateProfileRequest(
-        @NotNull @Size(min = 2, max = 100) String displayName
+        @ValidDisplayName String displayName
 ) {
 }

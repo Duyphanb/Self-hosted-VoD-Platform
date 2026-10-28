@@ -3,11 +3,35 @@ import { ApiRequestError } from '../../lib/api/client';
 import {
   authFormFailure,
   resolvePostLoginPath,
+  trimDisplayName,
+  validateDisplayName,
   validateLoginForm,
   validateRegistrationForm
 } from './authForm';
 
 describe('auth form validation', () => {
+  it.each(['  ', '\u00a0\u2007\u202f', '\u0000Viewer', 'Viewer\u0000', 'View\rer', 'View\ner', '\tViewer', 'View\u007fer', 'View\u009fer', ' A ', 'A'.repeat(101)])(
+    'rejects invalid display name %j before registration', (displayName) => {
+      expect(validateRegistrationForm({ email: 'a@b.co', password: 'password', displayName }).displayName)
+        .toBeTruthy();
+    }
+  );
+
+  it('rejects every Unicode Cc character, including at the edges before trimming', () => {
+    for (let codePoint = 0; codePoint <= 0x9f; codePoint += 1) {
+      if (codePoint <= 0x1f || codePoint >= 0x7f) {
+        expect(validateDisplayName(`${String.fromCodePoint(codePoint)}AB`)).toMatch(/control characters/);
+        expect(validateDisplayName(`AB${String.fromCodePoint(codePoint)}`)).toMatch(/control characters/);
+      }
+    }
+  });
+
+  it.each(['AB', 'A'.repeat(100), 'Tên  Việt', 'A\u200b\u202e\ufeffB'])('validates the trimmed wire value and preserves Cf: %j', (name) => {
+    const displayName = `\u00a0\u2007 ${name} \u202f\u3000`;
+    expect(validateRegistrationForm({ email: 'a@b.co', password: 'password', displayName })).toEqual({});
+    expect(trimDisplayName(displayName)).toBe(name);
+  });
+
   it('matches the login request constraints', () => {
     const maximumDomain = Array.from({ length: 4 }, () => 'a'.repeat(63)).join('.');
     expect(validateLoginForm({ email: '', password: '   ' })).toEqual({

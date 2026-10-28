@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--project", required=True)
     parser.add_argument("--base-url", required=True)
     args = parser.parse_args()
-    assert args.project.startswith("vod-auth-audit-"), "Use a dedicated audit project"
+    assert args.project == "vod93" or args.project.startswith("vod-auth-audit-"), "Use a dedicated audit project"
     assert urllib.parse.urlparse(args.base_url).hostname in ("localhost", "127.0.0.1")
     container = args.project + "-postgres-1"
     label = subprocess.check_output([
@@ -34,7 +34,7 @@ def main():
         result = subprocess.run([
             "docker", "exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
             "-U", "vod_app", "-d", "vod_platform", "-At"
-        ], input=statement, text=True, capture_output=True)
+        ], input=statement, text=True, encoding="utf-8", capture_output=True)
         assert result.returncode == 0, "Fixture SQL failed (details withheld)"
         return result.stdout.strip()
 
@@ -63,6 +63,21 @@ def main():
 
     password = "Audit-fixture-only!0917"
     email = "Viewer@example.test"
+    invalid_names = ["  ", "\u00a0\u2007\u202f", "\0Viewer", "Viewer\0", "View\rer", "View\ner",
+                     "\tViewer", "View\u007fer", "View\u009fer", " A "]
+
+    def assert_name_error(result):
+        status, body = result
+        assert status == 400 and body["code"] == "VALIDATION_ERROR", "Expected displayName validation error"
+        assert any(error["field"] == "displayName" for error in body["fieldErrors"])
+
+    for name in invalid_names:
+        assert_name_error(request("/api/v1/auth/register", {
+            "email": "invalid-name@example.test", "password": password, "displayName": name
+        }))
+    assert sql("SELECT count(*) FROM users;") == "0", "Invalid registrations must not write users"
+    print("PASS PostgreSQL registration rejects blank, NUL, CR/LF, tab and other Cc without writes")
+
     def register(address):
         return request("/api/v1/auth/register", {
             "email": address, "password": password, "displayName": "Audit Viewer"
@@ -122,6 +137,21 @@ def main():
     current = request("/api/v1/users/me", token=access)[1]
     assert current["id"] == user_id and current["email"] == email and current["roles"] == ["ROLE_USER"]
     print("PASS generic login failures, JWT, hashed refresh storage, profile ownership")
+
+    for name in invalid_names:
+        assert_name_error(request("/api/v1/users/me", {"displayName": name}, access, "PUT"))
+    assert request("/api/v1/users/me", token=access)[1]["displayName"] == "Updated"
+    assert sql(f"SELECT display_name FROM users WHERE id = '{user_id}';") == "Updated"
+    valid_name = "Tên  Việt\u200b\u202e\ufeff"
+    status, trimmed = request("/api/v1/users/me", {"displayName": "\u00a0 " + valid_name + " \u202f"}, access, "PUT")
+    assert status == 200 and trimmed["displayName"] == valid_name
+    status, registered = request("/api/v1/auth/register", {
+        "email": "trimmed-name@example.test", "password": password,
+        "displayName": "\u2007 " + valid_name + " \u3000"
+    })
+    assert status == 201 and registered["displayName"] == valid_name
+    assert sql("SELECT display_name FROM users WHERE email = 'trimmed-name@example.test';") == valid_name
+    print("PASS PostgreSQL profile rejects invalid names without writes; both endpoints trim and preserve Cf")
 
     outcomes = concurrent([lambda: refresh(original), lambda: refresh(original)])
     assert sorted(status for status, _ in outcomes) == [200, 401]

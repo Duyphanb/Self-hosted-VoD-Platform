@@ -6,6 +6,7 @@ import type { RegisterRequest } from '../authApi';
 import {
   authFormFailure,
   type AuthFieldErrors,
+  trimDisplayName,
   validateRegistrationForm
 } from '../authForm';
 import { AuthField, AuthFormCard, SubmitButton } from '../components/AuthFormCard';
@@ -47,7 +48,7 @@ export function RegisterPage() {
     submitInFlight.current = true;
     setIsSubmitting(true);
     try {
-      const profile = await register(values);
+      const profile = await register({ ...values, displayName: trimDisplayName(values.displayName) });
       setValues(INITIAL_VALUES);
       setRegisteredUser(profile);
     } catch (failure) {
@@ -120,7 +121,6 @@ export function RegisterPage() {
           autoComplete="name"
           error={fieldErrors.displayName}
           label="Display name"
-          maxLength={100}
           minLength={2}
           name="displayName"
           onChange={(event) => updateField('displayName', event.target.value)}
