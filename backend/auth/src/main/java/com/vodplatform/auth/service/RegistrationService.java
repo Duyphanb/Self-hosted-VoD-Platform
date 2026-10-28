@@ -8,6 +8,7 @@ import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
+import com.vodplatform.shared.validation.UnicodeWhitespace;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
@@ -55,7 +56,7 @@ public class RegistrationService {
                 UUID.randomUUID(),
                 request.email(),
                 passwordEncoder.encode(request.password()),
-                request.displayName(),
+                UnicodeWhitespace.trim(request.displayName()),
                 UserStatus.ACTIVE,
                 now,
                 now

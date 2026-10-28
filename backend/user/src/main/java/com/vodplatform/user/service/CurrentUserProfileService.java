@@ -6,6 +6,7 @@ import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
 import com.vodplatform.auth.service.UserProfileMapper;
+import com.vodplatform.shared.validation.UnicodeWhitespace;
 import java.time.Clock;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -36,7 +37,7 @@ public class CurrentUserProfileService {
     @Transactional
     public UserProfile updateDisplayName(UUID authenticatedUserId, String displayName) {
         UserEntity user = loadActiveUser(authenticatedUserId);
-        user.updateDisplayName(displayName, clock.instant());
+        user.updateDisplayName(UnicodeWhitespace.trim(displayName), clock.instant());
         return userProfileMapper.toProfile(user);
     }
 

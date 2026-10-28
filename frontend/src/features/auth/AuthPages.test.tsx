@@ -136,6 +136,42 @@ describe('RegisterPage', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each(['  ', '\u00a0\u2007\u202f', '\u0000Viewer', 'Viewer\u009f', ' A ', '😀', ` ${'A'.repeat(100)} `])('shows inline errors for invalid name %j without HTTP', async (displayName) => {
+    renderAuthRoutes('/register');
+    fillRegistrationForm();
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: displayName } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Display name/);
+    expect(screen.getByLabelText('Display name')).toHaveAttribute('aria-invalid', 'true');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends the trimmed name that was validated, preserving internal spacing and Cf', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(user, 201));
+    renderAuthRoutes('/register');
+    fillRegistrationForm();
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: '\u00a0 Tên  Việt\u200b\u202e\ufeff \u202f' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+    await screen.findByText('Account created for viewer@example.com.');
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/register', expect.objectContaining({
+      body: JSON.stringify({ email: 'viewer@example.com', password: 'strong-password', displayName: 'Tên  Việt\u200b\u202e\ufeff' })
+    }));
+  });
+
+  it('allows a padded name at the raw code-point maximum without a UTF-16 HTML cap', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(user, 201));
+    renderAuthRoutes('/register');
+    fillRegistrationForm();
+    const input = screen.getByLabelText('Display name');
+    expect(input).not.toHaveAttribute('maxlength');
+    fireEvent.change(input, { target: { value: ` ${'😀'.repeat(98)} ` } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+    await screen.findByText('Account created for viewer@example.com.');
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/register', expect.objectContaining({
+      body: JSON.stringify({ email: 'viewer@example.com', password: 'strong-password', displayName: '😀'.repeat(98) })
+    }));
+  });
+
   it('submits displayName and reports success without creating an auth session', async () => {
     fetchMock.mockResolvedValue(jsonResponse(user, 201));
     renderAuthRoutes('/register');

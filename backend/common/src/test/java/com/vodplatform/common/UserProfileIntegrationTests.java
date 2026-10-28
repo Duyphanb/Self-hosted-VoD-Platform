@@ -2,6 +2,7 @@ package com.vodplatform.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,10 +16,15 @@ import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -31,6 +37,7 @@ import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.web.servlet.MockMvc;
+import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(
         properties = {
@@ -41,6 +48,78 @@ import org.springframework.test.web.servlet.MockMvc;
 )
 @AutoConfigureMockMvc
 class UserProfileIntegrationTests {
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @ParameterizedTest
+    @MethodSource("invalidDisplayNames")
+    void rejectsInvalidDisplayNamesOnBothEndpointsWithoutWriting(String name) throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", "invalid-name@example.com", "password", "strong-password", "displayName", name))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("displayName"));
+        assertThat(userRepository.findByEmail("invalid-name@example.com")).isEmpty();
+
+        mockMvc.perform(put("/api/v1/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("displayName", name))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("displayName"));
+        assertThat(userRepository.findById(currentUser.getId()).orElseThrow().getDisplayName())
+                .isEqualTo("Current Viewer");
+    }
+
+    static Stream<String> invalidDisplayNames() {
+        return Stream.of("  ", "\u00a0\u2007\u202f", "\u0000Viewer", "Viewer\u0000", "View\rer", "View\ner",
+                "\tViewer", "View\u007fer", "View\u009fer", " A ", "😀", " 😀 ",
+                " " + "A".repeat(100) + " ", " ".repeat(10000) + "AB", "😀".repeat(101));
+    }
+
+    @ParameterizedTest
+    // H2 varchar counts UTF-16 units; PostgreSQL 51/100-code-point persistence is in auth-runtime-smoke.py.
+    @ValueSource(ints = {2, 50})
+    void acceptsAstralNamesOnBothEndpointsWithinH2Capacity(int count) throws Exception {
+        String name = "😀".repeat(count);
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", "emoji@example.com", "password", "strong-password", "displayName", name))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.displayName").value(name));
+        assertThat(userRepository.findByEmail("emoji@example.com").orElseThrow().getDisplayName()).isEqualTo(name);
+        mockMvc.perform(put("/api/v1/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("displayName", name))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value(name));
+        assertThat(userRepository.findById(currentUser.getId()).orElseThrow().getDisplayName()).isEqualTo(name);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"AB", "Tên  Việt", "A\u200b\u202e\ufeffB"})
+    void trimsNamesOnBothEndpointsAndPreservesInternalSpacingAndCf(String name) throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "email", "trimmed@example.com", "password", "strong-password", "displayName", "\u00a0 " + name + " \u202f"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.displayName").value(name));
+        assertThat(userRepository.findByEmail("trimmed@example.com").orElseThrow().getDisplayName()).isEqualTo(name);
+        mockMvc.perform(put("/api/v1/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("displayName", "\u2007 " + name + " \u3000"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value(name));
+        assertThat(userRepository.findById(currentUser.getId()).orElseThrow().getDisplayName()).isEqualTo(name);
+    }
 
     @Autowired
     private MockMvc mockMvc;
