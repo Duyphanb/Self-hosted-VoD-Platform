@@ -50,11 +50,12 @@ services:
       - vod_internal
 
   minio:
-    image: minio/minio:latest
-    command: ["server", "/data", "--console-address", ":9001"]
+    image: docker.io/pgsty/silo:RELEASE.2026-10-26T00-00-00Z@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7
+    command: ["server", "/data"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-vod_minio}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-change-me}
+      MINIO_BROWSER: "off"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -85,7 +86,7 @@ services:
       - vod_internal
 
   minio-init:
-    image: minio/mc:latest
+    image: docker.io/pgsty/silo:RELEASE.2026-10-26T00-00-00Z@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7
     environment:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-vod_minio}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me}
@@ -99,7 +100,15 @@ services:
       - /bin/sh
       - -ec
       - |
-        until mc alias set local http://minio:9000 "$${MINIO_ACCESS_KEY}" "$${MINIO_SECRET_KEY}"; do sleep 2; done
+        attempts=0
+        until mc alias set local http://minio:9000 "$${MINIO_ACCESS_KEY}" "$${MINIO_SECRET_KEY}" >/dev/null 2>&1; do
+          attempts=$$((attempts + 1))
+          if [ "$$attempts" -ge 60 ]; then
+            echo "Storage initialization failed: authentication or endpoint unavailable" >&2
+            exit 1
+          fi
+          sleep 2
+        done
         mc mb --ignore-existing "local/$${MINIO_BUCKET_RAW}"
         mc mb --ignore-existing "local/$${MINIO_BUCKET_HLS}"
         mc mb --ignore-existing "local/$${MINIO_BUCKET_THUMBNAILS}"

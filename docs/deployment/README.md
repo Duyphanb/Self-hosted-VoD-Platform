@@ -146,3 +146,76 @@ The script uses synthetic test-only values. It verifies that local Compose
 still accepts its development defaults and publishes the edge on loopback only,
 missing production values fail during configuration, published defaults and a
 loopback-bound edge fail the runtime preflight, and non-default values pass.
+
+## Object Storage Backup and Restore
+
+Object storage is PGSTY Silo under the existing `minio` service/volume names ([ADR-004 addendum](../architecture/adr/ADR-004.md#runtime-addendum)). Both server and init are pinned to the same verified index digest. The console is off and S3/console ports are unpublished in local and production Compose. Curl `/minio/health/live` remains the health probe. Use the following offline procedure before a version change; never test upgrades on the only copy of data.
+
+These Bash examples use production configuration. Set `PROJECT`, the **actual** volume name from your deployment, a new absolute backup directory and the exact currently deployed image from Compose/source control. Do not print the composed configuration or credentials. The directory/volume names below are examples, not discovery of existing resources.
+
+```bash
+set -eu
+PROJECT=vod-platform
+VOLUME="${PROJECT}_minio_data"
+BACKUP=/srv/vod/backups/storage-2026-10-28
+IMAGE='docker.io/pgsty/silo:RELEASE.2026-10-26T00-00-00Z@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7'
+# First verify the source volume exists; a typo must not create an empty source.
+docker volume inspect "$VOLUME" >/dev/null
+# Stop all readers/writers, then the store, using the same project as the deployment.
+docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml stop nginx backend worker minio
+mkdir -m 700 "$BACKUP"  # must be a new directory, not an existing backup
+# The Silo image has cp -a, but no tar. Include dotfiles and metadata, not just objects.
+docker run --rm --entrypoint cp -v "$VOLUME:/data:ro" -v "$BACKUP:/backup" "$IMAGE" -a /data/. /backup/
+```
+
+Record the index digest, source revision, creation time and volume identity alongside the backup; retain the matching credentials securely outside Git. Protect IAM metadata as sensitive data. Check the backup contains `.minio.sys` and object data. Restore to a **new** empty volume, preserving the old volume for recovery:
+
+```bash
+set -eu
+RESTORE_VOLUME="${PROJECT}_minio_restore_20261028"
+# Require a new name; do not overwrite an existing restore target.
+if docker volume inspect "$RESTORE_VOLUME" >/dev/null 2>&1; then exit 1; fi
+docker volume create "$RESTORE_VOLUME" >/dev/null
+docker run --rm --entrypoint cp -v "$BACKUP:/backup:ro" -v "$RESTORE_VOLUME:/data" "$IMAGE" -a /backup/. /data/
+```
+
+Use a temporary Compose overlay to point `minio.volumes` to that restored external volume, and pin the server/init to the digest recorded with the backup. Validate health, object checksums, metadata and all bucket policies on an isolated copy before reconnecting readers/writers. Do not start an older binary against metadata written by a newer version: rollback restores **both** the backup and its matching digest. Do not run `down -v` during a deployment/rollback. Establish retention, permissions and an independently tested restore before public production use. The #14 spike proved restart/recreation on a Silo-created volume, not restoration of real production data or migration from an upstream-created volume.
+
+Example restore overlay (set/export `RESTORE_VOLUME` and `STORAGE_RESTORE_IMAGE` to the verified backup values). Compose merges volume mounts by target, so this replaces `/data` without deleting the original volume:
+
+```yaml
+services:
+  minio:
+    image: ${STORAGE_RESTORE_IMAGE:?Set the backup image digest}
+    volumes:
+      - restored_storage:/data
+  minio-init:
+    image: ${STORAGE_RESTORE_IMAGE:?Set the backup image digest}
+volumes:
+  restored_storage:
+    external: true
+    name: ${RESTORE_VOLUME:?Set the new restored volume name}
+```
+
+### Temporary Local Console
+
+For a local demonstration only, create an untracked temporary overlay, load the same ignored local environment, and stop external readers/writers as appropriate:
+
+```yaml
+services:
+  minio:
+    environment:
+      MINIO_BROWSER: "on"
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "127.0.0.1:19001:9001"
+```
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml -f /absolute/path/demo-console.yml up -d --no-deps minio
+# Open http://localhost:19001 locally; never share storage root credentials.
+# Remove the temporary configuration by recreating from the base file only:
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --no-deps --force-recreate minio
+```
+
+Keep that file outside Git and do not combine it with the production overlay. Production explicitly keeps `MINIO_BROWSER: "off"`; the production configuration regression check rejects console/port/image drift. Omitting `--console-address` alone is insufficient to disable the console.

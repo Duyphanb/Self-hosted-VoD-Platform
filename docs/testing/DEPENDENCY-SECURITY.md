@@ -45,7 +45,24 @@ Dependency Review status: on 2026-10-06 the dependency-review API was unavailabl
 
 - [Issue #50](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/50) recorded the supported Spring platform decision: open-source Spring Boot 4.x, maintained by the owner ([ADR-002 amendment](../architecture/adr/ADR-002.md#amendment-2026-10-18)). The complete Spring Boot 4.1 migration replaced the parent-only Boot 4 PRs #66/#68, which were closed without merging because they failed compilation and conflicted with ADR-002 as frozen at the time. A dependency-audit job that stops during packaging, before scanning, does not prove a new vulnerability finding. Future major upgrades require another ADR-002 amendment and a complete migration.
 - [Issue #54](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/54) owns maintained non-MinIO images, immutable artifacts, runtime users and container OS scan coverage. The existing JAR/npm gates do not certify container OS packages, broker or object-store maintenance.
-- [Issue #74](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/74) owns the RabbitMQ support/upgrade decision; [Issue #14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14) retains MinIO ownership. Resolve these runtime decisions before public production, without treating them as authorization for a platform migration during feature work.
+- [Issue #74](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/74) owns the RabbitMQ support/upgrade decision; [Issue #14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14) records the pinned Silo decision and storage verification below. Resolve these runtime decisions before public production, without treating them as authorization for a platform migration during feature work.
+
+## Object storage runtime (#14)
+
+Reviewed 2026-10-28: PGSTY Silo `RELEASE.2026-10-26T00-00-00Z`, source `c3ad836aed0d8a7d23c2e44a5eaa3009d08525e3`. The [ADR-004 addendum](../architecture/adr/ADR-004.md#runtime-addendum) records the index/platform/SBOM digests, exact build identity, trust boundary and update/exit policy. Both Compose storage services use this same immutable artifact. `storage-runtime-smoke.py` verifies signed SLSA provenance (source revision, exact workflow/tag, no self-hosted runners) and signed SPDX SBOMs for amd64 and arm64 before pulling/starting it. A wrong-signer verification was rejected locally. This verifies origin, not exploit resistance or a complete OS vulnerability scan (#54).
+
+The [pinned source security policy](https://github.com/pgsty/silo/blob/c3ad836aed0d8a7d23c2e44a5eaa3009d08525e3/SECURITY.md), [release notes](https://github.com/pgsty/silo/blob/c3ad836aed0d8a7d23c2e44a5eaa3009d08525e3/CHANGELOG.md) and maintainer [advisory ledger](https://silo.pgsty.com/about/security-advisories/) were reviewed against the selected release:
+
+| Advisory | Review result for the selected version |
+|---|---|
+| CVE-2025-62506 / GHSA-jjjj-jwhf-8rgr | Pinned policy records the inherited `c1a49490` session-policy fix, present since Silo's first community release. |
+| CVE-2026-33322, CVE-2026-33419 | Ledger records OIDC/LDAP STS fixes retained in this release. These identity integrations are not enabled by this stack. |
+| CVE-2026-34204, CVE-2026-39414 | Ledger records replication-metadata and S3 Select bounds fixes, including subsequent hardening. |
+| CVE-2026-41145, CVE-2026-40344, CVE-2026-42600 | Ledger records unsigned-trailer/Snowball authentication and internode traversal fixes retained in this release. |
+| SN-2026-011 through SN-2026-019 | Review includes signed-header coverage, IAM/STS revocation, retention/overwrite authorization, proxy-address trust and notification-secret redaction. Ledger places the October authorization fixes in the 20261018 baseline retained by 20261026. |
+| CVE-2026-32285 | Maintainer reports misattribution to jsonparser; do not infer a fresh fix or suppress a scanner solely from that statement. |
+
+These are source/release/maintainer-evidence assessments; the repository did not rerun each exploit regression or certify the ledger's abbreviated commit links. The local spike/runtime smoke covers the actual storage contract, not every S3/IAM API. No claim that Silo is vulnerability-free is made. Review fresh advisories and scanner findings on every bump, including reachability and fork fix evidence before granting exceptions. Root runtime (#54), shared root credentials (Issue 4.1), registry availability, and concentrated maintenance remain risks.
 
 ## Local Checks
 

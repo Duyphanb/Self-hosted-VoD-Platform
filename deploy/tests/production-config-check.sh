@@ -52,5 +52,6 @@ reject_published_default \
   "${JWT_SECRET:-}" \
   "change-me-use-a-long-random-secret"
 reject_unpublished_edge "${NGINX_HTTP_PORT:-}"
+[ "${MINIO_BROWSER:-off}" = "off" ] || fail "MINIO_BROWSER must be off"
 
 printf '%s\n' "Production configuration preflight passed"

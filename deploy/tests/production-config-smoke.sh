@@ -241,6 +241,14 @@ do
 done
 printf '%s\n' "Production edge publication checks passed"
 
+set_synthetic_values
+if MINIO_BROWSER=on run_check > "$log_file" 2>&1; then
+  printf '%s\n' "Production console was accepted" >&2
+  exit 1
+fi
+assert_log_contains "Production configuration rejected: MINIO_BROWSER must be off"
+printf '%s\n' "Production console rejection check passed"
+
 for variable_name in \
   POSTGRES_USER \
   POSTGRES_PASSWORD \
@@ -302,6 +310,9 @@ then
   exit 1
 fi
 
+# `up --wait` reports only the dependency exit code, not the service's diagnostic.
+run_production_compose logs --no-color production-config-check >> "$log_file" 2>&1
+assert_log_contains "Production configuration rejected"
 for service_name in postgres rabbitmq minio
 do
   if [ -n "$(run_production_compose ps --status running -q "$service_name")" ]; then
@@ -371,6 +382,10 @@ edge_ports = sorted(
     for port in services["nginx"]["ports"]
 )
 assert edge_ports == [("", "443", 443), ("", "80", 80)], edge_ports
+
+# Same assertions as the runtime smoke; config is never printed, as it contains credentials.
+import runpy
+runpy.run_path("deploy/tests/storage-runtime-smoke.py")["validate_config"](services)
 PY
 printf '%s\n' "Canonical credential alignment checks passed"
 
