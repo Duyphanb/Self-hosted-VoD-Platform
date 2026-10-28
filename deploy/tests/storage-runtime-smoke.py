@@ -22,21 +22,25 @@ SBOMS = (
 )
 
 
+class SmokeCommandError(RuntimeError):
+    """A safe diagnostic constructed here, never from captured command output."""
+
+
 def run(args, *, timeout=240, check=True):
     result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", timeout=timeout)
     if check and result.returncode:
-        raise RuntimeError("Storage smoke command failed (output withheld): " + args[0])
+        raise SmokeCommandError("Storage smoke command failed (output withheld): " + args[0])
     return result
 
 
 def validate_config(services):
     server, init = services["minio"], services["minio-init"]
     assert server["image"] == init["image"] == IMAGE, "Storage image pin mismatch"
-    assert re.search(r"@sha256:[0-9a-f]{64}$", server["image"])
+    assert re.search(r"@sha256:[0-9a-f]{64}$", server["image"]), "Storage image must be digest pinned"
     assert server["environment"]["MINIO_BROWSER"] == "off", "Console must be off"
     assert server["command"] == ["server", "/data"], "Unexpected storage command"
     assert not server.get("ports"), "Storage must not publish ports"
-    assert server["healthcheck"]["test"] == ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+    assert server["healthcheck"]["test"] == ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"], "Storage healthcheck mismatch"
     for key, expected in (("RAW", "vod-raw"), ("HLS", "vod-hls"), ("THUMBNAILS", "vod-thumbnails")):
         assert init["environment"]["MINIO_BUCKET_" + key] == expected, "Bucket contract changed"
 
@@ -71,7 +75,7 @@ def main():
     assert any(item.endswith("@" + DIGEST) for item in digests), "Pulled digest mismatch"
     run(compose + ["up", "--wait", "--wait-timeout", "120", "--no-build", "minio"])
     container = run(compose + ["ps", "-q", "minio"]).stdout.strip()
-    assert run(["docker", "inspect", "--format", '{{index .Config.Labels "com.docker.compose.project"}}', container]).stdout.strip() == args.project
+    assert run(["docker", "inspect", "--format", '{{index .Config.Labels "com.docker.compose.project"}}', container]).stdout.strip() == args.project, "Storage container project label mismatch"
     init_logs = []
     for _ in range(2):
         result = run(compose + ["run", "--rm", "--no-deps", "minio-init"])
@@ -124,6 +128,9 @@ printf '%s' "$want"''').strip()
 if __name__ == "__main__":
     try:
         main()
+    except (AssertionError, SmokeCommandError) as error:
+        # All assertion messages are fixed strings; our command error contains only the tool name.
+        raise SystemExit("FAIL storage smoke: " + (str(error) or type(error).__name__))
     except Exception as error:
         # Avoid tracebacks that can include command/configuration payloads.
         raise SystemExit("FAIL storage smoke: " + type(error).__name__)

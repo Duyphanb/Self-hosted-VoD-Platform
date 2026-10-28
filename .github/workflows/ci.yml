@@ -78,7 +78,9 @@ jobs:
       - name: Verify storage supply chain
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 deploy/tests/storage-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --verify-only
+        run: |
+          python3 -m unittest discover -s deploy/tests -p test_storage_runtime_smoke.py
+          python3 deploy/tests/storage-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --verify-only
 
       - name: Verify production configuration fails closed
         run: sh deploy/tests/production-config-smoke.sh
@@ -110,7 +112,12 @@ jobs:
           cleanup() { docker compose --env-file /dev/null -f deploy/docker-compose.yml down --volumes --remove-orphans; }
           trap cleanup EXIT
           JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
-          export JWT_SECRET
+          MINIO_ACCESS_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          MINIO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          POSTGRES_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD"
+          RABBITMQ_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          export JWT_SECRET MINIO_ACCESS_KEY MINIO_SECRET_KEY POSTGRES_PASSWORD SPRING_DATASOURCE_PASSWORD RABBITMQ_PASSWORD
           python3 deploy/tests/storage-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME"
           # Fresh full stack, including private storage/init and the dedicated worker.
           docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build
