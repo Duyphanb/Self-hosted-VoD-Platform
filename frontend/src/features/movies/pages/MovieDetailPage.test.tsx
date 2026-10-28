@@ -39,7 +39,7 @@ describe('MovieDetailPage through AppRoutes', () => {
   });
 
   it('fetches the movie with authentication and shows metadata in the agreed order', async () => {
-    const movie = movieDetail({ averageRating: 4.25 });
+    const movie = movieDetail({ averageRating: 13 / 3 });
     fetchMock.mockResolvedValue(jsonResponse(movie));
     renderDetail();
 
@@ -52,7 +52,7 @@ describe('MovieDetailPage through AppRoutes', () => {
     expect(fieldValue('Genres')).toHaveTextContent('Drama');
     expect(fieldValue('Genres')).toHaveTextContent('Thriller');
     expect(fieldValue('Availability')).toHaveTextContent('Not available');
-    expect(fieldValue('Average rating')).toHaveTextContent(/4\.25\s*\/\s*5/);
+    expect(fieldValue('Average rating')).toHaveTextContent(/^4\.3\s*\/\s*5$/);
     expect(headingSection('Description')).toHaveTextContent(movie.description);
     expect(headingSection('Directors')).toHaveTextContent('Director First');
     expect(headingSection('Cast')).toHaveTextContent('Actor First');
@@ -199,6 +199,25 @@ describe('MovieDetailPage through AppRoutes', () => {
     expect(headingSection('Cast')).not.toHaveTextContent('A Future Credit');
   });
 
+  it('keeps both unknown roles for one person without duplicate-key warnings through a refetch', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const people = [
+      { personId: regularUser.id, name: 'A Future Credit', role: 'WRITER' },
+      { personId: regularUser.id, name: 'A Future Credit', role: 'PRODUCER' }
+    ];
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ...movieDetail(), people }))
+      .mockResolvedValueOnce(jsonResponse({ ...movieDetail(), people: [...people].reverse() }));
+    const { queryClient } = renderDetail();
+
+    await screen.findByRole('heading', { level: 1, name: 'The Long Night' });
+    expect(within(headingSection('Other credits')).getAllByRole('listitem')).toHaveLength(2);
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: movieKeys.detail(movieId) }); });
+
+    const credits = within(headingSection('Other credits')).getAllByRole('listitem');
+    expect(credits.map((credit) => credit.textContent)).toEqual(['A Future Credit', 'A Future Credit']);
+    expect(consoleError.mock.calls.filter((args) => args.some((argument) => String(argument).includes('same key')))).toHaveLength(0);
+  });
+
   it('does not render admin information or controls for a regular user', async () => {
     fetchMock.mockResolvedValue(jsonResponse(movieDetail({ videoStatus: 'UPLOADED' })));
     renderDetail();
@@ -227,6 +246,18 @@ describe('MovieDetailPage through AppRoutes', () => {
     expect(within(panel).getByRole('link', { name: 'Edit movie' }))
       .toHaveAttribute('href', `/admin/movies/${movieId}/edit`);
     expect(screen.getByText(/not visible to viewers/i)).toBeInTheDocument();
+  });
+
+  it.each(['DRAFT', 'ARCHIVED'] as const)('keeps Ready availability but hides Watch for an admin viewing %s', async (status) => {
+    fetchMock.mockResolvedValue(jsonResponse(movieDetail({ status, videoStatus: 'READY' })));
+    renderDetail({ user: admin });
+
+    await screen.findByRole('heading', { level: 1, name: 'The Long Night' });
+    expect(fieldValue('Availability')).toHaveTextContent(/^Ready$/);
+    expect(fieldValue('Video status')).toHaveTextContent('READY');
+    expect(screen.getByText(/not visible to viewers/i)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Watch' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Watch' })).not.toBeInTheDocument();
   });
 
   it('shows a published admin movie without a visibility warning and handles no video asset', async () => {
@@ -463,18 +494,27 @@ describe('MovieDetailPage through AppRoutes', () => {
   });
 
   it('drops an admin result and personal data when a different regular user signs in', async () => {
+    const nextUserResponse = deferredResponse();
     fetchMock.mockResolvedValueOnce(jsonResponse(movieDetail({
       userRating: 5,
       inWatchlist: true,
       status: 'DRAFT'
     })))
-      .mockResolvedValueOnce(apiError(404, 'MOVIE_NOT_FOUND', 'Movie not found'));
+      .mockReturnValueOnce(nextUserResponse.promise);
     renderDetail({ user: admin });
     await screen.findByRole('heading', { level: 2, name: 'Movie administration' });
 
     persistSession(otherUser, 'other');
     announceStoredSession();
 
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('heading', { name: 'The Long Night' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Movie administration' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Your rating')).not.toBeInTheDocument();
+    expect(screen.queryByText('In your watchlist')).not.toBeInTheDocument();
+    expect(screen.getByText('Loading movie…')).toBeInTheDocument();
+
+    nextUserResponse.release(apiError(404, 'MOVIE_NOT_FOUND', 'Movie not found'));
     expect(await screen.findByRole('heading', { level: 1, name: 'Movie not found' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Movie administration' })).not.toBeInTheDocument();
     expect(screen.queryByText('Your rating')).not.toBeInTheDocument();
