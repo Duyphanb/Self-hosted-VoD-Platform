@@ -54,7 +54,7 @@ describe('AppLayout auth navigation', () => {
     renderLayout();
 
     // /admin until #91 adds /admin/movies and redirects /admin there.
-    expect(await screen.findByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(await screen.findByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin/movies');
     expect(screen.getByRole('link', { name: 'Movies' })).toHaveAttribute('href', '/movies');
   });
 

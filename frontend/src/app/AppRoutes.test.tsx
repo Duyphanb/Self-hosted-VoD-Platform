@@ -43,9 +43,14 @@ describe('AppRoutes guard wiring', () => {
 
   it('renders /admin for ROLE_ADMIN', async () => {
     persistUser({ ...regularUser, roles: ['ROLE_USER', 'ROLE_ADMIN'] });
+    fetchMock.mockResolvedValue(jsonResponse({
+      items: [],
+      page: { page: 0, size: 20, totalElements: 0, totalPages: 0 }
+    }));
     renderRoutes('/admin');
 
-    expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Movies' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'New movie' })).toHaveAttribute('href', '/admin/movies/new');
   });
 
   it('sends a signed-in user from the landing page to the movie list', async () => {

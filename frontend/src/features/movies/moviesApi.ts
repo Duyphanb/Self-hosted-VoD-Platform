@@ -133,7 +133,7 @@ export class InvalidMovieResponseError extends Error {
   }
 }
 
-function decodeMoviePage(value: unknown): MoviePage {
+export function decodeMoviePage(value: unknown): MoviePage {
   if (!isRecord(value) || !Array.isArray(value.items)) {
     throw new InvalidMovieResponseError();
   }
@@ -191,7 +191,7 @@ function decodeMovieSummary(value: unknown): MovieSummary | null {
   };
 }
 
-function decodeMovieDetail(value: unknown): MovieDetail | null {
+export function decodeMovieDetail(value: unknown): MovieDetail | null {
   const summary = decodeMovieSummary(value);
   if (!summary
     || !isRecord(value)

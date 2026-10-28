@@ -14,18 +14,6 @@ export function AccountPage() {
   );
 }
 
-export function AdminPage() {
-  return (
-    <section className="max-w-2xl rounded-lg border border-slate-800 bg-slate-900 p-6">
-      <p className="text-sm font-medium text-amber-300">Admin route</p>
-      <h1 className="mt-2 text-3xl font-semibold text-white">Administration</h1>
-      <p className="mt-4 text-slate-300">
-        This client session includes ROLE_ADMIN. Every admin API still enforces authorization on the backend.
-      </p>
-    </section>
-  );
-}
-
 export function ForbiddenPage() {
   return (
     <section className="mx-auto max-w-xl rounded-lg border border-amber-700 bg-amber-950/30 p-8 text-center">

@@ -54,7 +54,7 @@ export function AppLayout() {
                   <>
                     <NavLink className={navLinkClass} to="/movies">Movies</NavLink>
                     <NavLink className={navLinkClass} to="/account">Account</NavLink>
-                    {isAdmin ? <NavLink className={navLinkClass} to="/admin">Admin</NavLink> : null}
+                    {isAdmin ? <NavLink className={navLinkClass} to="/admin/movies">Admin</NavLink> : null}
                   </>
                 ) : null}
                 <button
