@@ -7,6 +7,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-vod_platform}
       POSTGRES_USER: ${POSTGRES_USER:-vod_app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      # Vietnamese ICU collation for title and name ordering (ADR-009). Applies when the cluster is
+      # first created; an existing volume keeps its collation (see docs/deployment/README.md).
+      POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=vi
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
