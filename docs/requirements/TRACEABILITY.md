@@ -38,7 +38,7 @@ Updated 2026-10-29 for [ADR-010](../architecture/adr/ADR-010.md). Rows for deliv
 |---|---|---|
 | NFR-001 | F-021 | Docker Compose smoke test |
 | NFR-002 | F-021, F-022 | VPS resource observation during demo smoke test |
-| NFR-003 | F-008 | Declared MIME/signature family, equal MiB ceilings including multipart overhead, route-limit JSON errors and real 2 GB prod-overlay timings/temp/memory (Issues 4.4/4.6/4.7) |
+| NFR-003 | F-008 | `.env.example` size/MIME allowlist configuration and backend rejection outside those limits; declared MIME/signature family, equal MiB ceilings including multipart overhead, route-limit JSON errors and real 2 GB prod-overlay timings/temp/memory (Issues 4.4/4.6/4.7) |
 | NFR-004 | F-010 | One non-overlapping worker, prefetch/concurrency 1, startup recovery, caps/deadlines and long-job/second-queued-job test (5.1/5.3/5.7/#124) |
 | NFR-005 | F-012, F-013 | Browser playback smoke test |
 | NFR-006 | F-014, F-015 | Redis-to-PostgreSQL flush test |

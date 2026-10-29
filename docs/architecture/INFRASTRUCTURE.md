@@ -73,6 +73,8 @@ Required named volumes:
 
 Redis persistence is not required for MVP because Redis is a cache/progress buffer. Durable playback progress belongs in PostgreSQL.
 
+Issue 5.8 adds and documents a disk-backed writable volume/mount for `WORKER_TEMP_DIR` under the worker's read-only root. It must not use tmpfs; the raw-size free-disk check guards capacity for the raw copy plus generated HLS. Keep this separate from backend `TEMP_UPLOAD_DIR`, which stays in the container layer. The volume/mount wiring is future Sprint 5 work, not added by this docs change.
+
 ## MinIO Buckets
 
 PGSTY Silo provides this contract under the existing `minio` service name; see the [ADR-004 addendum](adr/ADR-004.md#runtime-addendum). Server and initialization share one verified digest. `MINIO_BROWSER: "off"` disables the console in local and production stacks; no storage port is published. The curl `/minio/health/live` probe and all backend/worker `MINIO_*` settings remain unchanged. [Backup/restore and a temporary local console](../deployment/README.md#object-storage-backup-and-restore) are documented separately.
@@ -120,14 +122,14 @@ These are the approved settings to wire into `.env.example`, application configu
 | `ENCODING_RELAY_INTERVAL_SECONDS` | 10; relay ignores jobs younger than twice confirm timeout |
 | `RABBITMQ_ENCODING_QUEUE` | `video-encoding-queue`; direct DLX `<queue>.dlx`, DLQ/routing key `<queue>.dlq` |
 | `WORKER_CONCURRENCY`, `WORKER_PREFETCH` | 1 each; exactly one non-overlapping worker replica |
-| `WORKER_TEMP_DIR` | `/tmp/vod-worker`; dedicated `job-*` children, swept before listener startup |
+| `WORKER_TEMP_DIR` | `/tmp/vod-worker`; disk-backed writable volume, not tmpfs, added/documented in 5.8; raw-size free-disk check; owned `job-*` children swept before listener startup |
 | `WORKER_FFPROBE_TIMEOUT_SECONDS` | Positive bound, to be measured in Issue 5.4/#124 |
 | `WORKER_FFMPEG_TIMEOUT_MIN_SECONDS`, `WORKER_FFMPEG_TIMEOUT_FACTOR` | Deadline `max(min, factor * duration)`; values to be measured in Issue 5.5/5.7/#124 |
 | `WORKER_MAX_DURATION_SECONDS`, `WORKER_MAX_WIDTH`, `WORKER_MAX_HEIGHT`, `WORKER_MAX_STREAMS` | Positive caps to be measured/validated in Issue 5.4/5.7/#124 |
 
-Document bounded storage/JDBC waits, total DB-retry window and the raw-size-based free-disk/output allowance in Issue 5.7. DB retry-window exhaustion stops the listener/worker without ack or poison rejection; startup recovery resolves the retained state. Worker `stop_grace_period` is 30s. Before the listener starts: sweep owned temp dirs, conditionally fail orphaned PROCESSING job/asset pairs, delete their attempt prefixes, then start consumption. No backend PROCESSING reconciler or QUEUED age timeout. Recovery assumes one backend relay and one non-overlapping worker.
+Document bounded storage/JDBC waits per operation and the raw-size-based free-disk/output allowance in Issue 5.7. DB outage at claim/finish holds delivery and retries in-process with capped backoff delays, never FAILED or DLQ; it has no retry-exhaustion shutdown path. Worker `stop_grace_period` is 30s. Before the listener starts: sweep owned temp dirs, conditionally fail orphaned PROCESSING job/asset pairs, delete their attempt prefixes, then start consumption. No backend PROCESSING reconciler or QUEUED age timeout. Recovery assumes one backend relay and one non-overlapping worker.
 
-#74 decides the RabbitMQ version before Sprint 5. Use classic durable queues with DLX/DLQ (identical backend/worker declarations), AUTO acknowledgement after terminal persistence, `default-requeue-rejected=false` and prefetch 1. On 4.3+ classic queues no consumer-timeout setting is needed. If staying on 3.13, render `consumer_timeout` from an environment setting into a mounted `conf.d` file in base/prod Compose, above the measured maximum whole-job deadline plus margin. Do not assume config environment interpolation or use immutable `x-consumer-timeout`; verify rendering and a long encode with a second queued job. Exact deadline is to be measured in Issue 5.7/#124. This change does not upgrade the broker (#74) or select the FFmpeg base (#54).
+#74 decides the RabbitMQ version and consumer-timeout sizing before Sprint 5, including how it preserves D20 during DB-outage retries. Use classic durable queues with DLX/DLQ (identical backend/worker declarations), AUTO acknowledgement after terminal persistence, `default-requeue-rejected=false` and prefetch 1. On 4.3+ classic queues no consumer-timeout setting is needed. If staying on 3.13, render `consumer_timeout` from an environment setting into a mounted `conf.d` file in base/prod Compose above the media-processing deadline from #103/#124, with final sizing/DB-outage handling owned by #74, not an application DB-retry budget. Do not assume config environment interpolation or use immutable `x-consumer-timeout`; verify rendering, a long encode with a second queued job and DB-outage handling. This change does not upgrade the broker (#74) or select the FFmpeg base (#54).
 
 ## Nginx Responsibilities
 

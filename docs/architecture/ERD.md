@@ -35,7 +35,7 @@ Status values must match the domain glossary.
 | `video_assets` | `status` | `UPLOADED`, `QUEUED`, `PROCESSING`, `READY`, `FAILED` |
 | `encoding_jobs` | `status` | `QUEUED`, `PROCESSING`, `READY`, `FAILED` |
 
-`encoding_jobs.status = READY` means the job completed successfully and the linked video asset is ready for playback.
+`encoding_jobs.status = READY` means the job completed successfully and the linked video asset has HLS output; it is playable only while it is the movie's current asset ([ADR-010](adr/ADR-010.md)).
 
 ### Asset and job lifecycle
 
@@ -53,6 +53,8 @@ stateDiagram-v2
 The diagram is the asset lifecycle. Each job has QUEUED -> PROCESSING -> READY/FAILED only; retry inserts a new job rather than resetting a terminal job. Claims/finishes update job and asset atomically with expected-state predicates. There is no age-based QUEUED timeout. One non-overlapping worker fails orphaned PROCESSING rows before starting its listener.
 
 Newest means greatest `(created_at, id)` per movie. Current is greatest `(created_at, id)` among READY assets; no pointer column is added to `movies`. `videoStatus` is READY if current exists, otherwise newest status, or null without assets. Superseded means READY but not current, or FAILED but not newest. Retry accepts only newest FAILED.
+
+Assign asset `created_at` inside the asset/job insert transaction, after the raw PUT and acquisition of per-movie serialization, never at asset ID generation or request start. This keeps overlapping uploads ordered by the serialized insert when deriving newest/current.
 
 ## Logical ERD
 

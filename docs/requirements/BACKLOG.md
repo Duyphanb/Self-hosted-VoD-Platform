@@ -572,6 +572,7 @@ Map `video_assets` and `encoding_jobs` including nullable `published_at`. Add V5
 - Preflight detects pre-existing duplicate in-flight movies and stops for explicit repair; no silent data deletion. Existing QUEUED rows stay unpublished/relay eligible
 - CI named-index count changes 31 -> 32; tables 15, constraints 53, FKs 17 and CHECKs 9 stay unchanged; no current pointer/optional READY CHECK/extra outbox or job index
 - Repository includes findByMovieId, findByStatus, newest by `(created_at,id)` and `findCurrentReadyByMovieId` (greatest READY tuple)
+- Asset `created_at` is assigned inside the asset/job insert transaction after raw PUT and per-movie serialization, never alongside pre-PUT ID generation or at request start
 - Catalog list/detail derive videoStatus in set-based SQL or through a catalog-defined port implemented by encoding, without N+1 or a Maven dependency cycle
 - Tests cover no assets, one READY, pending/failed replacement with older READY, tie ordering, newest-only retry selection; PostgreSQL proves the partial unique index and mapping by its name (also exercised through upload in 4.6)
 
@@ -585,12 +586,13 @@ Map `video_assets` and `encoding_jobs` including nullable `published_at`. Add V5
 Validate the spooled multipart file, stream raw to Silo with known length, then coordinate with 4.5 to commit a new QUEUED asset/job pair. Generate the asset ID before PUT; never upsert a video asset. Configure/create the dedicated temp spool before the connector starts.
 
 **Acceptance Criteria:**
-- Keep allowlisted declared part MIME; require compatible family: `ftyp` at offset 4 for mp4/mov or EBML `1A45DFA3` for mkv/webm. Reject text, renamed HLS/ffconcat, family mismatch and legacy MOV without ftyp with 400 `UNSUPPORTED_VIDEO_TYPE`; empty file remains 400 validation error
+- Check declared part MIME against the configured allowlist; require compatible family: `ftyp` at offset 4 for mp4/mov or EBML `1A45DFA3` for mkv/webm. Reject text, renamed HLS/ffconcat, family mismatch and legacy MOV without ftyp with 400 `UNSUPPORTED_VIDEO_TYPE`; empty file remains 400 validation error
 - Extension is mp4/mov/mkv/webm from validated declared type within its family, never filename; MP4 declared video/quicktime is accepted as family-compatible
 - Set Spring file/request limits to `${MAX_UPLOAD_SIZE_MB:2048}MB`, spool `${TEMP_UPLOAD_DIR:/tmp/vod-uploads}`, threshold 0B. Validate directory and sweep only stale regular Tomcat `upload_*.tmp` files non-recursively before connector start, no symlink traversal/general temp sweep/ApplicationRunner
 - Stream `getInputStream()` with `getSize()` to private `vod-raw` at `{movieId}/{videoAssetId}.{ext}`, never `getBytes()`; release request temp files on completion/abort
 - Advisory in-flight pre-check before PUT saves storage writes; authoritative V5 partial index maps concurrent loser to 409 `VIDEO_UPLOAD_IN_PROGRESS`
 - Raw PUT precedes the new asset/job transaction; if it does not commit (including 409 loser), best-effort delete only this request's raw key, WARN with IDs on cleanup failure. Read back uncertain commits by generated asset/job IDs; retain raw while outcome is unknown. Never delete raw on a post-commit publish failure
+- Assign asset `created_at` only inside that insert transaction, after PUT and per-movie serialization. Test overlapping PUTs: X starts first, Y commits and reaches READY before X's PUT ends, then X inserts; X must rank newest, Y stays current until X reaches READY, then X becomes current
 - Return the committed acceptance DTO (QUEUED), with no internal keys/credentials; UPLOADED stays reserved
 - Tests cover all MIME/signature cases, size/empty rejection, known-length streaming, DB rollback and concurrent 409 compensation, ambiguous commit retaining raw, failed-delete logging, temp cleanup and cancelled body parsing; use private isolated storage/PostgreSQL evidence
 
@@ -628,6 +630,7 @@ Implement `POST /api/v1/admin/movies/{movieId}/video` endpoint for admin video u
 - Returns 202 after raw storage and DB commit, even if broker publication is pending; validation 400, missing movie 404, anonymous 401, non-admin 403, in-flight 409 `VIDEO_UPLOAD_IN_PROGRESS`
 - Backend-direct oversize raises `MaxUploadSizeExceededException` -> 413 `PAYLOAD_TOO_LARGE` ApiError; multipart request ceiling includes overhead
 - Actual HTTP multipart tests prove 401/403 before parse and no upload temp files (including invalid body/missing movie); PostgreSQL parallel uploads produce one accepted transaction and one mapped 409 with compensating delete
+- PostgreSQL overlap test pauses X's PUT while Y commits/reaches READY, then lets X finish PUT and insert; assert asset created_at is assigned after serialization, newest/current follow insert order rather than request start, and no timestamp was captured at pre-PUT ID generation
 - Implement #52/#116 Nginx change only with/after this route: global 1m, nested upload-only regex with own URI-less proxy_pass, 2048m, buffering off, read timeout 600s, inherited headers/HTTP1.1, 60s body/send idle defaults, edge ApiError 413/502/503/504 and proxy_intercept_errors off per INFRASTRUCTURE
 - Smoke/preflight asserts edge literal and SPA constant equal MAX_UPLOAD_SIZE_MB; changing that value without coordinated limits fails closed; document the consistency rule in `.env.example`
 - #52 runtime tests: >1 MiB ordinary/auth body rejected; valid 2 MiB upload accepted by a custom stub with client_max_body_size 0; oversized upload edge 413 JSON; deterministic unavailable/slow stub 502/504 JSON with status/requestId; HLS/health unchanged. A short test timeout may accelerate 504 but verify production 600s
@@ -695,7 +698,7 @@ Configure worker to consume from `video-encoding-queue`. Set concurrency to 1. I
 - Spring AMQP AUTO ack only after persisted READY/FAILED or a safe duplicate/stale skip; `default-requeue-rejected=false`, poison rejection uses `AmqpRejectAndDontRequeueException`
 - DB outage at claim/finish holds delivery with capped in-process backoff, never media FAILED or DLQ; no hot requeue loop or encode replay during final-write retries
 - Tests: redelivery after READY, stale attempt, poison payload, DB down and restart mid-PROCESSING. Inspect DLQ using rabbitmqctl without exposing management UI
-- #74 consumer-timeout rule is implemented/verified: 4.3+ classic has no timeout; on 3.13 render env-driven broker consumer_timeout through conf.d above whole-job deadline, not immutable queue args. Long-job test keeps a second job queued and confirms no premature delivery/channel close
+- #74 consumer-timeout rule is implemented/verified: 4.3+ classic has no timeout; on 3.13 render env-driven broker consumer_timeout through conf.d, not immutable queue args. #74 owns sizing from #103/#124 and DB-outage handling, without an application retry-exhaustion path. Long-job test keeps a second job queued and confirms no premature delivery/channel close
 
 **Dependencies:** Sprint 4 complete, #74; startup recovery from Issue 5.7 must be wired before enabling consumption
 
@@ -809,7 +812,7 @@ Implement main processing orchestrator that coordinates: mark status `PROCESSING
 - Best-effort delete only the attempt prefix ending `/` after FAILED, lost conditional finish or startup orphan recovery; warn on delete failure without undoing terminal state
 - Clean owned temp files on every exit. Before listener startup, sweep validated WORKER_TEMP_DIR job-* dirs, log bytes freed, conditionally fail all orphaned PROCESSING pairs as WORKER_INTERRUPTED, delete their attempt prefixes, then enable listener. Startup fails closed if DB recovery cannot finish; assume one non-overlapping worker
 - No QUEUED timeout/backend PROCESSING reconciler/heartbeat columns; unpublished QUEUED belongs to backend relay. Manual wedged-JVM restart and confirmed-message-loss procedure follow deployment runbook
-- Bounded probe/encode/storage/JDBC waits; DB outage during claim/finish retries in-process with capped backoff without FAILED/DLQ or re-encoding. Bound total retry window in the measured whole-job budget; exhaustion stops listener/worker without ack/reject and startup recovery resolves the pair. Reserve PROBE_FAILED, PROBE_TIMEOUT, ENCODE_TIMEOUT, MEDIA_LIMIT_EXCEEDED, INSUFFICIENT_DISK, WORKER_INTERRUPTED via #107
+- Bounded probe/encode/storage/JDBC waits per operation; DB outage during claim/finish retries in-process with capped backoff delays without FAILED/DLQ or re-encoding. No DB-retry exhaustion, listener/worker shutdown or startup recovery is triggered by the outage alone; consumer-timeout sizing remains #74. Reserve PROBE_FAILED, PROBE_TIMEOUT, ENCODE_TIMEOUT, MEDIA_LIMIT_EXCEEDED, INSUFFICIENT_DISK, WORKER_INTERRUPTED via #107
 - Tests cover happy path, truncated/disguised media, process-tree timeout, insufficient disk, raw-copy removal order, failed-prefix deletion/failure, attempt-1/ vs attempt-10/ isolation, lost finish, DB outage, crash/restart/orphan cleanup and redelivery after READY
 
 **Dependencies:** Issues 5.3, 5.4, 5.5, 5.6
@@ -823,7 +826,8 @@ Create worker Dockerfile with FFmpeg and FFprobe installed. Document required en
 
 **Acceptance Criteria:**
 - Use maintained FFmpeg/FFprobe source selected/verified in #54 before Sprint 5; capture package/version and uid evidence, update routine and container OS scan limits
-- Non-root, read_only root, bounded writable temp mount, cap_drop ALL, no-new-privileges, pids_limit validated in this issue; stop_grace_period 30s
+- Non-root, read_only root, a disk-backed writable volume (not tmpfs) for WORKER_TEMP_DIR guarded by the raw-size free-disk check, cap_drop ALL, no-new-privileges, pids_limit validated in this issue; stop_grace_period 30s
+- Add the worker temp volume/mount to Compose and document it in INFRASTRUCTURE Persistent Volumes; this does not move the backend TEMP_UPLOAD_DIR out of its container layer
 - Worker image builds successfully
 - `.env.example`/Compose bind prefetch/concurrency, temp, probe timeout, duration/width/height/stream caps and min/factor encode deadline, bounded storage/JDBC waits; cap values from #124, never invented placeholders
 - Worker starts in Docker Compose with correct config
@@ -876,7 +880,7 @@ Implement `GET /api/v1/movies/{movieId}/playback` per API-CONTRACT: authenticate
 - Returns video duration from `video_assets` metadata
 - Returns user's current resume position from `playback_progress` table (0 if not started)
 - Visible movie with no current asset returns 409 VIDEO_NOT_READY; missing/hidden movie is 404 for every playback caller
-- Tests cover null/no READY, replacement pending/failed/succeeded, tie ordering and visibility-first 404; clamp per-movie resume to current duration on replacement
+- Tests cover null/no READY, replacement pending/failed/succeeded, tie ordering and visibility-first 404
 
 **Dependencies:** Sprint 5 complete
 

@@ -23,7 +23,7 @@ sequenceDiagram
     Backend->>Backend: Spool to dedicated temp disk, validate size, MIME and signature family
     Backend->>PostgreSQL: Check movie and in-flight asset (early advisory check)
     Backend->>MinIO: PUT raw at movieId/videoAssetId.ext with known size
-    Backend->>PostgreSQL: BEGIN, serialize per movie, INSERT new asset QUEUED and job attempt 1, published_at NULL
+    Backend->>PostgreSQL: BEGIN, serialize per movie, assign asset created_at now, INSERT asset QUEUED and job attempt 1, published_at NULL
     alt one-in-flight index or DB transaction fails
         Backend->>PostgreSQL: ROLLBACK, or read back uncertain commit before compensation
         Backend->>MinIO: Best-effort delete this request's raw key
@@ -120,7 +120,7 @@ sequenceDiagram
 
 DB unavailability at claim or finish holds delivery and retries in-process with capped backoff; it is neither FAILED nor a poison DLQ case. A startup crash is bounded by failing the orphan on restart. Only one non-overlapping worker replica is permitted. See the [recovery runbook](../deployment/README.md#encoding-recovery); every external step needs a deadline and QUEUED age never causes failure.
 
-Read back uncertain commit outcomes before cleanup: if this attempt already reached READY with its expected HLS keys, acknowledge success and retain those objects. Total DB retry time is bounded by the whole-job budget in Issue 5.7; on exhaustion stop the listener/worker without ack or poison rejection, then use startup recovery.
+Read back uncertain commit outcomes before cleanup: if this attempt already reached READY with its expected HLS keys, acknowledge success and retain those objects. DB outage alone does not stop the listener/worker or trigger startup orphan recovery; consumer-timeout sizing remains #74.
 
 ## Admin Retry Failed Encoding
 

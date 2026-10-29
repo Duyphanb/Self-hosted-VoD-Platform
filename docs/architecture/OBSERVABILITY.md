@@ -66,7 +66,7 @@ Important worker events:
 - duplicate/stale attempt skipped and poison message dead-lettered
 - startup orphan marked FAILED `WORKER_INTERRUPTED`, attempt cleanup outcome and bytes freed from temp sweep
 - one event per attempt-prefix/manual object deletion, with IDs and safe outcome
-- bounded DB-outage retry/backoff and process deadline/resource-cap failure
+- DB-outage retries with capped backoff delays, separate from process deadline/resource-cap failure
 
 ## Metrics
 
@@ -103,7 +103,7 @@ Required failure fields:
 
 Failure messages shown in UI must be safe summaries. Stack traces stay in server logs only.
 
-Issue #107 finalizes the safe-code mapping; reserve `PROBE_FAILED`, `PROBE_TIMEOUT`, `ENCODE_TIMEOUT`, `MEDIA_LIMIT_EXCEEDED`, `INSUFFICIENT_DISK` and `WORKER_INTERRUPTED` for the approved safeguards. A transient DB outage is not a media failure or DLQ reason. QUEUED age alone is not evidence of a stuck job. `published_at NULL` on QUEUED means relay pending; queued/started/finished times and publication outcomes support diagnosis. Do not log uncapped FFmpeg output, tokens, storage credentials or sensitive request bodies.
+Issue #107 finalizes the safe-code mapping; reserve `PROBE_FAILED`, `PROBE_TIMEOUT`, `ENCODE_TIMEOUT`, `MEDIA_LIMIT_EXCEEDED`, `INSUFFICIENT_DISK` and `WORKER_INTERRUPTED` for the approved safeguards. A DB outage at claim/finish keeps retrying in-process with capped backoff delays regardless of outage duration; it is never a media FAILED or DLQ reason. QUEUED age alone is not evidence of a stuck job. `published_at NULL` on QUEUED means relay pending; queued/started/finished times and publication outcomes support diagnosis. Do not log uncapped FFmpeg output, tokens, storage credentials or sensitive request bodies.
 
 ## Correlation
 
