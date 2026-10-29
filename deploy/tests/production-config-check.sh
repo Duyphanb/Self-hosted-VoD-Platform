@@ -54,4 +54,16 @@ reject_published_default \
 reject_unpublished_edge "${NGINX_HTTP_PORT:-}"
 [ "${MINIO_BROWSER:-off}" = "off" ] || fail "MINIO_BROWSER must be off"
 
+# Application identities must be independent from root and from each other.
+reject_published_default "MINIO_BACKEND_ACCESS_KEY" "${MINIO_BACKEND_ACCESS_KEY:-}" "vod_backend"
+reject_published_default "MINIO_BACKEND_SECRET_KEY" "${MINIO_BACKEND_SECRET_KEY:-}" "change-me-backend-only"
+reject_published_default "MINIO_WORKER_ACCESS_KEY" "${MINIO_WORKER_ACCESS_KEY:-}" "vod_worker"
+reject_published_default "MINIO_WORKER_SECRET_KEY" "${MINIO_WORKER_SECRET_KEY:-}" "change-me-worker-only"
+[ "$MINIO_BACKEND_ACCESS_KEY" != "$MINIO_ACCESS_KEY" ] || fail "Scoped storage credentials must be independent"
+[ "$MINIO_WORKER_ACCESS_KEY" != "$MINIO_ACCESS_KEY" ] || fail "Scoped storage credentials must be independent"
+[ "$MINIO_BACKEND_ACCESS_KEY" != "$MINIO_WORKER_ACCESS_KEY" ] || fail "Scoped storage credentials must be independent"
+[ "$MINIO_BACKEND_SECRET_KEY" != "$MINIO_SECRET_KEY" ] || fail "Scoped storage credentials must be independent"
+[ "$MINIO_WORKER_SECRET_KEY" != "$MINIO_SECRET_KEY" ] || fail "Scoped storage credentials must be independent"
+[ "$MINIO_BACKEND_SECRET_KEY" != "$MINIO_WORKER_SECRET_KEY" ] || fail "Scoped storage credentials must be independent"
+
 printf '%s\n' "Production configuration preflight passed"

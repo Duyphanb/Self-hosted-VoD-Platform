@@ -50,7 +50,7 @@ Bash:
 cp .env.example .env
 ```
 
-The committed `.env.example` contains placeholders only. Before sharing the stack or using persistent data, replace at least `JWT_SECRET`, `POSTGRES_PASSWORD`, `SPRING_DATASOURCE_PASSWORD`, `RABBITMQ_PASSWORD`, and `MINIO_SECRET_KEY` in the ignored `.env` file.
+The committed `.env.example` contains placeholders only. Before sharing the stack or using persistent data, replace at least `JWT_SECRET`, `POSTGRES_PASSWORD`, `SPRING_DATASOURCE_PASSWORD`, `RABBITMQ_PASSWORD`, `MINIO_SECRET_KEY`, and the independent `MINIO_BACKEND_*`/`MINIO_WORKER_*` credentials in the ignored `.env` file. Storage root keys are bootstrap-only; [scoped application policies](docs/architecture/INFRASTRUCTURE.md#storage-identities-and-policies) are provisioned by minio-init.
 
 For the default local Compose setup, `SPRING_DATASOURCE_PASSWORD` must match `POSTGRES_PASSWORD`. If you also change the PostgreSQL database name or username, keep `SPRING_DATASOURCE_URL` and `SPRING_DATASOURCE_USERNAME` aligned with the corresponding `POSTGRES_*` values.
 

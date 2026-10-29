@@ -45,6 +45,14 @@ def validate_config(services):
         assert init["environment"]["MINIO_BUCKET_" + key] == expected, "Bucket contract changed"
 
 
+    for service, role in (("backend", "BACKEND"), ("worker", "WORKER")):
+        app = services[service]["environment"]
+        assert app["MINIO_ACCESS_KEY"] == init["environment"]["MINIO_" + role + "_ACCESS_KEY"], "Scoped access key wiring mismatch"
+        assert app["MINIO_SECRET_KEY"] == init["environment"]["MINIO_" + role + "_SECRET_KEY"], "Scoped secret key wiring mismatch"
+        assert app["MINIO_ACCESS_KEY"] != server["environment"]["MINIO_ROOT_USER"], "App must not use root identity"
+        assert app["MINIO_SECRET_KEY"] != server["environment"]["MINIO_ROOT_PASSWORD"], "App must not use root secret"
+
+
 def verify_artifacts():
     signer = f"https://github.com/pgsty/silo/.github/workflows/docker-release.yml@refs/tags/{TAG}"
     common = ["--repo", "pgsty/silo", "--cert-identity", signer,
@@ -89,6 +97,26 @@ def main():
     alias = 'mc alias set local http://minio:9000 "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" >/dev/null; '
     def client(script):
         return run(compose + ["run", "--rm", "--no-deps", "--entrypoint", "/bin/sh", "minio-init", "-ec", script]).stdout
+    client(alias + '''printf scope-test >/tmp/scope
+backend() { curl -sS --aws-sigv4 aws:amz:us-east-1:s3 --user "$MINIO_BACKEND_ACCESS_KEY:$MINIO_BACKEND_SECRET_KEY" -o /dev/null -w '%{http_code}' "$@"; }
+worker() { curl -sS --aws-sigv4 aws:amz:us-east-1:s3 --user "$MINIO_WORKER_ACCESS_KEY:$MINIO_WORKER_SECRET_KEY" -o /dev/null -w '%{http_code}' "$@"; }
+raw="http://minio:9000/$MINIO_BUCKET_RAW/ci-smoke/scoped.mp4"
+hls="http://minio:9000/$MINIO_BUCKET_HLS/video-assets/ci-smoke/attempt-1/master.m3u8"
+[ "$(backend -X PUT --data-binary @/tmp/scope "$raw")" = 200 ]
+[ "$(worker "$raw")" = 200 ]
+[ "$(worker -X PUT --data-binary @/tmp/scope "$hls")" = 200 ]
+[ "$(backend "$hls")" = 200 ]
+[ "$(backend "$raw")" = 403 ]
+[ "$(worker -X DELETE "$raw")" = 403 ]
+[ "$(backend -X DELETE "$hls")" = 403 ]
+[ "$(worker -X PUT --data-binary @/tmp/scope "http://minio:9000/$MINIO_BUCKET_HLS/outside-attempt/file.ts")" = 403 ]
+[ "$(backend -X PUT --data-binary @/tmp/scope "http://minio:9000/$MINIO_BUCKET_THUMBNAILS/forbidden")" = 403 ]
+mc alias set backend http://minio:9000 "$MINIO_BACKEND_ACCESS_KEY" "$MINIO_BACKEND_SECRET_KEY" >/dev/null 2>&1
+if mc admin user list backend >/dev/null 2>&1; then exit 1; fi
+[ "$(backend -X DELETE "$raw")" = 204 ]
+[ "$(worker -X DELETE "$hls")" = 204 ]
+''')
+    print("PASS scoped backend/worker PUT/GET/DELETE and out-of-scope denials", flush=True)
     checksum = client(alias + '''head -c 1048576 /dev/urandom >/tmp/o
 want=$(sha256sum /tmp/o); want=${want%% *}
 for b in "$MINIO_BUCKET_RAW" "$MINIO_BUCKET_HLS" "$MINIO_BUCKET_THUMBNAILS"; do

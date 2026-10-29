@@ -89,6 +89,27 @@ Key layout: raw `{movieId}/{videoAssetId}.{ext}`; HLS `video-assets/{videoAssetI
 
 ## Environment Configuration
 
+### Storage identities and policies
+
+Issue #169 implements the [ADR-004 SDK choice](adr/ADR-004.md#runtime-addendum). `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` in the host environment remain root bootstrap credentials for the server and `minio-init` (the production gate validates them without contacting storage). Applications never receive them. `MINIO_BACKEND_ACCESS_KEY`/`MINIO_BACKEND_SECRET_KEY` and `MINIO_WORKER_ACCESS_KEY`/`MINIO_WORKER_SECRET_KEY` are independent dedicated identities; Compose maps each pair to the corresponding application's existing `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` variables. Production requires all six values, rejects published defaults and reused identities/secrets. Keep dedicated users free of additional policies/groups.
+
+`deploy/minio-init.sh` creates/secures the three buckets, creates/updates the two users and their `vod-backend`/`vod-worker` policies, and attaches each policy idempotently. Root credentials stay only in bootstrap services; the applications do not create buckets or change policies. All failures have safe diagnostics; no credentials or signed headers are logged. Existing initialized volumes are retained; supply the new independent application credentials and rerun init before starting apps. Never remove a volume to adopt these accounts.
+
+Resource notation below uses the configured bucket names; default raw/HLS buckets are `vod-raw`/`vod-hls`:
+
+| Identity | Actions | Resources |
+|---|---|---|
+| Backend raw writer/compensation | `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` | `arn:aws:s3:::<raw>` and `arn:aws:s3:::<raw>/*` |
+| Backend HLS reader | `s3:GetObject` | `arn:aws:s3:::<hls>/video-assets/*/attempt-*/*` |
+| Worker raw reader | `s3:GetObject` | `arn:aws:s3:::<raw>/*` |
+| Worker attempt writer/cleanup | `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` | `arn:aws:s3:::<hls>` and `arn:aws:s3:::<hls>/video-assets/*/attempt-*/*` |
+
+Bare bucket ARNs are required by Silo's write authorization in addition to object ARNs. They do not grant object access outside the listed prefix: signed S3 and Java SDK negative tests enforce that boundary. No ListBucket, GetBucketLocation, bucket creation, anonymous policy, IAM admin, thumbnail access, backend raw GET, backend HLS write/delete, or worker raw write/delete is granted. The fixed SDK region `us-east-1` avoids bucket-region discovery permissions; path-style access uses `MINIO_ENDPOINT` (default `http://minio:9000`). These policies scope worker output to attempt-shaped paths, not per-job ownership; trusted DB keys and application access checks remain required.
+
+The backend adapter accepts a caller-owned InputStream and known non-negative length; it never reads the whole object into an array and does not close the caller's input. The caller must close a returned GET stream to release HTTP resources. Negative lengths are rejected before I/O. Storage errors are safe IOExceptions without SDK diagnostic payloads. `MINIO_CONNECT_TIMEOUT_MS=10000`, `MINIO_READ_TIMEOUT_MS=60000`, `MINIO_WRITE_TIMEOUT_MS=60000` configure positive SDK operation waits. No retry orchestration/upload endpoint is implemented here.
+
+`storage-runtime-smoke.py` proves init idempotency/privacy, scoped operations and denied access using signed requests, with provenance/SBOM checks retained. `storage-sdk-smoke.py` provisions a separate fresh project, runs the real Java adapter with generated 128 MiB objects under `-Xmx64m`, proves GET/PUT/DELETE and IAM denials, then removes only its own resources. CI runs both checks; normal backend tests skip the explicitly opt-in Silo test.
+
 All runtime configuration comes from environment variables. `.env.example` is the safe template and must not contain real secrets.
 
 Required configuration groups:

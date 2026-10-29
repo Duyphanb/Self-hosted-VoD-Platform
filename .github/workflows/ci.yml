@@ -75,6 +75,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          verify-signature: true
+          java-version: "21"
+          cache: maven
+
       - name: Verify storage supply chain
         env:
           GH_TOKEN: ${{ github.token }}
@@ -114,11 +122,17 @@ jobs:
           JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
           MINIO_ACCESS_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
           MINIO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          MINIO_BACKEND_ACCESS_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          MINIO_BACKEND_SECRET_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          MINIO_WORKER_ACCESS_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          MINIO_WORKER_SECRET_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
           POSTGRES_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
           SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD"
           RABBITMQ_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          export MINIO_BACKEND_ACCESS_KEY MINIO_BACKEND_SECRET_KEY MINIO_WORKER_ACCESS_KEY MINIO_WORKER_SECRET_KEY
           export JWT_SECRET MINIO_ACCESS_KEY MINIO_SECRET_KEY POSTGRES_PASSWORD SPRING_DATASOURCE_PASSWORD RABBITMQ_PASSWORD
           python3 deploy/tests/storage-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME"
+          python3 deploy/tests/storage-sdk-smoke.py --project "${COMPOSE_PROJECT_NAME}-sdk"
           # Fresh full stack, including private storage/init and the dedicated worker.
           docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build
           python3 deploy/tests/auth-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087

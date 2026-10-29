@@ -62,7 +62,7 @@ The [pinned source security policy](https://github.com/pgsty/silo/blob/c3ad836ae
 | SN-2026-011 through SN-2026-019 | Review includes signed-header coverage, IAM/STS revocation, retention/overwrite authorization, proxy-address trust and notification-secret redaction. Ledger places the October authorization fixes in the 20261018 baseline retained by 20261026. |
 | CVE-2026-32285 | Maintainer reports misattribution to jsonparser; do not infer a fresh fix or suppress a scanner solely from that statement. |
 
-These are source/release/maintainer-evidence assessments; the repository did not rerun each exploit regression or certify the ledger's abbreviated commit links. The local spike/runtime smoke covers the actual storage contract, not every S3/IAM API. No claim that Silo is vulnerability-free is made. Review fresh advisories and scanner findings on every bump, including reachability and fork fix evidence before granting exceptions. Root runtime (#54), shared root credentials (Issue 4.1), registry availability, and concentrated maintenance remain risks.
+These are source/release/maintainer-evidence assessments; the repository did not rerun each exploit regression or certify the ledger's abbreviated commit links. The local spike/runtime smoke covers the actual storage contract, not every S3/IAM API. No claim that Silo is vulnerability-free is made. Review fresh advisories and scanner findings on every bump, including reachability and fork fix evidence before granting exceptions. Root runtime (#54), registry availability and concentrated maintenance remain risks. #169 replaces shared application root credentials with scoped identities; policy and SDK integration checks are described in INFRASTRUCTURE.
 
 ## Media processing prerequisites (#103 / #54)
 

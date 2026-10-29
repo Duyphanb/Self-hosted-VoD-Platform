@@ -119,7 +119,13 @@ provide non-empty, non-default values for:
 - `RABBITMQ_PASSWORD`
 - `MINIO_ACCESS_KEY`
 - `MINIO_SECRET_KEY`
+- `MINIO_BACKEND_ACCESS_KEY`
+- `MINIO_BACKEND_SECRET_KEY`
+- `MINIO_WORKER_ACCESS_KEY`
+- `MINIO_WORKER_SECRET_KEY`
 - `JWT_SECRET`
+
+Root storage keys are bootstrap-only. Supply distinct backend/worker identities and secrets, also distinct from root, before rerunning `minio-init` and starting the applications on an existing volume. Do not reuse an operator account or attach extra policies/groups to these dedicated users. See [the IAM policy and SDK contract](../architecture/INFRASTRUCTURE.md#storage-identities-and-policies); account provisioning does not require deleting storage data.
 
 It must also set `NGINX_HTTP_PORT=80`, as described in
 [Edge Port Binding](#edge-port-binding).
