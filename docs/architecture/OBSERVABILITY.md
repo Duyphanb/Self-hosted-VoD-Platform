@@ -47,6 +47,8 @@ Important backend events:
 - admin upload accepted/rejected
 - raw object stored
 - encoding job published
+- publication confirm/return/timeout and relay republish with job/asset IDs; distinguish committed QUEUED pending publication from a rejected upload
+- raw compensation success/failure (WARN on failure), without secret-bearing diagnostics
 - HLS authorization failure
 - progress accepted
 - progress flush success/failure
@@ -61,6 +63,10 @@ Important worker events:
 - HLS upload success/failure
 - status transition to `READY` or `FAILED`
 - temp cleanup success/failure
+- duplicate/stale attempt skipped and poison message dead-lettered
+- startup orphan marked FAILED `WORKER_INTERRUPTED`, attempt cleanup outcome and bytes freed from temp sweep
+- one event per attempt-prefix/manual object deletion, with IDs and safe outcome
+- DB-outage retries with capped backoff delays, separate from process deadline/resource-cap failure
 
 ## Metrics
 
@@ -93,9 +99,11 @@ Required failure fields:
 - latest job attempt
 - safe failure reason
 - queued, started, and finished timestamps
-- retry eligibility
+- retry eligibility: newest `(created_at, id)` asset of its movie and FAILED only; superseded rows are historical, may reference purged objects, and must be labelled accordingly in the admin view
 
 Failure messages shown in UI must be safe summaries. Stack traces stay in server logs only.
+
+Issue #107 finalizes the safe-code mapping; reserve `PROBE_FAILED`, `PROBE_TIMEOUT`, `ENCODE_TIMEOUT`, `MEDIA_LIMIT_EXCEEDED`, `INSUFFICIENT_DISK` and `WORKER_INTERRUPTED` for the approved safeguards. A DB outage at claim/finish keeps retrying in-process with capped backoff delays regardless of outage duration; it is never a media FAILED or DLQ reason. QUEUED age alone is not evidence of a stuck job. `published_at NULL` on QUEUED means relay pending; queued/started/finished times and publication outcomes support diagnosis. Do not log uncapped FFmpeg output, tokens, storage credentials or sensitive request bodies.
 
 ## Correlation
 
@@ -106,6 +114,7 @@ MVP uses `X-Request-ID`.
 - Backend includes `requestId` in logs and error responses.
 - Worker logs include `encodingJobId` and `videoAssetId`.
 - Queue payloads include `encodingJobId` and `videoAssetId`.
+- The versioned IDs-only envelope is `{schemaVersion: 1, encodingJobId, videoAssetId, attempt}`; optional `x-request-id` is an AMQP header, not a Java class/type header. [ADR-010](adr/ADR-010.md#message-consumer-and-recovery-d18-d21) is the schema/claim/ack authority; backend and worker parse the same golden fixture in implementation tests.
 
 ## Dashboards
 

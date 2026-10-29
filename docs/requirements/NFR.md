@@ -10,8 +10,8 @@ The MVP targets a single Oracle Cloud Free Tier VPS, expected baseline: Ampere A
 |---|---|---|---|
 | NFR-001 | Deployability | The full stack must run through Docker Compose locally before VPS deployment. | A documented command starts all required containers and health checks pass. |
 | NFR-002 | Resource fit | MVP runtime must fit on a 2 OCPU / 12 GB RAM VPS under demo load. | Baseline containers start with stable memory use and no repeated OOM restarts during smoke testing. |
-| NFR-003 | Upload limits | Maximum upload size and allowed MIME types must be configurable. | `.env.example` exposes `MAX_UPLOAD_SIZE_MB` and an allowlist for MP4, MKV, WebM, and MOV; backend rejects files above the configured limit or outside the allowlist. |
-| NFR-004 | Encoding stability | Worker concurrency must default to 1 for MVP. | One encoding job is processed at a time unless configuration explicitly changes it. |
+| NFR-003 | Upload limits | Maximum upload size and allowed declared MIME types must be configurable. | `.env.example` exposes `MAX_UPLOAD_SIZE_MB` and an allowlist for MP4, MKV, WebM, and MOV; backend rejects files above the configured limit or outside the allowlist. MAX_UPLOAD_SIZE_MB defaults to 2048 MiB; equal file/request/upload-edge ceilings include multipart overhead, other edge routes 1 MiB. Signature family must match the allowlisted declaration. Issue 4.6/4.7 measures a genuine 2 GB upload through the prod overlay, saving wait, temp peak and memory. |
+| NFR-004 | Encoding stability | Worker concurrency and prefetch are 1 for MVP, with exactly one non-overlapping replica. | One encoding job is processed at a time. Conditional claim/finish, restricted processes with measured deadlines/caps, startup orphan recovery and a long-job/second-queued-job test per ADR-010; increasing replica count requires a recovery decision. |
 | NFR-005 | Playback readiness | A ready video must be playable in a modern desktop browser. | A smoke test plays generated HLS for at least 60 seconds without manual file access. |
 | NFR-006 | Progress durability | Playback progress may be buffered but must not remain only in memory. | Redis-buffered progress is flushed to PostgreSQL on a scheduled interval. |
 | NFR-007 | API security | Protected APIs must reject unauthenticated requests and enforce roles. | Auth and RBAC tests cover user-only, admin-only, and anonymous access. |
@@ -22,7 +22,7 @@ The MVP targets a single Oracle Cloud Free Tier VPS, expected baseline: Ampere A
 | NFR-012 | Documentation accuracy | Docs must match implemented behavior. | README, OpenAPI, Postman, and deployment docs are reviewed before each release milestone. |
 | NFR-013 | Testability | Business rules must be covered by automated or documented manual tests. | Traceability file maps each MVP feature to planned test evidence before implementation. |
 | NFR-014 | Portability | Local and VPS deployment must use the same service names where practical. | Compose env vars use stable service aliases: `postgres`, `redis`, `rabbitmq`, `minio`, `backend`, `worker`, `frontend`, `nginx`. |
-| NFR-015 | Error handling | API failures must be predictable and machine-readable. | Backend uses centralized exception handling with consistent error response DTOs. |
+| NFR-015 | Error handling | API failures must be predictable and machine-readable. | Backend uses centralized ApiError responses; edge-generated API 413/502/503/504 preserves status and emits the same shape/requestId. Browsers may expose early body rejection as status 0; SPA checks inputs and reports an unknown upload result after ambiguous failures, without inferring acceptance from videoStatus or auto-resubmitting; deliberate re-upload is safe with in-flight 409 or extra storage after completion. |
 | NFR-016 | Browser UX | User-facing async states must be explicit. | Frontend screens for major flows include loading, error, empty, and success states. |
 
 ## MVP Performance Targets
@@ -36,7 +36,7 @@ These are demo-grade targets, not production SLA commitments.
 | Search API | Responds within 1 second for up to 500 seeded movies using PostgreSQL FTS. |
 | Playback progress save | Client sends updates every 5 to 10 seconds; backend accepts without visible playback interruption. |
 | Encoding | Completion time depends on source size and VPS resources; correctness is prioritized over speed. |
-| Recovery | Failed encoding jobs can be inspected and retried by admin. |
+| Recovery | Unpublished QUEUED is recovered by backend relay without an age timeout; worker deadlines/startup fail interrupted PROCESSING as safe FAILED. Before Sprint 9 re-upload; afterwards admin retries only newest FAILED. |
 
 ## Documentation Requirements
 

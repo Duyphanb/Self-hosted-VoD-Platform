@@ -219,3 +219,85 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --no-deps --fo
 ```
 
 Keep that file outside Git and do not combine it with the production overlay. Production explicitly keeps `MINIO_BROWSER: "off"`; the production configuration regression check rejects console/port/image drift. Omitting `--console-address` alone is insufficient to disable the console.
+
+## Encoding Recovery
+
+This is the approved procedure for the future Sprint 4/5 pipeline ([ADR-010](../architecture/adr/ADR-010.md)), not evidence that it exists at `24873be`. Exercise it against disposable local fixtures in Issues 4.5/5.7 before operational use. Commands below are operator procedures; this documentation task does not execute them. Confirm the project/environment/volume identities and obtain explicit authorization before mutating shared or production state. Preserve DB/storage backups for data-repair operations.
+
+1. Inspect safe job IDs/status/queued/started/finished/publication timestamps, worker logs and queue counts. A long QUEUED wait is valid with concurrency 1; do not fail it by age. QUEUED with `published_at NULL` belongs to the backend relay. Check confirms/returns, broker route and relay health first.
+2. A wedged worker needs a controlled restart: with the verified environment/project and Compose base (plus prod overlay only for production), run `docker compose ... restart worker`. Do not scale up or overlap a replacement worker. The 30s grace stops the old container; on restart, listener remains stopped until owned `job-*` temp sweep, conditional PROCESSING -> FAILED `WORKER_INTERRUPTED`, and attempt-prefix cleanup finish. If DB recovery fails, the listener must stay stopped. Confirm cleanup bytes/outcomes and final paired state.
+3. Before Sprint 9, re-upload after FAILED. With Sprint 9, retry only the movie's newest FAILED asset; double retry produces one accepted attempt and one 409. A malformed/unsupported-version/ID-mismatch message, or an unexpected pre-claim exception, may dead-letter into `<RABBITMQ_ENCODING_QUEUE>.dlq` while its committed job/asset pair remains QUEUED with `published_at` set. Inspect counts with `rabbitmqctl list_queues name messages_ready messages_unacknowledged consumers`. No public management UI or automatic DLQ replay. Fix and verify the producer/schema/consumer cause, then identify an existing QUEUED job/asset pair from trusted DB records, not from unvalidated DLQ IDs. Recover that exact job using step 4's guarded `published_at` reset with the same quiesce and approval; the relay rebuilds the canonical message from DB. Do not blindly replay the bad DLQ payload or reset terminal/missing/mismatched DB rows; never bulk dump sensitive payloads.
+4. An exceptional confirmed-delivery repair covers either broker data loss or a corrected DLQ cause for an existing QUEUED job/asset pair from step 3. Stop new uploads/retries and the relay (quiesce edge/backend), stop worker, ensure no other publisher/consumer, inspect an empty source queue with zero unacknowledged deliveries, and verify no PROCESSING jobs/assets. Snapshot the exact QUEUED job IDs selected for repair. This is not the normal unpublished-job case. In one approved transaction, lock the selected rows and reset only their `published_at`; do not rewrite lifecycle status or attempts. An example for **one reviewed job ID**, using a psql variable `job_id`, is:
+
+```sql
+BEGIN;
+SELECT j.id, j.video_asset_id, j.status, j.published_at
+FROM encoding_jobs j JOIN video_assets a ON a.id = j.video_asset_id
+WHERE j.id = :'job_id'::uuid
+FOR UPDATE OF j, a;
+-- Expect exactly the reviewed QUEUED job and QUEUED asset; otherwise ROLLBACK.
+UPDATE encoding_jobs j SET published_at = NULL
+FROM video_assets a
+WHERE j.id = :'job_id'::uuid AND j.video_asset_id = a.id
+  AND j.status = 'QUEUED' AND a.status = 'QUEUED'
+  AND j.published_at IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM encoding_jobs WHERE status = 'PROCESSING')
+  AND NOT EXISTS (SELECT 1 FROM video_assets WHERE status = 'PROCESSING');
+-- Expect UPDATE 1; otherwise ROLLBACK and investigate before COMMIT.
+COMMIT;
+```
+
+Restore backend/relay and the one worker, then edge only after health/status/queue checks. Relay republishes the same job ID; conditional claim makes duplicates safe. Recovery from an incorrect repair is a reviewed DB backup restore, never a blanket status update. #74 owns broker consumer-timeout sizing and DB-outage handling; a DB outage at claim/finish retries in-process with capped backoff and must not become FAILED or DLQ. On 4.3+ classic queues that timeout is not evaluated; on 3.13 verify the #74 environment-rendered setting. Do not change immutable queue args on a live queue as a shortcut.
+
+## Media Purge and Orphan Audit
+
+The frozen retention rule is [ADR-010](../architecture/adr/ADR-010.md#hls-objects-and-cleanup-d22-d23). This procedure is planned for Sprint 10/Phase 5 and must be exercised on isolated fixtures before use. It does not authorize production deletion. Keep DB rows as history, label superseded rows in admin views and treat their old keys as possibly absent. Do not alter a historical READY row solely to make it retryable.
+
+For an authorized purge, stop uploads/retries, the backend relay and worker, and quiesce playback during the final review/delete window. This prevents a newer asset/retry from changing candidate classification between selection and deletion. Take a recoverable DB/object backup, confirm the actual private bucket names, and review this read-only PostgreSQL candidate query:
+
+```sql
+WITH ranked AS (
+    SELECT a.*, row_number() OVER (
+        PARTITION BY movie_id ORDER BY created_at DESC, id DESC
+    ) AS newest_rank
+    FROM video_assets a
+), current_ready AS (
+    SELECT DISTINCT ON (movie_id) movie_id, id
+    FROM video_assets WHERE status = 'READY'
+    ORDER BY movie_id, created_at DESC, id DESC
+)
+SELECT a.id, a.movie_id, a.status, a.raw_bucket, a.raw_object_key,
+       a.hls_bucket, a.hls_master_object_key
+FROM ranked a
+JOIN movies m ON m.id = a.movie_id
+LEFT JOIN current_ready c ON c.movie_id = a.movie_id
+WHERE m.status <> 'ARCHIVED'
+  AND ((a.status = 'READY' AND a.id IS DISTINCT FROM c.id)
+       OR (a.status = 'FAILED' AND a.newest_rank > 1))
+ORDER BY a.movie_id, a.created_at, a.id;
+```
+
+Exclude every archived movie, current asset, newest FAILED raw and in-flight asset from deletion. Re-run the candidate query after quiescing and immediately before deletion. For each reviewed asset, enumerate attempts from DB rather than object-list guesses:
+
+```sql
+SELECT id AS encoding_job_id, video_asset_id, attempt, status,
+       'video-assets/' || video_asset_id || '/attempt-' || attempt || '/' AS attempt_prefix
+FROM encoding_jobs
+WHERE video_asset_id = :'asset_id'::uuid
+ORDER BY attempt;
+```
+
+Only terminal attempts qualify. Cross-check a stored master key, when present, against the generated same-asset/attempt prefix; reject malformed keys, empty raw keys/attempt prefixes and all bucket roots. A prefix must end with `/` so `attempt-1/` cannot select `attempt-10/`. Use an already configured internal `mc` alias (example `vod-store`) with credentials loaded securely outside Git/command output, no public storage port. Set `RAW_BUCKET`, `RAW_KEY` and `ATTEMPT_PREFIX` only from those reviewed DB rows. Use the row's `hls_bucket` for `HLS_BUCKET` when present; for an asset without it (including superseded FAILED, where no READY write occurred), use the verified private bucket from the deployment's `MINIO_BUCKET_HLS` for its DB-enumerated attempt prefixes. Confirm that configured bucket against the actual private Silo bucket before dry-run; refuse an empty/unverified bucket and never guess a bucket root. This permits purging remnants of failed best-effort attempt cleanup. Verify the exact targets before running:
+
+```bash
+# Preview each exact raw object and exact attempt prefix; inspect the output.
+mc rm --dry-run "vod-store/$RAW_BUCKET/$RAW_KEY"
+mc rm --dry-run --recursive --force "vod-store/$HLS_BUCKET/$ATTEMPT_PREFIX"
+# Only after approval of those exact targets and the preview:
+mc rm "vod-store/$RAW_BUCKET/$RAW_KEY"
+mc rm --recursive --force "vod-store/$HLS_BUCKET/$ATTEMPT_PREFIX"
+```
+
+These examples are not a bulk script. Refuse unset/empty variables, non-private buckets, any `..`/unexpected key structure, current/non-terminal assets or archive media. Log one safe result per deletion with asset/job IDs; keep the approved manifest and failure list outside Git. Repeating an already successful deletion is safe, but never broaden a failed target to a bucket root. Verify protected objects still exist, terminal DB history is unchanged and playback resolves the current prefix before resuming writers. Restore a matching backup to recover a mistaken deletion.
+
+Orphan audit covers crash-before-DB raw objects and abandoned multipart uploads, not a scheduled janitor. Compare a private object/incomplete-upload inventory against **all** DB raw/HLS references while writers are quiesced. Missing DB references alone are insufficient: require proof of an interrupted upload, no active request/job, and explicit approval of the exact orphan key. Use `mc rm --dry-run` first; for a proven abandoned multipart upload use `mc rm --incomplete --dry-run` then `mc rm --incomplete` on that exact object target, never recursively at bucket root. Keep raw for newest FAILED/current/in-flight assets and preserve everything on archive. The single known-limitation statement lives in ADR-010; no retention scheduler or ILM is introduced here.

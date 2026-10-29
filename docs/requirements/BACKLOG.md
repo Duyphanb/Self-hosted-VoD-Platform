@@ -514,7 +514,7 @@ Create admin pages for movie listing, create, edit, archive, and restore. Includ
 - [x] Postman collection includes movie endpoints
 - [x] No JPA entities exposed in API responses
 
-Verified against `main` at `7e9668e` on 2026-10-28; see the [Sprint 3 closeout evidence](../testing/SPRINT-3-CLOSEOUT.md) for the mapping of each item to its issue, tests, Newman requests, the manual UI pass and the limits. Upload, encoding and playback are out of scope; [#14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14) blocks Sprint 4.
+Verified against `main` at `7e9668e` on 2026-10-28; see the [Sprint 3 closeout evidence](../testing/SPRINT-3-CLOSEOUT.md) for the mapping of each item to its issue, tests, Newman requests, the manual UI pass and the limits. Upload, encoding and playback were out of scope for that closeout. #14 is now merged at `24873be`; [ADR-010](../architecture/adr/ADR-010.md) records the owner-approved 2026-10-29 Sprint 4 design package. The following criteria are planned implementation, not completed work.
 
 ---
 
@@ -525,16 +525,20 @@ Verified against `main` at `7e9668e` on 2026-10-28; see the [Sprint 3 closeout e
 **Related Stories:** US-008  
 **Related NFRs:** NFR-003, NFR-008, NFR-009, NFR-015
 
+**Design authority:** [ADR-010](../architecture/adr/ADR-010.md), API-CONTRACT, ERD, SECURITY and INFRASTRUCTURE. Create the implementation issues with these criteria after the docs merge. Order: 4.1; 4.3 (V5); 4.2; 4.4/4.5; 4.6 with #52; 4.7; measured prod-overlay upload. PostgreSQL race evidence uses #119 or an isolated Compose smoke, not H2. Do not introduce Testcontainers as an assumed existing dependency.
+
 ### Issue 4.1: Backend MinIO Client Configuration
 
 **Description:**  
-Configure MinIO client bean with credentials from environment. Implement upload and read operations. Create buckets (`vod-raw`, `vod-hls`, `vod-thumbnails`) via init script or startup logic.
+Configure a MinIO-compatible Silo client with environment credentials. Select/document minio-java or AWS SDK v2 in this issue; stream known-length uploads and reads. Keep bucket creation/privacy in the existing init path and provide scoped backend/worker service credentials.
 
 **Acceptance Criteria:**
 - MinIO client connects using environment credentials
 - Buckets are private by default
 - Upload and get object methods work
-- Integration test or manual verification confirms bucket creation and upload
+- Known-length upload streams use bounded heap; no whole-file byte array
+- Least-privilege backend permissions cover raw PUT/compensation DELETE and HLS reads; worker permissions cover raw reads and attempt HLS PUT/DELETE; neither uses storage root credentials
+- Integration evidence covers private buckets, streamed PUT/GET/DELETE, and denied out-of-scope access; final policy details are documented with the selected SDK
 
 **Dependencies:** Sprint 3 complete
 
@@ -543,27 +547,34 @@ Configure MinIO client bean with credentials from environment. Implement upload 
 ### Issue 4.2: Backend RabbitMQ Publisher Configuration
 
 **Description:**  
-Configure RabbitMQ connection and declare `video-encoding-queue`. Implement publish method for encoding job messages. Message includes video asset ID, raw object location, and attempt number.
+Configure RabbitMQ and the ADR-010 topology from `RABBITMQ_ENCODING_QUEUE`. Publish only versioned IDs-only messages, with persistent delivery, correlated confirms and mandatory returns.
 
 **Acceptance Criteria:**
 - RabbitMQ connection uses environment credentials
-- Queue `video-encoding-queue` is durable
-- Publish method sends JSON message with video asset ID, raw bucket, raw object key, attempt
-- Integration test or manual verification confirms message publish
+- Durable classic source queue defaults to `video-encoding-queue`; direct durable DLX `<queue>.dlx` and durable classic DLQ `<queue>.dlq`, source dead-letter routing key and DLQ binding `<queue>.dlq`; identical backend/worker declarations, no quorum delivery-limit or automatic DLQ redrive
+- JSON is `{schemaVersion:1, encodingJobId, videoAssetId, attempt}`; UUID IDs, attempt >=1, content type application/json, persistent, message_id=encodingJobId, optional x-request-id header; no object keys, Java serialization or __TypeId__ coupling
+- One golden `encoding-job-v1.json` fixture is parsed by backend and worker tests; ignore unknown fields, reject unsupported versions and ID/attempt mismatches
+- Confirms plus mandatory/returns distinguish ack-with-route, returned/unroutable, nack and timeout; default `ENCODING_PUBLISH_CONFIRM_TIMEOUT_MS=5000`, env-driven
+- Isolated broker evidence proves declarations, persistence, confirmed publication, return/nack/timeout handling and DLQ routing
 
-**Dependencies:** Sprint 3 complete
+**Dependencies:** Sprint 3 complete, Issue 4.3
 
 ---
 
 ### Issue 4.3: Backend Video Asset Entity and Repository
 
 **Description:**  
-Create JPA entity for `video_assets` table. Include raw and HLS object keys, status, metadata fields (duration, width, height, codec, bitrate), failure reason. Repository supports finding by movie ID and status.
+Map `video_assets` and `encoding_jobs` including nullable `published_at`. Add V5 from the [ADR-010 specification](../architecture/adr/ADR-010.md#v5-migration-specification-d11-d16-d17-d24); never edit V1-V4. Repository supports newest/current queries and the per-movie transaction serialization needed by upload/retry.
 
 **Acceptance Criteria:**
 - Entity matches ERD schema
-- Repository methods include findByMovieId, findByStatus
-- Unit tests cover repository queries
+- V5 adds only `encoding_jobs.published_at timestamptz NULL` (no default/backfill) and `ux_video_assets_movie_in_flight ON video_assets(movie_id) WHERE status IN ('UPLOADED','QUEUED','PROCESSING')`
+- Preflight detects pre-existing duplicate in-flight movies and stops for explicit repair; no silent data deletion. Existing QUEUED rows stay unpublished/relay eligible
+- CI named-index count changes 31 -> 32; tables 15, constraints 53, FKs 17 and CHECKs 9 stay unchanged; no current pointer/optional READY CHECK/extra outbox or job index
+- Repository includes findByMovieId, findByStatus, newest by `(created_at,id)` and `findCurrentReadyByMovieId` (greatest READY tuple)
+- Asset `created_at` is assigned inside the asset/job insert transaction after raw PUT and per-movie serialization, never alongside pre-PUT ID generation or at request start
+- Catalog list/detail derive videoStatus in set-based SQL or through a catalog-defined port implemented by encoding, without N+1 or a Maven dependency cycle
+- Tests cover no assets, one READY, pending/failed replacement with older READY, tie ordering, newest-only retry selection; PostgreSQL proves the partial unique index and mapping by its name (also exercised through upload in 4.6)
 
 **Dependencies:** Issue 3.1
 
@@ -572,18 +583,19 @@ Create JPA entity for `video_assets` table. Include raw and HLS object keys, sta
 ### Issue 4.4: Backend Upload Service - Validation and Storage
 
 **Description:**  
-Implement upload service that validates MIME type (MP4, MKV, WebM, MOV), size (from environment `MAX_UPLOAD_SIZE_MB`), and non-empty file. Generate server-side object key. Upload to MinIO `vod-raw` bucket. Create or update `video_assets` row with status `UPLOADED`.
+Validate the spooled multipart file, stream raw to Silo with known length, then coordinate with 4.5 to commit a new QUEUED asset/job pair. Generate the asset ID before PUT; never upsert a video asset. Configure/create the dedicated temp spool before the connector starts.
 
 **Acceptance Criteria:**
-- Upload validates allowed MIME types from config
-- Upload enforces max size from environment
-- Empty file returns 400
-- Object key is server-generated (e.g., `{movieId}/{uuid}.{ext}`)
-- Raw object is stored in `vod-raw` bucket
-- `video_assets` row is created with status `UPLOADED`
-- Service returns video asset DTO
-- Unit tests cover validation logic
-- Integration test or manual verification confirms upload to MinIO
+- Check declared part MIME against the configured allowlist; require compatible family: `ftyp` at offset 4 for mp4/mov or EBML `1A45DFA3` for mkv/webm. Reject text, renamed HLS/ffconcat, family mismatch and legacy MOV without ftyp with 400 `UNSUPPORTED_VIDEO_TYPE`; empty file remains 400 validation error
+- Extension is mp4/mov/mkv/webm from validated declared type within its family, never filename; MP4 declared video/quicktime is accepted as family-compatible
+- Set Spring file/request limits to `${MAX_UPLOAD_SIZE_MB:2048}MB`, spool `${TEMP_UPLOAD_DIR:/tmp/vod-uploads}`, threshold 0B. Validate directory and sweep only stale regular Tomcat `upload_*.tmp` files non-recursively before connector start, no symlink traversal/general temp sweep/ApplicationRunner
+- Stream `getInputStream()` with `getSize()` to private `vod-raw` at `{movieId}/{videoAssetId}.{ext}`, never `getBytes()`; release request temp files on completion/abort
+- Advisory in-flight pre-check before PUT saves storage writes; authoritative V5 partial index maps concurrent loser to 409 `VIDEO_UPLOAD_IN_PROGRESS`
+- Measure temp-disk headroom for concurrent uploads to different movies (each may spool up to the configured ceiling): values to be measured in Issue 4.4/4.6 on the target VPS. If insufficient, document a measured fallback proposal such as upload-location Nginx limit_conn 1; adopt no limit without measurement and a recorded decision
+- Raw PUT precedes the new asset/job transaction; if it does not commit (including 409 loser), best-effort delete only this request's raw key, WARN with IDs on cleanup failure. Read back uncertain commits by generated asset/job IDs; retain raw while outcome is unknown. Never delete raw on a post-commit publish failure
+- Assign asset `created_at` only inside that insert transaction, after PUT and per-movie serialization. Test overlapping PUTs: X starts first, Y commits and reaches READY before X's PUT ends, then X inserts; X must rank newest, Y stays current until X reaches READY, then X becomes current
+- Return the committed acceptance DTO (QUEUED), with no internal keys/credentials; UPLOADED stays reserved
+- Tests cover all MIME/signature cases, size/empty rejection, known-length streaming, DB rollback and concurrent 409 compensation, ambiguous commit retaining raw, failed-delete logging, temp cleanup and cancelled body parsing; use private isolated storage/PostgreSQL evidence
 
 **Dependencies:** Issues 4.1, 4.3
 
@@ -592,15 +604,15 @@ Implement upload service that validates MIME type (MP4, MKV, WebM, MOV), size (f
 ### Issue 4.5: Backend Encoding Job Service - Queue Publishing
 
 **Description:**  
-Implement encoding job service that creates `encoding_jobs` row with status `QUEUED` and publishes RabbitMQ message. Update video asset status to `QUEUED` after successful publish.
+Commit a new asset and attempt-1 job as QUEUED in one transaction, then eagerly publish. Use the job's nullable published_at as outbox state and a single-backend scheduled relay; a local DB transaction does not atomically commit RabbitMQ.
 
 **Acceptance Criteria:**
-- Encoding job row created with video_asset_id, status `QUEUED`, attempt 1
-- RabbitMQ message published with video asset ID, raw bucket, raw object key, attempt
-- Video asset status updated to `QUEUED`
-- Transaction ensures consistency between DB and queue
-- Unit tests cover job creation logic
-- Integration test confirms message in queue
+- Asset and attempt-1 job are QUEUED together before publication; job published_at is NULL, UPLOADED is never committed
+- Eager publish happens only after commit using 4.2's version-1 IDs-only message; confirmed, non-returned publication sets published_at only if NULL and never rewrites lifecycle status
+- Return 202 QUEUED on publish failure/timeout; retain raw and pending outbox row. Zero-row conditional writes mean already advanced, not permission to reset state
+- Relay defaults `ENCODING_RELAY_INTERVAL_SECONDS=10`, oldest QUEUED/published_at NULL first, queued_at at least twice confirm timeout old; both interval and confirm timeout are environment-driven
+- Every lifecycle transition uses expected-state predicates; upload/retry serialize per movie and commit paired changes. No QUEUED age timeout and no generic outbox table
+- Tests: DB rollback publishes nothing; crash after commit/before publish recovered by relay; returned/nacked/timed-out publish; confirm-before-published_at crash duplicates safely; fresh job skipped by relay grace; fast worker PROCESSING/FAILED/READY is never overwritten by a late confirm
 
 **Dependencies:** Issues 4.2, 4.3
 
@@ -616,10 +628,14 @@ Implement `POST /api/v1/admin/movies/{movieId}/video` endpoint for admin video u
 - Accepts multipart file
 - Validates movie exists
 - Calls upload service and encoding job service
-- Returns 202 Accepted with video asset DTO
-- Validation errors return 400
-- Authorization tests confirm admin-only access
-- Integration test covers full upload flow
+- Returns 202 after raw storage and DB commit, even if broker publication is pending; validation 400, missing movie 404, anonymous 401, non-admin 403, in-flight 409 `VIDEO_UPLOAD_IN_PROGRESS`
+- Backend-direct oversize raises `MaxUploadSizeExceededException` -> 413 `PAYLOAD_TOO_LARGE` ApiError; multipart request ceiling includes overhead
+- Actual HTTP multipart tests prove 401/403 before parse and no upload temp files (including invalid body/missing movie); PostgreSQL parallel uploads produce one accepted transaction and one mapped 409 with compensating delete
+- PostgreSQL overlap test pauses X's PUT while Y commits/reaches READY, then lets X finish PUT and insert; assert asset created_at is assigned after serialization, newest/current follow insert order rather than request start, and no timestamp was captured at pre-PUT ID generation
+- Implement #52/#116 Nginx change only with/after this route: global 1m, nested upload-only regex with own URI-less proxy_pass, 2048m, buffering off, read timeout 600s, inherited headers/HTTP1.1, 60s body/send idle defaults, edge ApiError 413/502/503/504 and proxy_intercept_errors off per INFRASTRUCTURE
+- Smoke/preflight asserts edge literal and SPA constant equal MAX_UPLOAD_SIZE_MB; changing that value without coordinated limits fails closed; document the consistency rule in `.env.example`
+- #52 runtime tests: >1 MiB ordinary/auth body rejected; valid 2 MiB upload accepted by a custom stub with client_max_body_size 0; oversized upload edge 413 JSON; deterministic unavailable/slow stub 502/504 JSON with status/requestId; HLS/health unchanged. A short test timeout may accelerate 504 but verify production 600s
+- Test cancelled sending releases temp files; record a real 2 GB (2,000,000,000 B) prod-overlay upload with no 504 and measurements listed in Sprint 4 DoD. Upload endpoints/storage/broker use only isolated test resources
 
 **Dependencies:** Issues 4.4, 4.5, Issue 2.6
 
@@ -628,14 +644,18 @@ Implement `POST /api/v1/admin/movies/{movieId}/video` endpoint for admin video u
 ### Issue 4.7: Frontend Admin Upload UI
 
 **Description:**  
-Create admin upload page with file picker and progress indicator. Display upload status and video asset status after upload completes.
+Create protected admin upload UI and shared `ApiClient.upload()` on XMLHttpRequest. Distinguish body transfer, storage-saving wait, committed acceptance and recoverable errors without automatic body replay.
 
 **Acceptance Criteria:**
 - File picker accepts video files
-- Upload button disabled until file selected
-- Loading indicator during upload
+- Upload button disabled until valid selection and during its own active request; no parallel duplicate submission
+- Pre-check file size against the guarded 2048 MiB limit constant, allowlisted extension and MIME; fill empty File.type from extension. GET movie detail through the existing refresh path before upload; do not add unconditional refresh or pull Sprint 9 admin listing forward
+- videoStatus may stay READY during replacement; it is availability, not a complete in-flight pre-check. Server 409 remains authoritative
+- XHR percent progress; Cancel only during body transfer. At 100%, “Saving to storage…” with Cancel hidden/disabled
 - Success message shows video asset status (QUEUED)
-- Error message displays validation or server errors
+- Map 400/413 clearly, 409 as upload already in progress, 401 as session expired (never automatically resend body), status 0 as file too large or connection lost. After a network error once the body was fully sent, or 502/503/504, show “Upload result unknown”; never infer outcome from MovieDetail.videoStatus, which may stay READY throughout a replacement
+- Explain deliberate re-upload is safe: while the first asset is UPLOADED/QUEUED/PROCESSING the server returns 409 VIDEO_UPLOAD_IN_PROGRESS; if it already finished, re-upload creates a newer asset with extra storage cost, reclaimable by the manual purge runbook, without corrupting existing assets. Never auto-resubmit, including after ambiguous disconnect/cancel; #168 supplies a direct newest-asset view later, with no new endpoint in this issue
+- Tests cover pre-check failure, empty MIME fallback, own-request disable, progress/saving switch, cancel availability and no automatic body replay; lost replacement-upload response while videoStatus stays READY, unknown-result messaging for post-send network error/502/503/504, deliberate re-upload 409 while in-flight, and a new asset/extra-storage notice after completion
 - Admin upload page is protected with `ROLE_ADMIN` guard
 
 **Dependencies:** Issue 4.6, Issue 2.10
@@ -645,17 +665,18 @@ Create admin upload page with file picker and progress indicator. Display upload
 ### Sprint 4 Definition of Done
 
 - [ ] Admin can upload video files through API and UI
-- [ ] Upload validates MIME type and size from config
+- [ ] Upload validates declared MIME/signature family and size from config
 - [ ] Raw video is stored in MinIO `vod-raw` bucket
-- [ ] Video asset row is created with status `UPLOADED`
-- [ ] Encoding job row is created with status `QUEUED`
-- [ ] RabbitMQ message is published to `video-encoding-queue`
-- [ ] Video asset status transitions to `QUEUED` after publish
+- [ ] New asset and attempt-1 job commit together as QUEUED; UPLOADED is reserved; V5 and schema-count changes verified on PostgreSQL
+- [ ] Version-1 IDs-only persistent RabbitMQ message, topology, confirms/returns and unpublished-job relay verified; broker outage keeps 202 QUEUED
+- [ ] Conditional writes prevent late publish/status regression; parallel uploads prove one-in-flight index/409 and raw compensation
 - [ ] Upload endpoint enforces `ROLE_ADMIN`
-- [ ] Frontend admin upload UI works with loading and error states
+- [ ] XHR progress, saving after 100%, send-only Cancel, pre-checks, no 401 replay and explicit ambiguous-error recovery verified
 - [ ] Unit and integration tests cover upload and queue publish
-- [ ] Postman collection includes admin upload endpoint
-- [ ] `.env.example` documents `MAX_UPLOAD_SIZE_MB` and MIME allowlist config
+- [ ] Postman/Newman collection covers upload 202/400/401/403/404/409/413; edge smoke covers ApiError 413/502/503/504, route limits and unchanged HLS/health
+- [ ] `.env.example` documents size/MIME/temp, confirm/relay settings and edge/SPA consistency rule; backend spool/abort/startup cleanup verified
+- [ ] Real 2 GB prod-overlay upload finishes without 504; record client time, post-100% saving wait, temp-disk peak, docker stats memory and actual VPS disk size, **to be measured in Issue 4.6/4.7**. Demo target remains 500 MB-1 GB. If saving approaches 600s or disk is insufficient, propose a separate ADR
+- [ ] This sprint proves upload/storage/queue only; upload -> transcode -> HLS playback remains #125
 
 ---
 
@@ -673,13 +694,15 @@ Configure worker to consume from `video-encoding-queue`. Set concurrency to 1. I
 
 **Acceptance Criteria:**
 - Worker connects to RabbitMQ using environment credentials
-- Consumer listens to `video-encoding-queue`
-- Concurrency is 1 (sequential processing)
-- Message listener extracts video asset ID and raw object location
-- Ack/Nack behavior defined for success/failure
-- Manual test confirms message consumption
+- Consumer declares the same env-named classic durable queue/DLX/DLQ topology as 4.2; concurrency and `WORKER_PREFETCH` are 1
+- Listener `autoStartup=false`; startup sweep/recovery in 5.7 must finish before listener starts. Exactly one worker replica, no overlapping recreate
+- Parse golden version-1 IDs-only JSON without Java type headers; load trusted storage keys from DB, validate job/asset/attempt; unknown fields ignored, bad version/malformed/mismatched IDs rejected without requeue to DLQ
+- Spring AMQP AUTO ack only after persisted READY/FAILED or a safe duplicate/stale skip; `default-requeue-rejected=false`, poison rejection uses `AmqpRejectAndDontRequeueException`
+- DB outage at claim/finish holds delivery with capped in-process backoff, never media FAILED or DLQ; no hot requeue loop or encode replay during final-write retries
+- Tests: redelivery after READY, stale attempt, poison payload, DB down and restart mid-PROCESSING. Inspect DLQ using rabbitmqctl without exposing management UI
+- #74 consumer-timeout rule is implemented/verified: 4.3+ classic has no timeout; on 3.13 render env-driven broker consumer_timeout through conf.d, not immutable queue args. #74 owns sizing from #103/#124 and DB-outage handling, without an application retry-exhaustion path. Long-job test keeps a second job queued and confirms no premature delivery/channel close
 
-**Dependencies:** Sprint 4 complete
+**Dependencies:** Sprint 4 complete, #74; startup recovery from Issue 5.7 must be wired before enabling consumption
 
 ---
 
@@ -692,7 +715,8 @@ Configure worker MinIO client for reading from `vod-raw` and writing to `vod-hls
 - Worker MinIO client uses environment credentials
 - Worker can read from `vod-raw` bucket
 - Worker can write to `vod-hls` bucket
-- Worker has JDBC/JPA connection to PostgreSQL
+- Worker has direct JDBC connection to PostgreSQL for the short status transactions
+- Storage/JDBC connect/read/statement waits are bounded and documented; free-space planning uses raw object size from storage metadata, without a new schema size column
 - Environment variables include MinIO and PostgreSQL connection details
 - Manual verification confirms connectivity
 
@@ -707,10 +731,13 @@ Implement service that updates `video_assets.status` and `encoding_jobs.status` 
 
 **Acceptance Criteria:**
 - Status update method accepts video asset ID, job ID, new status, optional failure reason
-- Updates both `video_assets` and `encoding_jobs` rows
+- Claim validates latest attempt and conditionally changes both QUEUED rows to PROCESSING in one short JDBC transaction; roll back both if either precondition fails. After an unknown claim COMMIT outcome, read back the pair when DB reconnects, not merely retry the conditional claim: matching latest PROCESSING for encodingJobId/attempt is our own claim under one non-overlapping worker, so continue probe/encode without re-claim; matching QUEUED retries claim. Terminal pair, different attempt or newer job is duplicate/stale and is acknowledged without media work; unresolved readback is held, never acknowledged from non-QUEUED status alone. No claim token/schema change; V5 stays minimal
+- Finish conditionally changes both PROCESSING rows to READY (including HLS keys/metadata) or FAILED (safe reason) in one transaction; lost expected state never overwrites a newer status. Read back ambiguous commits: same-attempt READY with the expected keys is success and retains HLS; only a genuinely lost finish cleans an unreferenced prefix
+- No transaction/DB connection is held during probe/encode/upload; DB unavailability retries final persistence without re-running media work
 - Timestamps are updated (started_at, finished_at)
 - Failure reason is stored if status is `FAILED`
-- Unit tests cover status transitions
+- Tests cover expected-state/zero-row semantics, atomic pair rollback, two claims, late finish, lost finish commit response/readback preserving READY HLS, and startup recovery; conditional update races require PostgreSQL evidence
+- PostgreSQL fault-injection test: claim COMMIT succeeds but connection drops before response; worker reconnects, reads matching latest PROCESSING pair, encodes to READY and does not leave the pair stuck PROCESSING or ack it as a duplicate
 
 **Dependencies:** Issue 5.2
 
@@ -723,13 +750,16 @@ Implement FFprobe service that executes `ffprobe` command to extract duration, w
 
 **Acceptance Criteria:**
 - FFprobe command execution uses configurable path from environment
+- Force mov or matroska demuxer from trusted key extension, whitelist file protocol and absolute file: input; typed ProcessBuilder arguments, close stdin, clear environment except PATH/LANG/HOME; do not pass FFmpeg-only -nostdin
 - Extracts duration, width, height, codec, bitrate
 - Parses JSON output safely
+- Drain capped stderr and bound JSON output; enforce `WORKER_FFPROBE_TIMEOUT_SECONDS`, duration/width/height/stream-count caps from INFRASTRUCTURE, with values **to be measured in Issue 5.4/#124**
+- Deadline kills the process tree; safe codes PROBE_FAILED/PROBE_TIMEOUT/MEDIA_LIMIT_EXCEEDED feed #107; codec/fps allowlists optional
 - Returns metadata DTO
 - Unit tests cover parsing logic
-- Integration test or manual verification with sample video file
+- Generated #123 fixtures test valid families, truncated file, fake MIME, disguised playlist, timeout and caps; command integration test uses the maintained binary selected by #54
 
-**Dependencies:** Issue 5.2
+**Dependencies:** Issue 5.2, #54, #123, #124
 
 ---
 
@@ -740,25 +770,27 @@ Implement FFmpeg service that generates single-quality HLS output. Use simple pr
 
 **Acceptance Criteria:**
 - FFmpeg command execution uses configurable path from environment
+- Force trusted mov/matroska input, -protocol_whitelist file, absolute file: path and -nostdin; typed argument list without shell, cleared environment except PATH/LANG/HOME, capped stderr
 - Generates HLS master playlist and segments
 - Target resolution configurable (default 720p)
 - Output stored in temp directory
+- Playlist uses relative segments/ URIs; FFmpeg deadline `max(WORKER_FFMPEG_TIMEOUT_MIN_SECONDS, WORKER_FFMPEG_TIMEOUT_FACTOR * durationSeconds)` kills the process tree, yields ENCODE_TIMEOUT via #107; values **to be measured in Issue 5.5/5.7/#124**
 - Command construction unit tests
 - Integration test or manual verification with sample video file
 
-**Dependencies:** Issue 5.2
+**Dependencies:** Issue 5.2, #54, #124
 
 ---
 
 ### Issue 5.6: Worker HLS Upload Service
 
 **Description:**  
-Implement service that uploads HLS master playlist and segments to MinIO `vod-hls` bucket. Object keys must match API-CONTRACT.yaml HLS path structure: `video-assets/{videoAssetId}/master.m3u8` and `video-assets/{videoAssetId}/segments/{segmentName}`. Update `video_assets` table with HLS object locations.
+Upload HLS artifacts to private `vod-hls` under attempt-scoped keys: `video-assets/{videoAssetId}/attempt-{n}/master.m3u8` and sibling `segments/*.ts`. Public API HLS paths remain unchanged and are resolved through the stored master key.
 
 **Acceptance Criteria:**
 - Uploads all HLS files from temp directory to `vod-hls` bucket
-- Object keys follow API-CONTRACT pattern: `video-assets/{videoAssetId}/master.m3u8` and `video-assets/{videoAssetId}/segments/*.ts`
-- `video_assets.hls_bucket` and `hls_master_object_key` are updated with correct paths
+- Attempt prefixes cannot overwrite another attempt; relative segment URIs match uploaded files
+- Return storage locations to the orchestrator; write `hls_bucket`/`hls_master_object_key` only in the successful conditional READY transaction
 - Unit tests cover object key generation
 - Integration test or manual verification confirms upload
 
@@ -772,17 +804,20 @@ Implement service that uploads HLS master playlist and segments to MinIO `vod-hl
 Implement main processing orchestrator that coordinates: mark status `PROCESSING` → download raw video → run FFprobe → run FFmpeg → upload HLS → mark status `READY` or `FAILED`. Handle failures at each step.
 
 **Acceptance Criteria:**
-- Orchestrator marks job `PROCESSING` before work starts
-- Downloads raw video from MinIO to temp storage
+- Conditionally claim latest QUEUED asset/job pair through 5.3; after ambiguous claim COMMIT, read back and continue this delivery's matching latest PROCESSING claim without re-claiming. Ack without media work only for confirmed terminal/stale/different-attempt/newer-job outcomes, never just from a failed conditional re-claim
+- Test successful claim COMMIT with lost response: reconnect/readback owns PROCESSING, probe/encode/finish to READY, no stuck PROCESSING; DB outage at claim/finish remains never FAILED and never DLQ
+- Check free disk from raw object size plus output allowance **to be measured in Issue 5.7/#124**; INSUFFICIENT_DISK is a safe failure code, not a new API quota response
+- Bounded download into owned `job-*` directory; no symlink/path escape
 - Runs FFprobe and stores metadata
 - Runs FFmpeg and generates HLS output
 - Uploads HLS artifacts to MinIO
-- Updates video asset with HLS locations
-- Marks job `READY` on success
-- Marks job `FAILED` with safe error message on failure
-- Cleans up temp files after success or failure
-- Unit tests cover orchestration logic
-- Integration test covers full happy path with sample video
+- Delete downloaded raw copy when FFmpeg exits, before HLS upload; original raw object stays retained
+- Conditionally finish asset/job READY with metadata/HLS keys in one transaction; on media/storage/timeout failure, persist paired FAILED with safe code/timestamps before AUTO ack
+- Best-effort delete only the attempt prefix ending `/` after FAILED, lost conditional finish or startup orphan recovery; warn on delete failure without undoing terminal state
+- Clean owned temp files on every exit. Before listener startup, sweep validated WORKER_TEMP_DIR job-* dirs, log bytes freed, conditionally fail all orphaned PROCESSING pairs as WORKER_INTERRUPTED, delete their attempt prefixes, then enable listener. Startup fails closed if DB recovery cannot finish; assume one non-overlapping worker
+- No QUEUED timeout/backend PROCESSING reconciler/heartbeat columns; unpublished QUEUED belongs to backend relay. Manual wedged-JVM restart and confirmed-message-loss procedure follow deployment runbook
+- Bounded probe/encode/storage/JDBC waits per operation; DB outage during claim/finish retries in-process with capped backoff delays without FAILED/DLQ or re-encoding. No DB-retry exhaustion, listener/worker shutdown or startup recovery is triggered by the outage alone; consumer-timeout sizing remains #74. Reserve PROBE_FAILED, PROBE_TIMEOUT, ENCODE_TIMEOUT, MEDIA_LIMIT_EXCEEDED, INSUFFICIENT_DISK, WORKER_INTERRUPTED via #107
+- Tests cover happy path, truncated/disguised media, process-tree timeout, insufficient disk, raw-copy removal order, failed-prefix deletion/failure, attempt-1/ vs attempt-10/ isolation, lost finish, DB outage, crash/restart/orphan cleanup and redelivery after READY
 
 **Dependencies:** Issues 5.3, 5.4, 5.5, 5.6
 
@@ -794,13 +829,15 @@ Implement main processing orchestrator that coordinates: mark status `PROCESSING
 Create worker Dockerfile with FFmpeg and FFprobe installed. Document required environment variables in `.env.example`: RabbitMQ credentials, MinIO credentials and bucket names, PostgreSQL connection, FFmpeg/FFprobe paths.
 
 **Acceptance Criteria:**
-- Worker Dockerfile includes FFmpeg and FFprobe installation
+- Use maintained FFmpeg/FFprobe source selected/verified in #54 before Sprint 5; capture package/version and uid evidence, update routine and container OS scan limits
+- Non-root, read_only root, a disk-backed writable volume (not tmpfs) for WORKER_TEMP_DIR guarded by the raw-size free-disk check, cap_drop ALL, no-new-privileges, pids_limit validated in this issue; stop_grace_period 30s
+- Add the worker temp volume/mount to Compose and document it in INFRASTRUCTURE Persistent Volumes; this does not move the backend TEMP_UPLOAD_DIR out of its container layer
 - Worker image builds successfully
-- `.env.example` documents all worker environment variables
+- `.env.example`/Compose bind prefetch/concurrency, temp, probe timeout, duration/width/height/stream caps and min/factor encode deadline, bounded storage/JDBC waits; cap values from #124, never invented placeholders
 - Worker starts in Docker Compose with correct config
 - Manual verification confirms worker can process a job end-to-end
 
-**Dependencies:** Issue 5.7
+**Dependencies:** Issue 5.7, #54, #74, #124
 
 ---
 
@@ -808,6 +845,7 @@ Create worker Dockerfile with FFmpeg and FFprobe installed. Document required en
 
 - [ ] Worker consumes encoding jobs from RabbitMQ queue
 - [ ] Worker concurrency is 1 (sequential processing)
+- [ ] One non-overlapping replica, prefetch 1, startup sweep/orphan failure before listener, 30s stop grace and long-job consumer-timeout evidence
 - [ ] Worker downloads raw video from MinIO
 - [ ] FFprobe extracts metadata and updates `video_assets` table
 - [ ] FFmpeg generates single-quality HLS output
@@ -816,6 +854,8 @@ Create worker Dockerfile with FFmpeg and FFprobe installed. Document required en
 - [ ] Encoding job status matches video asset status
 - [ ] Failed jobs store safe diagnostic information
 - [ ] Worker cleans up temp files after processing
+- [ ] Restricted media commands, metadata caps, bounded diagnostics, process-tree deadlines/disk check and hardened container verified against #123/#124 fixtures
+- [ ] Redelivery/poison/DB-outage/lost-finish/crash recovery and failed-attempt-prefix cleanup tested; R-006 remains Open until 4.4/5.7 failure-path evidence exists
 - [ ] Worker logs job lifecycle events
 - [ ] Unit and integration tests cover worker modules
 - [ ] End-to-end test: upload → queue → worker → HLS output verified
@@ -834,17 +874,17 @@ Create worker Dockerfile with FFmpeg and FFprobe installed. Document required en
 ### Issue 6.1: Backend Playback API
 
 **Description:**  
-Implement playback endpoint per API-CONTRACT.yaml (Stream tag): `GET /api/v1/movies/{movieId}/playback` returns playback information including HLS manifest URL, video duration, and current user's resume position. Require authentication. Check video asset status is `READY`.
+Implement `GET /api/v1/movies/{movieId}/playback` per API-CONTRACT: authenticate, apply visibility 404 first, then select current READY asset by greatest `(created_at,id)` and return manifest, duration and current user's per-movie resume position.
 
 **Acceptance Criteria:**
 - Endpoint requires valid JWT
 - Validates movie exists and is published
-- Validates video asset exists and status is `READY`
+- Uses `findCurrentReadyByMovieId`; pending/failed replacement preserves playback on the previous current asset
 - Returns HLS manifest path per API-CONTRACT format: `/hls/video-assets/{videoAssetId}/master.m3u8`
 - Returns video duration from `video_assets` metadata
 - Returns user's current resume position from `playback_progress` table (0 if not started)
-- Not-ready videos return appropriate status (e.g., 409 or 503)
-- Unit and integration tests cover playback info retrieval
+- Visible movie with no current asset returns 409 VIDEO_NOT_READY; missing/hidden movie is 404 for every playback caller
+- Tests cover null/no READY, replacement pending/failed/succeeded, tie ordering and visibility-first 404
 
 **Dependencies:** Sprint 5 complete
 
@@ -858,12 +898,12 @@ Implement authenticated HLS proxy endpoints per API-CONTRACT.yaml (Stream tag): 
 **Acceptance Criteria:**
 - Endpoints match API-CONTRACT paths: `/hls/video-assets/{videoAssetId}/master.m3u8` and `/hls/video-assets/{videoAssetId}/segments/{segmentName}`
 - Validates JWT from `Authorization` header
-- Validates user has access to movie (movie is published, asset is ready)
-- Reads HLS objects (playlist or segment) from MinIO `vod-hls` bucket
+- Validates published movie and requested asset is current READY on every playlist/segment request; non-current/hidden/non-ready/missing is 404, including after a mid-stream switch
+- Derives the attempt prefix from stored hls_master_object_key, validates segmentName and streams only those objects from private vod-hls; public paths unchanged
 - Streams object with correct Content-Type (`application/vnd.apple.mpegurl` for `.m3u8`, `video/mp2t` for `.ts`)
 - Missing or invalid JWT returns 401
 - Missing object returns 404
-- Integration test confirms HLS proxy flow
+- Integration tests cover current-only playlist/segments, superseded 404, attempt-prefix resolution, unsafe segment names and visibility
 - Nginx config forwards `/hls/*` with `Authorization` header
 
 **Dependencies:** Issue 6.1
@@ -1284,6 +1324,8 @@ Implement `GET /api/v1/admin/video-assets` endpoint that returns all video asset
 - Returns video assets with movie title, status, metadata, failure reason
 - Supports filtering by status (e.g., `?status=FAILED`)
 - Supports filtering by movie ID
+- Current/newest/superseded are derived per ADR-010; historical READY is not a playback promise and purged historical keys may dangle. Implement the contract's movieId filter here, not in Sprint 4
+- Before implementation, settle the admin classification/eligibility projection and UI with an authorized contract follow-up if new fields are needed; never infer movie-wide current/newest from a paginated subset
 - Pagination supported
 - Integration tests cover admin authorization
 
@@ -1294,16 +1336,14 @@ Implement `GET /api/v1/admin/video-assets` endpoint that returns all video asset
 ### Issue 9.2: Backend Encoding Retry Service
 
 **Description:**  
-Implement retry service that republishes encoding job for failed video assets. Increment attempt number. Only allow retry for `FAILED` status.
+Retry only the newest `(created_at,id)` asset of its movie when FAILED. Serialize per movie with the same movie-row lock order as upload commit, conditionally claim FAILED -> QUEUED, clear failure, insert next attempt/published_at NULL and commit before eager publish/relay.
 
 **Acceptance Criteria:**
 - Retry service accepts video asset ID
-- Validates asset status is `FAILED`
-- Creates new `encoding_jobs` row with incremented attempt
-- Publishes new RabbitMQ message
-- Updates video asset status to `QUEUED`
-- Unit tests cover retry logic
-- Integration test confirms message republish
+- Non-newest/non-FAILED/lost concurrent claim returns 409 VIDEO_ASSET_NOT_RETRYABLE; missing asset 404
+- Asset transition and next job insert are atomic; attempt increases per asset, source raw retained, expected-state predicates on every write
+- After commit publish the same version-1 envelope with confirms/returns; publish failure remains accepted QUEUED for relay, never deletes raw
+- PostgreSQL tests: double retry yields one 202/one 409, retry versus new upload preserves one-in-flight, rollback publishes nothing, late worker/status writes cannot regress state
 
 **Dependencies:** Issue 9.1
 
@@ -1312,13 +1352,13 @@ Implement retry service that republishes encoding job for failed video assets. I
 ### Issue 9.3: Backend Encoding Retry API
 
 **Description:**  
-Implement `POST /api/v1/admin/video-assets/{id}/retry` endpoint. Require `ROLE_ADMIN`. Call retry service.
+Implement `POST /api/v1/admin/video-assets/{videoAssetId}/retry` per API-CONTRACT. Require ROLE_ADMIN and call the newest-FAILED retry service.
 
 **Acceptance Criteria:**
 - Endpoint requires `ROLE_ADMIN`
 - Calls retry service for specified video asset
-- Returns 200 OK with updated video asset DTO
-- Returns 400 if asset is not in `FAILED` status
+- Returns 202 Accepted with QUEUED DTO, including pending publication
+- Returns 409 VIDEO_ASSET_NOT_RETRYABLE when not newest FAILED or another retry won; 401 anonymous, 403 non-admin, 404 missing
 - Integration tests cover admin authorization and retry flow
 
 **Dependencies:** Issue 9.2
@@ -1336,7 +1376,7 @@ Create admin dashboard page showing video assets with status. Display movie titl
 - Filter dropdown for status (All, Uploaded, Queued, Processing, Ready, Failed)
 - Loading, empty, error states handled
 - Pagination supported
-- Retry button visible for failed assets
+- Retry button enabled only for newest FAILED; label superseded history and handle 409 refresh. A historical READY row may have manually purged objects and is not current playback
 - Admin route protected with `ROLE_ADMIN` guard
 
 **Dependencies:** Issue 9.1
@@ -1565,7 +1605,8 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 - **R-002 (FFmpeg behavior):** Sprint 5 isolates worker implementation with sample video verification before dependent features.
 - **R-003 (VPS resources):** Sprint 1 production Compose includes resource limits; NFR-002 validated before VPS deployment.
 - **R-004 (API contract drift):** Sprint 10 reviews OpenAPI vs. implementation; Postman collection serves as contract test.
-- **R-007 (Queue failures):** Sprint 5 defines explicit status transitions; Sprint 9 adds admin retry for recovery.
+- **R-006 (Storage leaks):** 4.4 compensates uncommitted raw PUTs; 5.7 cleans failed/orphan/lost-finish prefixes and temp; deployment runbook owns manual superseded purge and orphan audit. Keep Open until failure-path tests exist.
+- **R-007 (Queue failures):** 4.5 commits job-row outbox before publish and relays pending publication; 5.3/5.7 conditionally claim/finish and recover startup orphans with deadlines; Sprint 9 retries only newest FAILED. Never time out QUEUED by age.
 - **R-008 (Auth/RBAC):** Sprint 2 completed before catalog and upload features; authorization tests required.
 - **R-012 (Tests lag):** Definition of Done includes tests for every sprint; traceability matrix tracks coverage.
 - **R-014 (HLS headers):** Sprint 6 verifies MIME types and playback in browser; Nginx config reviewed.

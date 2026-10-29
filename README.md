@@ -2,7 +2,7 @@
 
 This repository contains the foundation for a self-hosted Video-on-Demand platform built as a modular monolith plus a dedicated video-processing worker.
 
-Current status: Phase 3 implementation. Sprint 1 (foundation) and Sprint 2 (authentication: registration, login, refresh-token rotation, logout, role-based access and profile endpoints, with the frontend auth pages) are delivered; see the [Sprint 2 closeout evidence](docs/testing/SPRINT-2-CLOSEOUT.md) and the `v0.1.0` and `v0.2.0` releases. Sprint 3 (movie catalog: admin movie, genre and people management, user-facing list and detail pages) is delivered; see the [Sprint 3 closeout evidence](docs/testing/SPRINT-3-CLOSEOUT.md). Sprint 4 (upload) is next and starts with the object-storage decision in #14. Upload, encoding and playback are not implemented yet.
+Current status: Phase 3 implementation. Sprint 1 (foundation) and Sprint 2 (authentication: registration, login, refresh-token rotation, logout, role-based access and profile endpoints, with the frontend auth pages) are delivered; see the [Sprint 2 closeout evidence](docs/testing/SPRINT-2-CLOSEOUT.md) and the `v0.1.0` and `v0.2.0` releases. Sprint 3 (movie catalog: admin movie, genre and people management, user-facing list and detail pages) is delivered; see the [Sprint 3 closeout evidence](docs/testing/SPRINT-3-CLOSEOUT.md). #14 is merged; [ADR-010](docs/architecture/adr/ADR-010.md) records the owner-approved Sprint 4 upload/asset/handoff/cleanup design and [ADR index](docs/architecture/README.md#adr-index) maps the decisions. Upload, encoding and playback are not implemented yet.
 
 ## Stack
 

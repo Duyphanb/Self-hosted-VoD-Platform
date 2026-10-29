@@ -9,7 +9,7 @@ Use these terms consistently across code, documentation, API contracts, and UI l
 | Backend | The Spring Boot core API runtime. It owns auth, domain APIs, validation, persistence, upload handling, and queue publishing. |
 | Continue Watching | A personalized list of movies the user started but has not finished, ordered by recent progress. |
 | Director | A person associated with directing a movie. |
-| Encoding Job | A RabbitMQ message instructing the worker to process a video asset into HLS output. |
+| Encoding Job | A durable PostgreSQL attempt record, also the outbox via published_at, delivered by versioned IDs-only RabbitMQ message to the worker. |
 | Encoding Status | The lifecycle state of a video asset: `UPLOADED`, `QUEUED`, `PROCESSING`, `READY`, or `FAILED`. |
 | FFmpeg | Command-line tool used by the worker to transcode video into HLS. |
 | FFprobe | Command-line tool used by the worker to inspect media metadata such as duration, codec, bitrate, and resolution. |
@@ -35,6 +35,9 @@ Use these terms consistently across code, documentation, API contracts, and UI l
 | User | A registered account with `ROLE_USER`, allowed to browse, watch, resume, manage watchlist/history, and rate movies. |
 | User Profile | The current user's account-facing profile data, including display name and read-only email. |
 | Video Asset | The technical media record linked to a movie, including raw object location, HLS output location, metadata, and encoding status. |
+| Current video asset | The movie's READY asset with greatest (created_at, id); the only asset served by playback/HLS. |
+| Newest video asset | The movie's asset with greatest (created_at, id), regardless of status. |
+| Superseded video asset | READY but not current, or FAILED but not newest; historical rows may reference manually purged objects. |
 | Watch History | A user's chronological record of watched or started movies. |
 | Watchlist | A user's saved list of movies to watch later. |
 | Worker | The Spring Boot video-processing runtime responsible for consuming jobs, running FFprobe/FFmpeg, uploading HLS output, and updating status. |
@@ -43,8 +46,8 @@ Use these terms consistently across code, documentation, API contracts, and UI l
 
 | Status | Meaning |
 |---|---|
-| `UPLOADED` | Raw file exists and a video asset record has been created. |
-| `QUEUED` | An encoding job has been published and is waiting for worker processing. |
+| `UPLOADED` | Reserved enum/CHECK value; the approved upload flow never commits this state. |
+| `QUEUED` | Asset/job transaction committed and waiting for the worker; broker publication may be pending (published_at NULL). |
 | `PROCESSING` | Worker is actively probing or transcoding the asset. |
 | `READY` | HLS output is available for playback. |
 | `FAILED` | Processing failed and requires admin inspection or retry. |
