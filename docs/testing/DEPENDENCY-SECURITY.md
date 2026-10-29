@@ -22,14 +22,23 @@ CVE-2026-47884 / GHSA-pc63-qcmh-9cmg (`XsltView`, Issue #96) and CVE-2026-47890 
 
 ## Managed Version Overrides
 
-`spring-boot-starter-parent` manages Spring and third-party dependency versions. Spring Boot 4.1.1 manages Tomcat 11.0.24 and Jackson 3.1.5, which Trivy flags with HIGH/CRITICAL findings, so `backend/pom.xml` and `worker/pom.xml` override these two third-party versions through the parent's version properties, with the same values in both POMs. No Spring artifact is overridden.
+`spring-boot-starter-parent` manages Spring and many third-party dependency versions. Spring Boot 4.1.1 manages Tomcat 11.0.24 and Jackson 3.1.5, which Trivy flags with HIGH/CRITICAL findings, so `backend/pom.xml` and `worker/pom.xml` override these two third-party versions through the parent's version properties, with the same values in both POMs. The SDK-specific Jackson 2/Guava/Snappy overrides and exclusion below are backend-only: the worker does not yet use the SDK. No Spring artifact is overridden.
 
 | Property | Override | Managed by Spring Boot 4.1.1 | Findings in the managed version | Remove when |
 |---|---|---|---|---|
 | `tomcat.version` | 11.0.27 | 11.0.24 | CVE-2026-65182, CVE-2026-65905, CVE-2026-68525 (fixed in 11.0.25) | A Spring Boot 4.1.x patch release manages Tomcat 11.0.27 or newer |
 | `jackson-bom.version` | 3.1.7 | 3.1.5 | CVE-2026-89407, CVE-2026-89425, CVE-2026-68497, CVE-2026-91776, CVE-2026-91777 (fixed in 3.1.7) | A Spring Boot 4.1.x patch release manages Jackson 3.1.7 or newer |
+| `jackson-2-bom.version` (backend) | 2.21.7 | 2.21.5 | Jackson core: CVE-2026-89425, CVE-2026-89407; databind: CVE-2026-91777, CVE-2026-91776, CVE-2026-68497 | Boot manages Jackson 2.21.7 or newer, or the SDK no longer requires Jackson 2 |
+| `guava.version` (backend) | 33.7.2-jre | Not managed; SDK requests 33.6.0-jre | CVE-2026-102554 | The selected SDK resolves Guava 33.7.2-jre or newer without this override, or no longer requires Guava |
+| `snappy-java.version` (backend) | 1.1.10.9 | Not managed; SDK requests 1.1.10.8 | CVE-2026-93451, CVE-2026-108106 | The selected SDK resolves Snappy 1.1.10.9 or newer without this override, or client construction and all used paths work without Snappy |
 
-When updating `spring-boot-starter-parent`, compare the `tomcat.version` and `jackson-bom.version` properties in the new parent's `spring-boot-dependencies` POM with these overrides. Remove each override whose condition is met in the same pull request, together with its POM comment and table row; the same applies when a later Spring Boot minor release manages an equal or newer version. Add an override only for a HIGH or CRITICAL finding in a third-party library that the current Spring Boot patch release does not fix yet, and document its reason and removal condition here.
+`common/pom.xml` excludes `org.bouncycastle:bcprov-jdk18on` from minio-java: no SDK class references it, and its 1.84 version carries CVE-2026-8763/CVE-2026-13506. Remove this exclusion only if upstream stops declaring the artifact or a newly required path needs it; in the latter case, select a fixed version and repeat runtime/dependency verification first. The exclusion is not a vulnerability suppression: the artifact is absent from the packaged JAR.
+
+`ObjectStorage` uses ordinary known-length PUT, GET and DELETE and never calls Snowball, the only SDK code path referencing `org.xerial.snappy:snappy-java`. However, excluding Snappy reproduced `NoClassDefFoundError: org/xerial/snappy/SnappyFramedOutputStream` in `MinioClient.builder()`: JVM class resolution requires its classes even when Snowball is unused. Retain the fixed managed version above rather than relying on apparent source-level unreachability.
+
+Issue 5.2 must copy these SDK-specific protections into the separate worker reactor when adding its storage client. It must also preserve #169's correct named timeouts, bounded DNS waits/pool, explicit dispatcher/PUT bound and safe transport-exception mapping; the backend reactor cannot manage the worker's dependencies or client configuration.
+
+When updating `spring-boot-starter-parent`, compare its managed properties with all applicable overrides above, including Jackson 2. When updating minio-java, recheck its full runtime tree, the exclusions' reachability and each artifact's GitHub advisories. Remove each override whose condition is met in the same pull request, together with its POM comment and table row; the same applies when a later Spring Boot minor release manages an equal or newer version. Add an override only for a HIGH or CRITICAL finding in a third-party library that the current Spring Boot patch release does not fix yet, and document its reason and removal condition here.
 
 ## Monitoring Ownership
 
