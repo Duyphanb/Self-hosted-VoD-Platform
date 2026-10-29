@@ -9,14 +9,19 @@ import io.minio.errors.MinioException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Objects;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 public final class MinioObjectStorage implements ObjectStorage {
     // Fixed part size bounds SDK buffering independently of the upload's total length.
     private static final long PART_SIZE = 5L * 1024 * 1024;
     private final MinioClient client;
+    private final Semaphore putPermits = new Semaphore(StorageConfiguration.MAX_CONCURRENT_PUTS, true);
+    private final long admissionTimeoutMs;
 
-    public MinioObjectStorage(MinioClient client) {
+    public MinioObjectStorage(MinioClient client, long admissionTimeoutMs) {
         this.client = Objects.requireNonNull(client);
+        this.admissionTimeoutMs = admissionTimeoutMs;
     }
 
     @Override
@@ -25,12 +30,27 @@ public final class MinioObjectStorage implements ObjectStorage {
             throw new IllegalArgumentException("Object length must be known and non-negative");
         }
         Objects.requireNonNull(source);
+        Objects.requireNonNull(contentType, "Object content type must not be null");
+        boolean acquired = false;
         try {
+            // SDK 9.0.3 joins abort inside an OkHttp callback, retaining that PUT's slot.
+            // Eight PUTs stay below 32 per-host slots, reserving abort/GET/DELETE headroom
+            // and bounding multipart buffers to roughly 64-96 MiB in the 768 MiB backend.
+            acquired = putPermits.tryAcquire(admissionTimeoutMs, TimeUnit.MILLISECONDS);
+            if (!acquired) throw new IOException("Object storage PUT failed");
             client.putObject(PutObjectArgs.builder().bucket(bucket).object(key)
                     .stream(source, size, PART_SIZE).contentType(contentType).build());
         } catch (MinioException e) {
-            // SDK exceptions may contain internal URLs, keys and signed headers. Do not propagate them.
+            // The SDK redacts signing credentials, but diagnostics retain internal URL, bucket and key.
             throw new IOException("Object storage PUT failed");
+        } catch (IllegalStateException e) {
+            if (!isTransportFailure(e)) throw e;
+            throw new IOException("Object storage PUT failed");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Object storage PUT failed");
+        } finally {
+            if (acquired) putPermits.release();
         }
     }
 
@@ -39,6 +59,9 @@ public final class MinioObjectStorage implements ObjectStorage {
         try {
             return client.getObject(GetObjectArgs.builder().bucket(bucket).object(key).build());
         } catch (MinioException e) {
+            throw new IOException("Object storage GET failed");
+        } catch (IllegalStateException e) {
+            if (!isTransportFailure(e)) throw e;
             throw new IOException("Object storage GET failed");
         }
     }
@@ -49,6 +72,13 @@ public final class MinioObjectStorage implements ObjectStorage {
             client.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(key).build());
         } catch (MinioException e) {
             throw new IOException("Object storage DELETE failed");
+        } catch (IllegalStateException e) {
+            if (!isTransportFailure(e)) throw e;
+            throw new IOException("Object storage DELETE failed");
         }
+    }
+
+    private static boolean isTransportFailure(IllegalStateException failure) {
+        return failure.getCause() instanceof IOException;
     }
 }
