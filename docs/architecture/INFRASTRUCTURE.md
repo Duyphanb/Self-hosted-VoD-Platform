@@ -83,6 +83,8 @@ PGSTY Silo provides this contract under the existing `minio` service name; see t
 | `vod-hls` | HLS playlists and `.ts` segments | Private, read by backend HLS proxy |
 | `vod-thumbnails` | Future poster/thumbnail objects | Private, deferred until thumbnail feature |
 
+Key layout: raw `{movieId}/{videoAssetId}.{ext}`; HLS `video-assets/{videoAssetId}/attempt-{n}/master.m3u8` and `.../segments/*.ts`. Backend derives the private attempt prefix from the READY asset's stored master key; public HLS paths are unchanged. Retention/compensation follows [ADR-010](adr/ADR-010.md#hls-objects-and-cleanup-d22-d23); manual purge/orphan audit follows the [runbook](../deployment/README.md#media-purge-and-orphan-audit). Buckets remain private.
+
 ## Environment Configuration
 
 All runtime configuration comes from environment variables. `.env.example` is the safe template and must not contain real secrets.
@@ -97,14 +99,35 @@ Required configuration groups:
 - `REDIS_*`
 - `RABBITMQ_*`
 - `MINIO_*`
-- upload size and MIME allowlist
-- `FFMPEG_PATH`, `FFPROBE_PATH`, worker temp path, and worker concurrency
+- upload size, MIME allowlist and `TEMP_UPLOAD_DIR`
+- `FFMPEG_PATH`, `FFPROBE_PATH`, `WORKER_TEMP_DIR`, `WORKER_CONCURRENCY` and `WORKER_PREFETCH`
 - `NGINX_HTTP_PORT`, `NGINX_HTTPS_PORT`, `PUBLIC_DOMAIN`, `LETSENCRYPT_EMAIL`
 
 Frontend public runtime values should point at Nginx paths:
 
 - API base: `/api/v1`
 - HLS base: `/hls`
+
+### Upload and encoding settings
+
+These are the approved settings to wire into `.env.example`, application configuration and Compose in Issues 4.2/4.4/4.6/5.1/5.7/5.8; this document does not claim those bindings exist yet.
+
+| Setting | Rule / default |
+|---|---|
+| `MAX_UPLOAD_SIZE_MB` | 2048 MiB; both Spring file/request limits, Nginx upload literal and SPA constant must match |
+| `TEMP_UPLOAD_DIR` | `/tmp/vod-uploads`, dedicated backend container-layer directory; threshold 0B, no named volume/tmpfs |
+| `ENCODING_PUBLISH_CONFIRM_TIMEOUT_MS` | 5000; confirms plus mandatory returns |
+| `ENCODING_RELAY_INTERVAL_SECONDS` | 10; relay ignores jobs younger than twice confirm timeout |
+| `RABBITMQ_ENCODING_QUEUE` | `video-encoding-queue`; direct DLX `<queue>.dlx`, DLQ/routing key `<queue>.dlq` |
+| `WORKER_CONCURRENCY`, `WORKER_PREFETCH` | 1 each; exactly one non-overlapping worker replica |
+| `WORKER_TEMP_DIR` | `/tmp/vod-worker`; dedicated `job-*` children, swept before listener startup |
+| `WORKER_FFPROBE_TIMEOUT_SECONDS` | Positive bound, to be measured in Issue 5.4/#124 |
+| `WORKER_FFMPEG_TIMEOUT_MIN_SECONDS`, `WORKER_FFMPEG_TIMEOUT_FACTOR` | Deadline `max(min, factor * duration)`; values to be measured in Issue 5.5/5.7/#124 |
+| `WORKER_MAX_DURATION_SECONDS`, `WORKER_MAX_WIDTH`, `WORKER_MAX_HEIGHT`, `WORKER_MAX_STREAMS` | Positive caps to be measured/validated in Issue 5.4/5.7/#124 |
+
+Document bounded storage/JDBC waits, total DB-retry window and the raw-size-based free-disk/output allowance in Issue 5.7. DB retry-window exhaustion stops the listener/worker without ack or poison rejection; startup recovery resolves the retained state. Worker `stop_grace_period` is 30s. Before the listener starts: sweep owned temp dirs, conditionally fail orphaned PROCESSING job/asset pairs, delete their attempt prefixes, then start consumption. No backend PROCESSING reconciler or QUEUED age timeout. Recovery assumes one backend relay and one non-overlapping worker.
+
+#74 decides the RabbitMQ version before Sprint 5. Use classic durable queues with DLX/DLQ (identical backend/worker declarations), AUTO acknowledgement after terminal persistence, `default-requeue-rejected=false` and prefetch 1. On 4.3+ classic queues no consumer-timeout setting is needed. If staying on 3.13, render `consumer_timeout` from an environment setting into a mounted `conf.d` file in base/prod Compose, above the measured maximum whole-job deadline plus margin. Do not assume config environment interpolation or use immutable `x-consumer-timeout`; verify rendering and a long encode with a second queued job. Exact deadline is to be measured in Issue 5.7/#124. This change does not upgrade the broker (#74) or select the FFmpeg base (#54).
 
 ## Nginx Responsibilities
 
@@ -116,13 +139,29 @@ Nginx must:
 - forward `Authorization` and `X-Request-ID` headers to backend
 - terminate HTTPS on VPS
 - apply basic security headers
-- enforce upload body size at least as strictly as backend configuration
+- enforce upload body size at least as strictly as backend configuration on the upload route; all other routes have a 1 MiB default
 - return correct HLS MIME types when applicable
 
 HLS MIME baseline:
 
 - `.m3u8`: `application/vnd.apple.mpegurl`
 - `.ts`: `video/mp2t`
+
+### Upload transport
+
+Owner-approved 2026-10-29 in #52/#116; implement with Issue 4.6 once the upload endpoint exists:
+
+- Set global `client_max_body_size 1m`.
+- Inside the existing `location /api/v1/`, add a nested regex matching only `^/api/v1/admin/movies/[^/]+/video$`. Backend UUID validation remains authoritative. Its own `proxy_pass http://backend_upstream;` has no URI part, as required for a regex location. Inherit parent's `proxy_http_version 1.1`, all `proxy_set_header` directives and `error_page` mappings; a sibling location would not inherit them.
+- Only that location has `client_max_body_size 2048m`, `proxy_request_buffering off`, `proxy_read_timeout 600s`. Content-Length bodies stream with buffering off; HTTP/1.1 upstream also prevents buffering chunked requests. This is transport handling, not a resumable/chunked browser upload feature.
+- Keep `client_body_timeout`, `send_timeout` and `proxy_send_timeout` at their 60s inactivity defaults; do not add a conflicting 120s body timeout. Verify Tomcat body-read timeout alignment in Issue 4.6. The 600s read setting bounds idle waiting after sending upstream, not total upload duration.
+- Spring `max-file-size` and `max-request-size` both use `${MAX_UPLOAD_SIZE_MB:2048}MB`; `location=${TEMP_UPLOAD_DIR:/tmp/vod-uploads}`, `file-size-threshold=0B`. Nginx `m` and Spring `MB` mean MiB. Multipart overhead counts against the request ceiling; no MAX+1 bean/headroom is selected.
+- The literal Nginx value and SPA limit constant are guarded against `.env.example` by smoke assertions; production preflight fails closed if `MAX_UPLOAD_SIZE_MB` differs. `.env.example` gains that consistency comment in Issue 4.6, not a new Vite build-argument mechanism.
+- Backend creates/validates the dedicated spool and non-recursively removes only stale regular Tomcat `upload_*.tmp` files before the connector starts. Never sweep a general temp directory or follow symlinks. Request cleanup removes completed/aborted multipart files. Header auth precedes parsing; map `MaxUploadSizeExceededException` to 413 `PAYLOAD_TOO_LARGE`.
+
+Under `/api/v1/`, map edge-generated 413/502/503/504 through separate named error locations (or an equivalent status-preserving map) to `application/json` `ApiError`: `timestamp=$time_iso8601`, numeric original `status`, safe fixed `message`, `requestId=$request_id`, and codes `PAYLOAD_TOO_LARGE`, `UPSTREAM_UNAVAILABLE` (502/503), `UPSTREAM_TIMEOUT` (504). Use the same request ID sent upstream as `X-Request-ID`; keep `proxy_intercept_errors off` so backend JSON is not replaced. Ensure an early body-limit error selects the JSON mapping. Do not use a single named return that flattens every status to 413.
+
+#52 runtime evidence: small/auth routes reject >1 MiB; upload permits a valid 2 MiB request and rejects >2048 MiB; edge errors match JSON schema/status/request ID; HLS/health routing stays unchanged. The stub needs its own `client_max_body_size 0` and a marker/202 upload response (stock Nginx's 1m would reject the accepted case). Use deterministic unavailable and accept-without-response stubs for 502/504; a test-only short timeout can accelerate the 504, with an assertion that production stays 600s. Add backend-direct oversize/413, unauthorized-before-parse/no-temp-file and cancelled-upload tests. Record one genuine 2 GB prod-overlay upload in Issue 4.6/4.7: client duration, saving wait after 100%, temp peak, memory and actual VPS disk size, all **to be measured**. No such run is claimed here.
 
 ## VPS Deployment Baseline
 

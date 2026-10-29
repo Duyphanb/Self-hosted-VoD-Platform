@@ -525,7 +525,20 @@ paths:
     post:
       tags: [Upload, Admin]
       summary: Upload raw video for a movie
-      description: Requires ROLE_ADMIN. Stores raw video in MinIO and queues encoding.
+      description: >
+        Requires ROLE_ADMIN. Long-running multipart request, streamed through Nginx
+        and spooled to backend temp disk. Validates declared MIME and signature
+        family, stores raw video in private MinIO-compatible storage, then commits
+        a new QUEUED asset and attempt-1 job together before publishing. 202 means
+        storage and DB commit succeeded; RabbitMQ publication may still be pending
+        for the durable relay. UPLOADED is reserved and is not committed by upload.
+        At most one UPLOADED/QUEUED/PROCESSING asset per movie; a conflict returns
+        409 VIDEO_UPLOAD_IN_PROGRESS, including the concurrent-insert loser.
+        File and total multipart request limits both use MAX_UPLOAD_SIZE_MB
+        (default 2048 MiB); the request ceiling includes multipart overhead.
+        Invalid MIME/signature family returns 400 UNSUPPORTED_VIDEO_TYPE.
+        Early rejections may appear as a connection error in browsers; after an
+        ambiguous timeout refresh movie status before submitting another upload.
       requestBody:
         required: true
         content:
@@ -539,19 +552,33 @@ paths:
                   format: binary
       responses:
         "202":
-          description: Upload accepted and encoding queued
+          description: Raw stored and new asset/job committed as QUEUED; broker delivery may be pending
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/VideoAssetStatusResponse"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: VIDEO_UPLOAD_IN_PROGRESS - the movie already has an in-flight video asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
+        "502":
+          $ref: "#/components/responses/UpstreamUnavailable"
+        "503":
+          $ref: "#/components/responses/UpstreamUnavailable"
+        "504":
+          $ref: "#/components/responses/UpstreamTimeout"
 
   /api/v1/movies/{movieId}/playback:
     parameters:
@@ -559,6 +586,11 @@ paths:
     get:
       tags: [Stream]
       summary: Get playback information for a ready movie
+      description: >
+        Apply movie visibility first (404 for missing or non-PUBLISHED, for every
+        playback caller). Current is the READY asset with greatest (created_at, id).
+        Return only that asset, preserving previous playback during a pending or
+        failed replacement. With no current asset return 409 VIDEO_NOT_READY.
       responses:
         "200":
           description: Playback info
@@ -571,7 +603,11 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: VIDEO_NOT_READY - visible movie has no current READY asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /hls/video-assets/{videoAssetId}/master.m3u8:
     parameters:
@@ -579,7 +615,13 @@ paths:
     get:
       tags: [Stream]
       summary: Authenticated HLS master playlist
-      description: Only MVP HLS path. Nginx /hls/* proxies to backend; bearer token required; no direct MinIO or presigned playback.
+      description: >
+        Only MVP HLS path. Nginx proxies to backend; bearer token required.
+        Serve only the current READY asset of a visible PUBLISHED movie, where
+        current is greatest (created_at, id) among READY assets. Missing, hidden,
+        non-ready or non-current assets return 404. The backend derives the
+        attempt-scoped private prefix from hls_master_object_key; public paths
+        remain unchanged. No direct MinIO or presigned playback.
       responses:
         "200":
           description: HLS playlist
@@ -593,8 +635,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
 
   /hls/video-assets/{videoAssetId}/segments/{segmentName}:
     parameters:
@@ -608,7 +648,13 @@ paths:
     get:
       tags: [Stream]
       summary: Authenticated HLS segment
-      description: Only MVP HLS path. Nginx /hls/* proxies to backend; bearer token required; no direct MinIO or presigned playback.
+      description: >
+        Only MVP HLS path. Nginx proxies to backend; bearer token required.
+        Check current READY asset and PUBLISHED movie on every segment request;
+        missing, hidden, non-ready and non-current assets return 404. Derive the
+        attempt prefix from the stored master key and validate segmentName before
+        reading storage. A current-asset switch can interrupt an old stream with
+        404; reopen playback. No direct MinIO or presigned playback.
       responses:
         "200":
           description: HLS segment
@@ -623,8 +669,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
 
   /api/v1/movies/{movieId}/progress:
     parameters:
@@ -821,8 +865,18 @@ paths:
     get:
       tags: [Admin]
       summary: List video assets and processing state
-      description: Requires ROLE_ADMIN.
+      description: >
+        Requires ROLE_ADMIN. Implemented in Sprint 9. Includes historical assets;
+        a historical READY status does not imply current/playable media. Superseded
+        rows may retain keys for manually purged objects; see ADR-010.
       parameters:
+        - name: movieId
+          in: query
+          required: false
+          description: Filter assets belonging to this movie
+          schema:
+            type: string
+            format: uuid
         - name: status
           in: query
           required: false
@@ -837,6 +891,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VideoAssetPageResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
 
@@ -846,7 +902,12 @@ paths:
     post:
       tags: [Admin]
       summary: Retry a failed encoding job
-      description: Requires ROLE_ADMIN. Only FAILED assets are eligible.
+      description: >
+        Requires ROLE_ADMIN. Only the newest asset (greatest created_at, id) of
+        its movie with status FAILED is eligible. Conditionally claim FAILED to
+        QUEUED and insert the next attempt in one transaction, then publish after
+        commit; broker failure leaves 202 QUEUED for the relay. A concurrent loser,
+        non-FAILED or superseded asset returns 409 VIDEO_ASSET_NOT_RETRYABLE.
       responses:
         "202":
           description: Retry queued
@@ -854,12 +915,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VideoAssetStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: VIDEO_ASSET_NOT_RETRYABLE - asset is not newest FAILED, or another retry won
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
 components:
   securitySchemes:
@@ -959,7 +1026,24 @@ components:
           schema:
             $ref: "#/components/schemas/ApiError"
     PayloadTooLarge:
-      description: Uploaded file is larger than the configured limit
+      description: >
+        PAYLOAD_TOO_LARGE. File or total multipart request exceeds the configured
+        ceiling. May originate at Nginx or the backend; both return ApiError JSON.
+        Edge errors include requestId matching the forwarded X-Request-ID.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    UpstreamUnavailable:
+      description: UPSTREAM_UNAVAILABLE - edge could not reach an available backend (502 or 503)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    UpstreamTimeout:
+      description: >
+        UPSTREAM_TIMEOUT - edge timed out (504). Upload may already have committed;
+        refresh movie status before resubmitting.
       content:
         application/json:
           schema:
@@ -988,8 +1072,10 @@ components:
           description: >
             Machine-readable error code. Known codes include VALIDATION_ERROR,
             MALFORMED_REQUEST, UNAUTHORIZED, FORBIDDEN, MOVIE_NOT_FOUND,
-            GENRE_NOT_FOUND, PERSON_NOT_FOUND, MOVIE_SLUG_CONFLICT and
-            GENRE_CONFLICT. The list is not exhaustive.
+            GENRE_NOT_FOUND, PERSON_NOT_FOUND, MOVIE_SLUG_CONFLICT, GENRE_CONFLICT,
+            PAYLOAD_TOO_LARGE, UNSUPPORTED_VIDEO_TYPE, VIDEO_UPLOAD_IN_PROGRESS,
+            VIDEO_NOT_READY, VIDEO_ASSET_NOT_RETRYABLE, UPSTREAM_UNAVAILABLE and
+            UPSTREAM_TIMEOUT. The list is not exhaustive.
         message:
           type: string
         requestId:
@@ -1130,9 +1216,12 @@ components:
           $ref: "#/components/schemas/MovieStatus"
         videoStatus:
           description: >
-            Latest video availability; null when the movie has no video asset, which
-            is always the case until video upload is implemented. Values match
-            VideoAssetStatus.
+            Playback availability. READY if any READY asset exists (current is the
+            READY asset with greatest created_at, id); otherwise use the status of
+            the newest asset by created_at, id; null when no asset exists. A pending
+            or failed replacement preserves READY while the old current is playable.
+            UPLOADED is reserved; new uploads commit directly as QUEUED. Values
+            match VideoAssetStatus. Null until video upload is implemented.
           type: string
           nullable: true
           enum: [UPLOADED, QUEUED, PROCESSING, READY, FAILED, null]

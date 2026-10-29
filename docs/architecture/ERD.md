@@ -37,6 +37,23 @@ Status values must match the domain glossary.
 
 `encoding_jobs.status = READY` means the job completed successfully and the linked video asset is ready for playback.
 
+### Asset and job lifecycle
+
+Per [ADR-010](adr/ADR-010.md), insert a new asset and attempt-1 job together as `QUEUED` after raw storage. `UPLOADED` is reserved (retained in the enum, CHECK and in-flight index), not a committed upload state. QUEUED means the durable job is waiting; broker publication may be pending (`published_at IS NULL`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> QUEUED: raw stored, asset and job committed
+    QUEUED --> PROCESSING: conditional paired claim
+    PROCESSING --> READY: conditional paired finish and HLS keys
+    PROCESSING --> FAILED: safe failure or startup WORKER_INTERRUPTED
+    FAILED --> QUEUED: newest asset only, new job attempt
+```
+
+The diagram is the asset lifecycle. Each job has QUEUED -> PROCESSING -> READY/FAILED only; retry inserts a new job rather than resetting a terminal job. Claims/finishes update job and asset atomically with expected-state predicates. There is no age-based QUEUED timeout. One non-overlapping worker fails orphaned PROCESSING rows before starting its listener.
+
+Newest means greatest `(created_at, id)` per movie. Current is greatest `(created_at, id)` among READY assets; no pointer column is added to `movies`. `videoStatus` is READY if current exists, otherwise newest status, or null without assets. Superseded means READY but not current, or FAILED but not newest. Retry accepts only newest FAILED.
+
 ## Logical ERD
 
 ```mermaid
@@ -197,6 +214,8 @@ Indexes:
 
 ### `video_assets`
 
+One new row per upload, never an upsert. Raw key: `{movieId}/{videoAssetId}.{ext}`, with the extension derived from the validated MIME/signature family. HLS keys are attempt scoped: `video-assets/{videoAssetId}/attempt-{n}/master.m3u8` and sibling `segments/*.ts`; HLS fields are written only in the READY transaction. Public HLS URLs do not contain the attempt.
+
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | uuid | PK | Video asset ID |
@@ -221,6 +240,7 @@ Indexes:
 - `ix_video_assets_status` on `status`
 - unique `ux_video_assets_raw_object` on (`raw_bucket`, `raw_object_key`)
 - unique `ux_video_assets_hls_master` on (`hls_bucket`, `hls_master_object_key`) where `hls_master_object_key` is not null
+- unique partial `ux_video_assets_movie_in_flight` on `movie_id` where `status IN ('UPLOADED', 'QUEUED', 'PROCESSING')` (V5, Issue 4.3). Match this index name to 409 `VIDEO_UPLOAD_IN_PROGRESS`; compensate the losing request's raw object.
 
 ### `encoding_jobs`
 
@@ -229,9 +249,10 @@ Indexes:
 | `id` | uuid | PK | Job ID |
 | `video_asset_id` | uuid | FK -> `video_assets.id` on delete cascade, not null | Target asset |
 | `status` | varchar(20) | not null, check | `QUEUED`, `PROCESSING`, `READY`, `FAILED` |
-| `attempt` | int | not null, check `attempt >= 1` | Starts at 1 |
+| `attempt` | int | not null, check `attempt >= 1` | Starts at 1 per asset; increments on retry |
 | `error_message` | text | null | Safe diagnostic summary |
 | `queued_at` | timestamptz | not null | Queue timestamp |
+| `published_at` | timestamptz | null, no default | V5: confirmed broker publication; NULL means pending for a QUEUED job |
 | `started_at` | timestamptz | null | Worker start timestamp |
 | `finished_at` | timestamptz | null | Completion timestamp |
 
@@ -240,6 +261,8 @@ Indexes:
 - `ix_encoding_jobs_video_asset_id` on `video_asset_id`
 - `ix_encoding_jobs_status` on `status`
 - unique `ux_encoding_jobs_asset_attempt` on (`video_asset_id`, `attempt`)
+
+Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specification-d11-d16-d17-d24): nullable `published_at` and the one-in-flight asset index only. Existing QUEUED rows remain NULL for relay. Detect duplicate in-flight movies and stop for explicit repair; do not silently change data. CI schema counts become 32 named `ux`/`ix` indexes, with 15 tables, 53 constraints, 17 FKs and 9 CHECKs unchanged. No migration is added by this docs change.
 
 ### `playback_progress`
 
@@ -324,3 +347,10 @@ The `search_vector` is rebuilt by application code on any metadata change that a
 - Deleting a `users` row cascades to refresh tokens, playback progress, watchlist items, watch history, and ratings.
 - Media object cleanup is not automatic on movie archive.
 - Archiving a movie, or any non-`PUBLISHED` status, keeps the related watchlist items, watch history, playback progress, and ratings. They are hidden from user-facing lists and per-movie endpoints by the movie visibility rule in [SECURITY.md](SECURITY.md#movie-visibility), and reappear when the movie is restored.
+
+### Media storage lifecycle
+
+- Upload compensates only its own raw PUT if the asset/job transaction does not commit, including the 409 loser. Publish failure after commit retains raw and leaves QUEUED for relay.
+- Worker deletes failed/lost-finish/startup-orphan attempt prefixes best effort after the applicable state transaction; temp cleanup runs per job and before listener startup.
+- Retain current raw/HLS, newest FAILED raw, all in-flight objects and media on archive. Superseded terminal media is manually purged with DB rows retained as history; keys in those rows may dangle.
+- Delete only exact owned raw keys or DB-derived validated attempt prefixes ending in `/`, never bucket roots/current/non-terminal assets. [ADR-010](adr/ADR-010.md#hls-objects-and-cleanup-d22-d23) is the frozen rule; the [deployment runbook](../deployment/README.md#media-purge-and-orphan-audit) defines candidate review, dry-run and orphan audit.

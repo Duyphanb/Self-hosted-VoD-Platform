@@ -18,17 +18,52 @@ sequenceDiagram
 
     Admin->>Frontend: Select movie and video file
     Frontend->>Nginx: POST /api/v1/admin/movies/{movieId}/video
-    Nginx->>Backend: Forward request with Authorization
-    Backend->>Backend: Validate JWT, ROLE_ADMIN, MIME type, size, non-empty file
-    Backend->>MinIO: Store raw video in vod-raw
-    Backend->>PostgreSQL: Upsert video_assets status UPLOADED
-    Backend->>PostgreSQL: Create encoding_jobs status QUEUED
-    Backend->>RabbitMQ: Publish job to video-encoding-queue
-    Backend->>PostgreSQL: Mark video_assets status QUEUED
-    Backend-->>Nginx: 202 Accepted
-    Nginx-->>Frontend: 202 Accepted with videoAssetId and QUEUED status
-    Frontend-->>Admin: Show queued processing status
+    Nginx->>Backend: Stream body unbuffered with Authorization
+    Backend->>Backend: Validate JWT and ROLE_ADMIN before multipart parsing
+    Backend->>Backend: Spool to dedicated temp disk, validate size, MIME and signature family
+    Backend->>PostgreSQL: Check movie and in-flight asset (early advisory check)
+    Backend->>MinIO: PUT raw at movieId/videoAssetId.ext with known size
+    Backend->>PostgreSQL: BEGIN, serialize per movie, INSERT new asset QUEUED and job attempt 1, published_at NULL
+    alt one-in-flight index or DB transaction fails
+        Backend->>PostgreSQL: ROLLBACK, or read back uncertain commit before compensation
+        Backend->>MinIO: Best-effort delete this request's raw key
+        Backend-->>Frontend: 409 VIDEO_UPLOAD_IN_PROGRESS for index loser, or safe DB error
+    else transaction succeeds
+        Backend->>PostgreSQL: COMMIT asset and job before any publish
+        Backend->>RabbitMQ: Persistent version-1 IDs-only JSON, mandatory, correlated confirm
+        alt confirmed and not returned
+            Backend->>PostgreSQL: Set published_at only if NULL (never reset status)
+        else failed, returned or confirm timeout
+            Note over Backend,PostgreSQL: Keep committed QUEUED, raw retained, relay will publish
+        end
+        Backend-->>Nginx: 202 Accepted with videoAssetId and QUEUED status
+        Nginx-->>Frontend: 202 Accepted
+        Frontend-->>Admin: Show queued processing status
+    end
+    Backend->>Backend: Release request multipart temp file
 ```
+
+The SPA pre-check GET uses the existing auth refresh path, validates file size/type, and shows XHR progress. At 100% it shows “Saving to storage…” without Cancel; no automatic body replay after 401. `202` is the committed acceptance snapshot; a fast worker may already have advanced the DB status. Keep raw while a commit outcome is unknown; compensate only after establishing the transaction did not commit. UPLOADED is reserved. Edge/body-limit details are in [INFRASTRUCTURE.md](INFRASTRUCTURE.md#upload-transport).
+
+### Unpublished-job relay
+
+```mermaid
+sequenceDiagram
+    participant Backend
+    participant PostgreSQL
+    participant RabbitMQ
+    Backend->>PostgreSQL: Select oldest QUEUED, published_at NULL, age at least twice confirm timeout
+    loop every ENCODING_RELAY_INTERVAL_SECONDS (default 10)
+        Backend->>RabbitMQ: Republish same persistent message, mandatory and confirm
+        alt confirmed and not returned
+            Backend->>PostgreSQL: Set published_at if NULL, without status write
+        else unavailable or timeout
+            Note over Backend,PostgreSQL: Leave pending; no FAILED and no QUEUED age timeout
+        end
+    end
+```
+
+The single-backend relay closes the commit/publish crash window; a confirm/DB-write crash may duplicate delivery. [ADR-010](adr/ADR-010.md) defines the conditional claim that makes duplication safe.
 
 ## Worker Encoding
 
@@ -41,17 +76,30 @@ sequenceDiagram
     participant FFprobe
     participant FFmpeg
 
-    RabbitMQ-->>Worker: Deliver encoding job
-    Worker->>PostgreSQL: Mark encoding_jobs and video_assets PROCESSING via direct JDBC
-    Worker->>MinIO: Read raw object from vod-raw
-    Worker->>FFprobe: Extract duration, codec, bitrate, resolution
-    FFprobe-->>Worker: Metadata result
-    Worker->>PostgreSQL: Save media metadata
-    Worker->>FFmpeg: Generate single-quality HLS output
-    FFmpeg-->>Worker: master.m3u8 and .ts segments
-    Worker->>MinIO: Upload HLS artifacts to vod-hls
-    Worker->>PostgreSQL: Mark video_assets and encoding_jobs READY via direct JDBC
-    Worker-->>RabbitMQ: Ack job
+    Note over Worker,PostgreSQL: Before listener start: sweep owned temp dirs, fail PROCESSING orphans WORKER_INTERRUPTED, clean attempt prefixes
+    RabbitMQ-->>Worker: Deliver versioned IDs-only job (prefetch 1, concurrency 1)
+    Worker->>PostgreSQL: Validate IDs/attempt, load trusted raw key, conditionally claim latest QUEUED pair in one JDBC transaction
+    alt duplicate, terminal or older valid attempt
+        Worker-->>RabbitMQ: Return normally, AUTO ack and skip
+    else malformed, unsupported version or mismatched IDs
+        Worker-->>RabbitMQ: Reject without requeue to queue-derived DLX/DLQ
+    else claimed
+        Note over Worker,PostgreSQL: Commit claim; no transaction during media work
+        Worker->>MinIO: Check disk from raw size, bounded download into job directory
+        Worker->>FFprobe: Forced trusted demuxer, file protocol, capped output and deadline
+        FFprobe-->>Worker: Metadata, checked against caps
+        Worker->>FFmpeg: Typed arguments, same input restrictions, single-quality HLS and deadline
+        FFmpeg-->>Worker: master.m3u8 with relative segments/ URIs
+        Worker->>Worker: Delete downloaded raw copy
+        Worker->>MinIO: Upload under video-assets/assetId/attempt-n/ only
+        Worker->>PostgreSQL: One conditional PROCESSING to READY pair transaction, metadata and HLS keys
+        alt finish genuinely lost expected state
+            Worker->>PostgreSQL: Read back pair, exclude same-attempt READY after ambiguous commit
+            Worker->>MinIO: Best-effort delete only unreferenced losing attempt prefix
+        end
+        Worker->>Worker: Clean owned job temp directory
+        Worker-->>RabbitMQ: Return normally, AUTO ack after persisted outcome
+    end
 ```
 
 Failure path:
@@ -61,12 +109,18 @@ sequenceDiagram
     participant Worker
     participant PostgreSQL
     participant RabbitMQ
+    participant MinIO
 
     Worker->>Worker: FFprobe, FFmpeg, storage, or validation error
-    Worker->>PostgreSQL: Mark video_assets FAILED with safe failure reason via direct JDBC
-    Worker->>PostgreSQL: Mark encoding_jobs FAILED via direct JDBC
-    Worker-->>RabbitMQ: Ack failed job after state is persisted
+    Worker->>PostgreSQL: One conditional PROCESSING to FAILED pair transaction, safe code and timestamps
+    Worker->>MinIO: Best-effort delete this attempt prefix ending in slash
+    Worker->>Worker: Clean owned job temp directory
+    Worker-->>RabbitMQ: Return normally, AUTO ack after state is persisted
 ```
+
+DB unavailability at claim or finish holds delivery and retries in-process with capped backoff; it is neither FAILED nor a poison DLQ case. A startup crash is bounded by failing the orphan on restart. Only one non-overlapping worker replica is permitted. See the [recovery runbook](../deployment/README.md#encoding-recovery); every external step needs a deadline and QUEUED age never causes failure.
+
+Read back uncertain commit outcomes before cleanup: if this attempt already reached READY with its expected HLS keys, acknowledge success and retain those objects. Total DB retry time is bounded by the whole-job budget in Issue 5.7; on exhaustion stop the listener/worker without ack or poison rejection, then use startup recovery.
 
 ## Admin Retry Failed Encoding
 
@@ -83,16 +137,19 @@ sequenceDiagram
     Frontend->>Nginx: POST /api/v1/admin/video-assets/{videoAssetId}/retry
     Nginx->>Backend: Forward request with Authorization
     Backend->>Backend: Validate JWT and ROLE_ADMIN
-    Backend->>PostgreSQL: Load video_assets row and latest encoding_jobs attempt
-    alt asset is FAILED
-        Backend->>PostgreSQL: Create new encoding_jobs row with next attempt and QUEUED
-        Backend->>RabbitMQ: Publish job to video-encoding-queue
-        Backend->>PostgreSQL: Mark video_assets status QUEUED
+    Backend->>PostgreSQL: BEGIN, same movie-row lock as upload commit, load newest asset/latest attempt
+    alt requested asset is newest FAILED and conditional claim wins
+        Backend->>PostgreSQL: Conditionally FAILED to QUEUED, clear failure, insert next QUEUED attempt with published_at NULL
+        Backend->>PostgreSQL: COMMIT both rows
+        Backend->>RabbitMQ: Version-1 IDs-only JSON, mandatory and correlated confirm
+        Backend->>PostgreSQL: On confirm only, set published_at if NULL without status overwrite
+        Note over Backend,PostgreSQL: Publish failure still returns 202; relay owns recovery
         Backend-->>Nginx: 202 Accepted with QUEUED status
         Nginx-->>Frontend: 202 Accepted
         Frontend-->>Admin: Show retry queued
-    else asset is not FAILED
-        Backend-->>Nginx: 409 Conflict
+    else not newest FAILED or another retry won
+        Backend->>PostgreSQL: ROLLBACK
+        Backend-->>Nginx: 409 VIDEO_ASSET_NOT_RETRYABLE
         Nginx-->>Frontend: 409 Conflict
         Frontend-->>Admin: Show retry not available
     end
@@ -113,19 +170,20 @@ sequenceDiagram
     Frontend->>Nginx: GET /api/v1/movies/{movieId}/playback
     Nginx->>Backend: Forward request with Authorization
     Backend->>Backend: Validate JWT and access rules
-    Backend->>PostgreSQL: Load movie, READY video asset, saved progress
+    Backend->>PostgreSQL: Apply movie visibility first, then load newest READY by created_at/id and saved progress
+    Note over Backend,PostgreSQL: Hidden/missing movie is 404; no current asset is 409 VIDEO_NOT_READY
     Backend-->>Nginx: Playback info with /hls/video-assets/{videoAssetId}/master.m3u8
     Nginx-->>Frontend: Playback info
     Frontend->>Nginx: GET /hls/video-assets/{videoAssetId}/master.m3u8 with Authorization
     Nginx->>Backend: Forward HLS request with Authorization
-    Backend->>Backend: Validate JWT and HLS access
-    Backend->>MinIO: Read vod-hls master playlist
+    Backend->>Backend: Validate JWT, visibility and current READY asset (else 404)
+    Backend->>MinIO: Read master at stored attempt-scoped key
     Backend-->>Nginx: HLS playlist with MIME type
     Nginx-->>Frontend: HLS playlist
     Frontend->>Nginx: GET /hls/video-assets/{videoAssetId}/segments/{segmentName} with Authorization
     Nginx->>Backend: Forward HLS segment request
-    Backend->>Backend: Validate JWT and HLS access
-    Backend->>MinIO: Read vod-hls segment
+    Backend->>Backend: Validate JWT, visibility, current READY asset and segmentName (else 404)
+    Backend->>MinIO: Read segment under prefix derived from stored master key
     Backend-->>Nginx: HLS segment with MIME type
     Nginx-->>Frontend: HLS segment
 ```

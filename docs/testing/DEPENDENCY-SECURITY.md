@@ -66,6 +66,10 @@ These are source/release/maintainer-evidence assessments; the repository did not
 
 ## Local Checks
 
+### Media processing prerequisites (#103 / #54)
+
+[ADR-010](../architecture/adr/ADR-010.md#untrusted-media-handling-d6-d10) requires a maintained FFmpeg source before Sprint 5. The owner-approved research reports a local image built from the unchanged worker Dockerfile with jammy `7:4.4.2-0ubuntu0.22.04.1` and uid 0; this is research evidence, not a CI image measurement repeated by this docs task. #54 must verify package security support or a checksum-verified upstream build, record `dpkg -s ffmpeg` where applicable, `ffmpeg -version`, FFprobe command compatibility and runtime uid in the chosen image, and document updates/OS scan limits. Debian-stable packages and a pinned upstream build are candidates, not an image decision in this change. Signature checks, protocol restrictions and capped probing do not replace decoder security fixes. #124 sets measured caps/deadlines; #74 separately settles the broker version and consumer-timeout rule.
+
 ```bash
 cd frontend
 npm audit --package-lock-only --omit=dev --audit-level=high

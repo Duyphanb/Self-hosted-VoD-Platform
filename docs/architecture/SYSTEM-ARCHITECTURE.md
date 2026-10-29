@@ -96,45 +96,45 @@ The `shared` module and the assembly role of `common` were approved by the repos
 
 Planned worker modules:
 
-- `queue`: RabbitMQ consumer and message acknowledgement
+- `queue`: versioned IDs-only RabbitMQ consumer, prefetch 1, AUTO acknowledgement after terminal persistence and poison DLQ routing
 - `probe`: FFprobe command execution and result parsing
 - `transcode`: FFmpeg single-quality HLS command construction and execution
 - `storage`: MinIO read/write operations for raw and HLS assets
 - `status`: direct JDBC status updates and failure recording in PostgreSQL
-- `cleanup`: temporary file cleanup after success or failure
+- `cleanup`: owned temp cleanup per job/startup and failed/lost-finish/orphan attempt-prefix cleanup
 
 Worker concurrency is fixed at 1 for MVP.
+
+Exactly one worker replica may run, with no overlap on recreation. Listener startup follows temp sweep and conditional failure of orphaned PROCESSING pairs. [ADR-010](adr/ADR-010.md) defines claim/finish, deadlines, recovery and topology. Catalog obtains derived `videoStatus` through a catalog-defined port or set-based SQL, avoiding an encoding/catalog dependency cycle and N+1 reads; the worker does not write `movies`.
 
 ## Primary Data Flows
 
 ### Upload And Queue
 
 1. Admin submits a video upload to `/api/v1/admin/movies/{movieId}/video`.
-2. Backend validates authentication, `ROLE_ADMIN`, MIME type, size, and non-empty file.
-3. Backend stores the raw video object in private MinIO bucket `vod-raw`.
-4. Backend creates or updates the `video_assets` row with status `UPLOADED`.
-5. Backend creates an `encoding_jobs` row with status `QUEUED`.
-6. Backend publishes the RabbitMQ message to `video-encoding-queue`.
-7. Backend marks the `video_assets` row as `QUEUED`.
-8. Backend returns `202 Accepted`.
+2. Nginx streams only this route unbuffered; backend authorizes headers before parsing, spools to dedicated temp disk and validates size, non-empty file, declared MIME and signature family.
+3. Backend generates a new asset ID and stores `{movieId}/{videoAssetId}.{ext}` in private `vod-raw`, streaming with known length.
+4. In one transaction serialized per movie, insert the new asset and attempt-1 job as `QUEUED`, with `published_at NULL`. The partial unique in-flight index rejects a concurrent loser with 409 `VIDEO_UPLOAD_IN_PROGRESS`; an uncommitted failure compensates only this request's raw key.
+5. Commit before publishing the version-1 IDs-only persistent message with mandatory/returns and correlated confirms; set `published_at` on confirm without rewriting status.
+6. Return `202 Accepted` even if publication fails; the backend relay republishes unpublished QUEUED jobs after the grace window. UPLOADED is reserved; QUEUED has no age timeout.
 
 ### Encoding
 
 1. Worker consumes one RabbitMQ job.
-2. Worker marks the job and asset `PROCESSING` through direct JDBC writes to PostgreSQL.
+2. Worker validates IDs/latest attempt and conditionally claims the QUEUED job/asset pair in a short JDBC transaction. Duplicates/older valid attempts are skipped and acknowledged; malformed/version/ID mismatches go to DLQ.
 3. Worker reads the raw object from MinIO into worker temp storage.
-4. Worker runs FFprobe and stores useful metadata.
-5. Worker runs FFmpeg and generates one HLS output variant.
-6. Worker uploads `master.m3u8` and `.ts` segments to private MinIO bucket `vod-hls`.
-7. Worker marks the asset and job `READY`, or `FAILED` with a safe reason, through direct JDBC writes to PostgreSQL.
+4. Worker runs restricted FFprobe with metadata caps and a process deadline.
+5. Worker runs restricted FFmpeg with a duration-derived deadline and generates one HLS variant, then deletes its downloaded raw copy.
+6. Worker uploads `master.m3u8` and `.ts` segments under `video-assets/{videoAssetId}/attempt-{n}/` in private `vod-hls`.
+7. Worker conditionally finishes both PROCESSING rows to `READY` (HLS keys/metadata) or `FAILED` (safe code) in one JDBC transaction, then AUTO-acks. No transaction spans media work. DB outages retry in-process; failed/lost-finish prefixes and temp files are cleaned best effort.
 
 ### Playback And Progress
 
 1. User requests `/api/v1/movies/{movieId}/playback`.
-2. Backend verifies JWT, movie visibility, and asset status `READY`.
+2. Backend verifies JWT and movie visibility first (404), then queries current: greatest `(created_at, id)` READY asset. No current returns 409 `VIDEO_NOT_READY`.
 3. Backend returns playback metadata, resume position, and canonical HLS manifest path under `/hls/*`.
 4. Frontend player requests the manifest and segments through Nginx, sending the bearer token.
-5. Backend authorizes each HLS request and streams the matching MinIO object through Nginx.
+5. Backend authorizes each HLS request against the visible movie and current READY asset, returning 404 for non-current IDs, and derives storage keys from the stored attempt master key. A replacement may interrupt an old stream.
 6. Frontend sends progress to `/api/v1/movies/{movieId}/progress` every 5 to 10 seconds.
 7. Backend buffers progress in Redis and periodically flushes it to PostgreSQL.
 
@@ -145,6 +145,8 @@ Worker concurrency is fixed at 1 for MVP.
 - RabbitMQ is the only encoding job handoff between backend and worker.
 - MinIO stores raw and HLS media objects; object keys are referenced from PostgreSQL.
 - Encoding is asynchronous; an uploaded video is not playable until status is `READY`.
+- `encoding_jobs` is the durable handoff record (`published_at` outbox); DB commit precedes RabbitMQ publish and delivery is at-least-once. Paired conditional transitions prevent status regression and duplicate encoding.
+- Current/newest are derived per [ADR-010](adr/ADR-010.md); `videoStatus` stays READY while a working current exists, even when a replacement is pending/failed. Retry accepts only newest FAILED; archive keeps media. Minimal automatic compensation and manual superseded purge follow that ADR.
 
 ## API Boundary
 

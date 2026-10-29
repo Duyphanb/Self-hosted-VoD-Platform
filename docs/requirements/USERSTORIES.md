@@ -90,8 +90,8 @@ Acceptance criteria:
 - Upload accepts configured allowed video MIME types only: MP4, MKV, WebM, and MOV for MVP.
 - Upload enforces configured size limits.
 - Raw video is stored in MinIO.
-- A video asset record is created or updated in PostgreSQL.
-- An encoding job is published to RabbitMQ.
+- A new video asset and attempt-1 job are committed together as QUEUED in PostgreSQL for each upload; UPLOADED is reserved. At most one in-flight asset per movie; a competing upload returns 409.
+- An encoding job is published after commit; a pending publication is recovered by the job-row outbox/relay ([ADR-010](../architecture/adr/ADR-010.md)). A pending or failed replacement preserves the previous current READY playback.
 - Upload returns a status that the admin UI can display.
 
 ### US-009 - Process Encoding Job
@@ -184,7 +184,7 @@ Acceptance criteria:
 
 - Admin dashboard shows uploaded videos and encoding status.
 - Failed assets expose safe diagnostic information.
-- Retry is allowed only for `FAILED` assets.
+- Retry is allowed only for the newest asset of its movie when `FAILED`; conditional claim and next-attempt insert prevent double retries. Others return 409 VIDEO_ASSET_NOT_RETRYABLE.
 - Retry publishes a new encoding job without duplicating movie metadata.
 
 ### US-017 - Run Local Stack

@@ -17,6 +17,21 @@ Choose the contract sections relevant to the task; this list is not a required r
 7. `OBSERVABILITY.md`
 8. `adr/`
 
+## ADR Index
+
+| ADR | Decision |
+|---|---|
+| [ADR-001](adr/ADR-001.md) | Modular monolith plus worker |
+| [ADR-002](adr/ADR-002.md) | Java 21 / Spring Boot 4.x / Maven |
+| [ADR-003](adr/ADR-003.md) | PostgreSQL and Flyway |
+| [ADR-004](adr/ADR-004.md) | MinIO-compatible storage / PGSTY Silo |
+| [ADR-005](adr/ADR-005.md) | RabbitMQ encoding queue |
+| [ADR-006](adr/ADR-006.md) | FFprobe / FFmpeg / HLS |
+| [ADR-007](adr/ADR-007.md) | Body-based refresh tokens |
+| [ADR-008](adr/ADR-008.md) | Case-insensitive email identity |
+| [ADR-009](adr/ADR-009.md) | Catalog visibility, archive retention and slugs |
+| [ADR-010](adr/ADR-010.md) | Upload transport, video asset lifecycle, encoding handoff and cleanup |
+
 ## Purpose
 
 - define the modular monolith plus worker architecture
