@@ -16,13 +16,16 @@ const admin: UserProfile = {
 };
 const fetchMock = vi.fn<typeof fetch>();
 
+// Query native actions by label/text to avoid accessible-name scans over the whole form.
+// Keep role queries for the navigation, modal and focus/accessibility assertions.
 describe('AdminMovieFormPage through the data router', () => {
   beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock); serve(); });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it('starts a new movie as Draft and suggests a Vietnamese slug until it is manually edited', async () => {
     renderForm();
-    await screen.findByRole('heading', { level: 1, name: 'New movie' }, { timeout: 5_000 });
+    await screen.findByLabelText('Title');
+    expect(screen.getByText('Create movie', { selector: 'button' })).toHaveAccessibleName('Create movie');
     expect(screen.getByLabelText('Title')).toHaveValue('');
     expect(screen.getByLabelText('Description')).toHaveValue('');
     expect(screen.getByLabelText('Release year (optional)')).toHaveValue('');
@@ -41,7 +44,7 @@ describe('AdminMovieFormPage through the data router', () => {
 
   it('validates required fields, focuses a linked error summary and makes no mutation', async () => {
     renderForm();
-    fireEvent.click(await screen.findByRole('button', { name: 'Create movie' }));
+    fireEvent.click(await screen.findByText('Create movie', { selector: 'button' }));
     const summary = errorSummary();
     expect(summary).toHaveFocus();
     expect(summary).toHaveTextContent('Title is required.');
@@ -71,7 +74,7 @@ describe('AdminMovieFormPage through the data router', () => {
     const { queryClient, router } = renderForm();
     queryClient.setQueryData(movieKeys.detail(movieId), movieDetail());
     await fillCreate({ title: '  Đất Rừng Phương Nam  ', description: '  A story.\nThe next line.  ' });
-    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
+    fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
 
     expect(await screen.findByText('Movie created')).toHaveAttribute('role', 'status');
     expect(router.state.location.pathname).toBe('/admin/movies');
@@ -95,7 +98,7 @@ describe('AdminMovieFormPage through the data router', () => {
       { field: 'otherField', message: 'An unexpected field error' }
     ], 'form-request-90') : undefined);
     renderForm({ path: `/admin/movies/${movieId}/edit` });
-    fireEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
+    fireEvent.click(await screen.findByText('Save changes', { selector: 'button' }));
     await waitFor(() => expect(errorSummary()).toHaveFocus());
     const summary = errorSummary();
     expect(summary).toHaveTextContent('Title was rejected');
@@ -113,7 +116,7 @@ describe('AdminMovieFormPage through the data router', () => {
     serve((_url, init) => init?.method === 'POST' ? apiError(409, 'MOVIE_SLUG_CONFLICT') : undefined);
     renderForm();
     await fillCreate();
-    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
+    fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
     await waitFor(() => expect(screen.getByLabelText('Slug')).toHaveAttribute('aria-invalid', 'true'));
     expect(errorSummary()).toHaveFocus();
     expect(screen.getByLabelText('Slug')).toHaveAccessibleDescription('This slug is already used');
@@ -132,7 +135,7 @@ describe('AdminMovieFormPage through the data router', () => {
       { field: 'people[1].personId', message: 'must identify an existing person' }
     ]) : undefined);
     renderForm({ path: `/admin/movies/${movieId}/edit` });
-    fireEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
+    fireEvent.click(await screen.findByText('Save changes', { selector: 'button' }));
     const secondPerson = screen.getByLabelText('Person 2');
     await waitFor(() => expect(secondPerson).toHaveAttribute('aria-invalid', 'true'));
 
@@ -148,7 +151,7 @@ describe('AdminMovieFormPage through the data router', () => {
   it('does not invalidate a newly added untouched credit or show a failed-save summary', async () => {
     renderForm();
     await fillCreate();
-    const add = screen.getByRole('button', { name: 'Add credit' });
+    const add = screen.getByText('Add credit', { selector: 'button' });
     act(() => add.focus());
     fireEvent.click(add);
     const person = screen.getByLabelText('Person 1');
@@ -157,7 +160,7 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(screen.queryByRole('heading', { name: 'The movie could not be saved' })).not.toBeInTheDocument();
     expect(screen.queryByText('Pick an existing person or explicitly create a new person.')).not.toBeInTheDocument();
     change('Person 1', 'A new person');
-    act(() => screen.getByRole('button', { name: "Create new person 'A new person'" }).focus());
+    act(() => screen.getByText("Create new person 'A new person'", { selector: 'button' }).focus());
     expect(screen.queryByRole('heading', { name: 'The movie could not be saved' })).not.toBeInTheDocument();
     expect(mutations()).toHaveLength(0);
   });
@@ -166,7 +169,7 @@ describe('AdminMovieFormPage through the data router', () => {
     serve((url, init) => url.pathname === `/api/v1/movies/${movieId}` && !init?.method
       ? json(movieDetail({ status: 'ARCHIVED' })) : undefined);
     const { router } = renderForm({ path: `/admin/movies/${movieId.toUpperCase()}/edit` });
-    await screen.findByRole('button', { name: 'Save changes' });
+    await screen.findByText('Save changes', { selector: 'button' });
     expect(screen.getByLabelText('Title')).toHaveValue('Existing movie');
     expect(screen.getByLabelText('Slug')).toHaveValue('existing-movie');
     expect(screen.getByLabelText('Description')).toHaveValue('An existing description.');
@@ -181,8 +184,8 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(screen.getByLabelText('Slug')).toHaveValue('existing-movie');
     change('Status', status);
     change('Release year (optional)', '');
-    fireEvent.click(screen.getByRole('button', { name: 'Move credit 2 up' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(screen.getByLabelText('Move credit 2 up'));
+    fireEvent.click(screen.getByText('Save changes', { selector: 'button' }));
     expect(await screen.findByText('Changes saved')).toHaveAttribute('role', 'status');
     expect(router.state.location.pathname).toBe('/admin/movies');
     const [[input, init]] = mutations();
@@ -200,12 +203,12 @@ describe('AdminMovieFormPage through the data router', () => {
     serve((_url, init) => init?.method === 'POST' ? held.promise : undefined);
     renderForm();
     await fillCreate();
-    const form = screen.getByRole('button', { name: 'Create movie' }).closest('form');
+    const form = screen.getByText('Create movie', { selector: 'button' }).closest('form');
     if (!form) throw new Error('Movie form is missing');
     fireEvent.submit(form);
     fireEvent.submit(form);
     await waitFor(() => expect(mutations()).toHaveLength(1));
-    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(screen.getByText('Saving…', { selector: 'button' })).toBeDisabled();
     expect(screen.getByLabelText('Title')).toBeDisabled();
     held.release(json(movieDetail()));
     expect(await screen.findByText('Movie created')).toBeInTheDocument();
@@ -218,9 +221,9 @@ describe('AdminMovieFormPage through the data router', () => {
     const { router, queryClient } = renderForm({ entries: ['/account', '/admin/movies/new'] });
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     await fillCreate();
-    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
-    if (departure === 'header') fireEvent.click(screen.getByRole('link', { name: 'Admin' }));
-    else if (departure === 'sign-out') fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
+    if (departure === 'header') fireEvent.click(screen.getByText('Admin', { selector: 'a' }));
+    else if (departure === 'sign-out') fireEvent.click(screen.getByText('Sign out', { selector: 'button' }));
     else await act(async () => { await router.navigate(-1); });
 
     const dialog = await screen.findByRole('dialog', { name: 'Saving movie…' });
@@ -242,7 +245,7 @@ describe('AdminMovieFormPage through the data router', () => {
     const view = renderForm();
     const invalidate = vi.spyOn(view.queryClient, 'invalidateQueries');
     await fillCreate();
-    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
+    fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
     await waitFor(() => expect(mutations()).toHaveLength(1));
     const signal = mutations()[0][1]?.signal;
     view.unmount();
@@ -258,13 +261,13 @@ describe('AdminMovieFormPage through the data router', () => {
     }) : undefined);
     renderForm();
     await fillCreate();
-    fireEvent.click(screen.getByRole('button', { name: 'Add credit' }));
-    change('Person 1', 'Existing');
+    fireEvent.click(screen.getByText('Add credit', { selector: 'button' }));
+    await searchPerson('Person 1', 'Existing');
     const results = await screen.findByRole('listbox', { name: 'People for credit 1' });
     const person = await within(results).findByRole('button', { name: /Existing actor/ });
     fireEvent.click(person);
     change('Role 1', 'DIRECTOR');
-    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
+    fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
     expect(await screen.findByText('Movie created')).toBeInTheDocument();
     expect(JSON.parse(String(mutations()[0][1]?.body)).people).toEqual([{ personId: actorId, role: 'DIRECTOR' }]);
     expect(fetchMock.mock.calls.some(([input]) => {
@@ -279,11 +282,11 @@ describe('AdminMovieFormPage through the data router', () => {
       ? json({ id: actorId, name: 'New person', slug: 'new-person' }, 201) : undefined);
     renderForm();
     await fillCreate();
-    fireEvent.click(screen.getByRole('button', { name: 'Add credit' }));
+    fireEvent.click(screen.getByText('Add credit', { selector: 'button' }));
     change('Person 1', 'New person');
-    fireEvent.click(screen.getByRole('button', { name: "Create new person 'New person'" }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Create new person|Creating person/ })).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
+    fireEvent.click(screen.getByText("Create new person 'New person'", { selector: 'button' }));
+    await waitFor(() => expect(screen.queryByText(/Create new person|Creating person/, { selector: 'button' })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
     expect(await screen.findByText('Movie created')).toBeInTheDocument();
     const requests = mutations();
     expect(requests).toHaveLength(2);
@@ -317,7 +320,7 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(screen.getByLabelText('Title')).toHaveValue('An unsaved title');
     expect(screen.getByLabelText('Description')).toHaveValue('An unsaved description.');
     failRefresh = false;
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByText('Retry', { selector: 'button' }));
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Movie could not be refreshed; your changes are kept' })).not.toBeInTheDocument());
     expect(screen.getByLabelText('Title')).toHaveValue('An unsaved title');
     expect(screen.getByLabelText('Description')).toHaveValue('An unsaved description.');
@@ -339,15 +342,15 @@ describe('AdminMovieFormPage through the data router', () => {
     const { queryClient } = renderForm({ path: `/movies/${movieId}` });
     await screen.findByRole('heading', { level: 1, name: 'Existing movie' });
     queryClient.setQueryDefaults(movieKeys.detail(movieId), { staleTime: Infinity });
-    fireEvent.click(screen.getByRole('link', { name: 'Edit movie' }));
+    fireEvent.click(screen.getByText('Edit movie', { selector: 'a' }));
     await waitFor(() => expect(detailReads).toBe(2));
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     expect(screen.getByText('Loading movie…')).toBeInTheDocument();
     freshResponse.release(json(freshMovie));
     expect(await screen.findByLabelText('Description')).toHaveValue(freshMovie.description);
-    expect(screen.getByRole('button', { name: 'Remove genre Comedy' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Remove genre Comedy')).toBeInTheDocument();
     change('Title', 'Retitled after a fresh GET');
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(screen.getByText('Save changes', { selector: 'button' }));
     expect(await screen.findByText('Changes saved')).toBeInTheDocument();
     expect(JSON.parse(String(mutations()[0][1]?.body))).toMatchObject({ description: freshMovie.description, genres: ['Comedy'] });
   });
@@ -368,15 +371,15 @@ describe('AdminMovieFormPage through the data router', () => {
     });
     renderForm({ path: `/admin/movies/${movieId}/edit` });
     await screen.findByLabelText('Title');
-    fireEvent.click(screen.getByRole('link', { name: 'Cancel' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Archive Existing movie' }));
+    fireEvent.click(screen.getByText('Cancel', { selector: 'a' }));
+    fireEvent.click(await screen.findByLabelText('Archive Existing movie'));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    fireEvent.click(await screen.findByRole('link', { name: 'Edit Existing movie' }));
+    fireEvent.click(await screen.findByLabelText('Edit Existing movie'));
     expect(await screen.findByLabelText('Status')).toHaveValue('ARCHIVED');
     expect(screen.getByText('This movie is archived. Choose Draft or Published to restore it.')).toBeInTheDocument();
     change('Description', 'Metadata update while the movie stays archived.');
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(screen.getByText('Save changes', { selector: 'button' }));
     expect(await screen.findByText('Changes saved')).toBeInTheDocument();
     expect(JSON.parse(String(mutations()[0][1]?.body)).status).toBe('ARCHIVED');
     expect(serverMovie.status).toBe('ARCHIVED');
@@ -404,11 +407,11 @@ describe('AdminMovieFormPage through the data router', () => {
     const { queryClient } = renderForm({ path: `/admin/movies/${movieId}/edit` });
     await screen.findByLabelText('Title');
     change('Title', 'The saved title');
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(screen.getByText('Save changes', { selector: 'button' }));
     expect(await screen.findByText('Changes saved')).toBeInTheDocument();
     expect(queryClient.getQueryData<MovieDetail>(movieKeys.detail(movieId))?.title).toBe('The saved title');
     const previousReads = delayedReads.length;
-    fireEvent.click(await screen.findByRole('link', { name: 'Edit The saved title' }));
+    fireEvent.click(await screen.findByLabelText('Edit The saved title'));
     await waitFor(() => expect(delayedReads.length).toBeGreaterThan(previousReads));
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     for (const response of delayedReads) response.release(json(serverMovie));
@@ -431,7 +434,7 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(status).toHaveValue('ARCHIVED');
     expect(within(status).getByRole('option', { name: 'Archived (current)' })).toBeInTheDocument();
     expect(screen.getByText('This movie is archived. Choose Draft or Published to restore it.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(screen.getByText('Save changes', { selector: 'button' }));
     expect(await screen.findByText('Changes saved')).toBeInTheDocument();
     expect(JSON.parse(String(mutations()[0][1]?.body))).toMatchObject({ title: 'Unsaved archived title', status: 'ARCHIVED' });
   });
@@ -454,14 +457,14 @@ describe('AdminMovieFormPage through the data router', () => {
     serve((url) => url.pathname === `/api/v1/movies/${movieId}` ? apiError(403, 'FORBIDDEN') : undefined);
     renderForm({ path: `/admin/movies/${movieId}/edit` });
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Save changes', { selector: 'button' })).not.toBeInTheDocument();
   });
 
   it('shows Forbidden when saving is denied, without an unsaved changes prompt', async () => {
     serve((_url, init) => init?.method === 'POST' ? apiError(403, 'FORBIDDEN') : undefined);
     renderForm();
     await fillCreate();
-    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
+    fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -469,7 +472,7 @@ describe('AdminMovieFormPage through the data router', () => {
   it('shows Movie not found when the edit PUT reports that the movie disappeared', async () => {
     serve((_url, init) => init?.method === 'PUT' ? apiError(404, 'MOVIE_NOT_FOUND') : undefined);
     renderForm({ path: `/admin/movies/${movieId}/edit` });
-    fireEvent.click(await screen.findByRole('button', { name: 'Save changes' }));
+    fireEvent.click(await screen.findByText('Save changes', { selector: 'button' }));
     expect(await screen.findByRole('heading', { name: 'Movie not found' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'The movie could not be saved' })).not.toBeInTheDocument();
@@ -479,9 +482,9 @@ describe('AdminMovieFormPage through the data router', () => {
     serve((url, init) => url.pathname === '/api/v1/admin/people' && init?.method === 'POST'
       ? apiError(403, 'FORBIDDEN') : undefined);
     renderForm();
-    fireEvent.click(await screen.findByRole('button', { name: 'Add credit' }));
+    fireEvent.click(await screen.findByText('Add credit', { selector: 'button' }));
     change('Person 1', 'Someone');
-    fireEvent.click(screen.getByRole('button', { name: "Create new person 'Someone'" }));
+    fireEvent.click(screen.getByText("Create new person 'Someone'", { selector: 'button' }));
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -497,8 +500,8 @@ describe('AdminMovieFormPage through the data router', () => {
   it('surfaces a forbidden people search as Forbidden for the whole page', async () => {
     serve((url) => url.pathname === '/api/v1/admin/people' ? apiError(403, 'FORBIDDEN') : undefined);
     renderForm();
-    fireEvent.click(await screen.findByRole('button', { name: 'Add credit' }));
-    change('Person 1', 'Someone');
+    fireEvent.click(await screen.findByText('Add credit', { selector: 'button' }));
+    await searchPerson('Person 1', 'Someone');
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -523,7 +526,7 @@ describe('AdminMovieFormPage through the data router', () => {
     const { router } = renderForm();
     await screen.findByLabelText('Title');
     change('Title', 'Keep this draft');
-    const cancel = screen.getByRole('link', { name: 'Cancel' });
+    const cancel = screen.getByText('Cancel', { selector: 'a' });
     cancel.focus();
     fireEvent.click(cancel);
     const dialog = await screen.findByRole('dialog', { name: 'Discard changes?' });
@@ -542,7 +545,7 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(screen.getByLabelText('Title')).toHaveValue('Keep this draft');
     expect(cancel).toHaveFocus();
     fireEvent.click(cancel);
-    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    fireEvent.click(await screen.findByText('Discard changes', { selector: 'button' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/admin/movies'));
     expect(await screen.findByRole('heading', { level: 1, name: 'Movies' })).toBeInTheDocument();
   });
@@ -554,7 +557,7 @@ describe('AdminMovieFormPage through the data router', () => {
     const nav = screen.getByRole('navigation', { name: 'Primary navigation' });
     fireEvent.click(within(nav).getByRole('link', { name: 'Movies' }));
     expect(await screen.findByRole('dialog', { name: 'Discard changes?' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    fireEvent.click(screen.getByText('Discard changes', { selector: 'button' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/movies'));
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
   });
@@ -564,15 +567,15 @@ describe('AdminMovieFormPage through the data router', () => {
     renderForm();
     await screen.findByLabelText('Title');
     change('Title', 'Keep this draft until sign-out is confirmed');
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    fireEvent.click(screen.getByText('Sign out', { selector: 'button' }));
     const dialog = await screen.findByRole('dialog', { name: 'Discard changes?' });
     const logoutRequests = () => fetchMock.mock.calls.filter(([input]) => new URL(String(input), 'http://localhost').pathname === '/api/v1/auth/logout');
     expect(logoutRequests()).toHaveLength(0);
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' })); });
     expect(screen.getByLabelText('Title')).toHaveValue('Keep this draft until sign-out is confirmed');
     expect(logoutRequests()).toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    fireEvent.click(screen.getByText('Sign out', { selector: 'button' }));
+    fireEvent.click(await screen.findByText('Discard changes', { selector: 'button' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeInTheDocument();
     expect(logoutRequests()).toHaveLength(1);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -588,14 +591,14 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(router.state.location.pathname).toBe('/admin/movies/new');
     expect(screen.getByLabelText('Title')).toHaveValue('Unsaved movie');
     await act(async () => { await router.navigate(-1); });
-    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    fireEvent.click(await screen.findByText('Discard changes', { selector: 'button' }));
     expect(await screen.findByRole('heading', { name: 'Account' })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/account');
   });
 
   it('leaves a clean form without a discard prompt', async () => {
     const { router } = renderForm();
-    fireEvent.click(await screen.findByRole('link', { name: 'Cancel' }));
+    fireEvent.click(await screen.findByText('Cancel', { selector: 'a' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/admin/movies'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -606,11 +609,13 @@ describe('AdminMovieFormPage through the data router', () => {
       ? adminPage(movieDetail(), 1)
       : init?.method === 'PUT' ? json(movieDetail({ title: 'Saved from filtered list' })) : undefined);
     const { router } = renderForm({ entries: ['/account', listPath] });
-    fireEvent.click(await screen.findByRole('link', { name: mode === 'new' ? 'New movie' : 'Edit Existing movie' }));
-    expect(await screen.findByRole('link', { name: 'Cancel' })).toHaveAttribute('href', listPath);
+    fireEvent.click(mode === 'new'
+      ? await screen.findByText('New movie', { selector: 'a' })
+      : await screen.findByLabelText('Edit Existing movie'));
+    expect(await screen.findByText('Cancel', { selector: 'a' })).toHaveAttribute('href', listPath);
     if (mode === 'new') await fillCreate();
     else change('Title', 'Saved from filtered list');
-    fireEvent.click(screen.getByRole('button', { name: mode === 'new' ? 'Create movie' : 'Save changes' }));
+    fireEvent.click(screen.getByText(mode === 'new' ? 'Create movie' : 'Save changes', { selector: 'button' }));
     expect(await screen.findByText(mode === 'new' ? 'Movie created' : 'Changes saved')).toBeInTheDocument();
     expect(`${router.state.location.pathname}${router.state.location.search}`).toBe(listPath);
     expect(screen.getByRole('heading', { level: 1, name: 'Movies' })).toHaveFocus();
@@ -624,7 +629,7 @@ describe('AdminMovieFormPage through the data router', () => {
     renderForm();
     await fillCreate();
     change('Add genre', 'Uncommitted genre');
-    fireEvent.click(screen.getByRole('button', { name: 'Create movie' }));
+    fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
     expect(errorSummary()).toHaveTextContent('Add or clear the genre you typed before saving.');
     expect(mutations()).toHaveLength(0);
   });
@@ -658,12 +663,25 @@ async function fillCreate({ title = 'New movie title', description = 'A descript
   change('Title', title);
   change('Description', description);
   change('Add genre', 'Drama');
-  fireEvent.click(screen.getByRole('button', { name: 'Add genre' }));
+  fireEvent.click(screen.getByText('Add genre', { selector: 'button' }));
+}
+
+// Keep real timers for router/Query waits. Fake only this interaction so the 250ms
+// people-search debounce is explicit, including the next tick for Query notifications.
+async function searchPerson(label: string, value: string) {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    change(label, value);
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 function change(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
 function errorSummary(): HTMLElement {
-  const summary = screen.getByRole('heading', { name: 'The movie could not be saved' }).closest<HTMLElement>('[role="alert"]');
+  const summary = screen.getByText('The movie could not be saved', { selector: 'h2' }).closest<HTMLElement>('[role="alert"]');
   if (!summary) throw new Error('Error summary is missing');
   return summary;
 }

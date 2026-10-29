@@ -80,7 +80,7 @@ The same stack ran the Newman collection: 31 requests, 51 assertions, 0 failures
 | Classification | Tracking | Boundary |
 |---|---|---|
 | Blocker before Sprint 4 | [#14](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/14) | The object-store image cannot be pulled on a clean machine. Upload, encoding and playback depend on it. The catalog CI fixture deliberately excludes storage. |
-| Test-quality follow-up | Not yet tracked; to be raised at the next triage | `AdminMovieFormPage.test.tsx` intermittently times out under CPU contention. This matches the #91 review's uncertain finding, which was not reproduced at the time. CI runners have not shown the failure, and no timeouts were raised to hide it. |
+| Test-quality follow-up | [#164](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/164) | `AdminMovieFormPage.test.tsx` intermittently times out under CPU contention. This matches the #91 review's uncertain finding, which was not reproduced at the time. CI runners have not shown the failure, and no timeouts were raised to hide it. |
 | Non-blocking | [#119](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/119) | Spring integration tests still use H2. PostgreSQL behaviour is covered by the runtime smoke and Newman, not by the JVM suite. |
 | Sprint 6 | [#125](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/125) | The upload → HLS smoke reuses this Newman step once #14 is resolved. |
 | UI overhaul (after Sprint 6) | — | Basic UI by decision. Example: person search shows full UUIDs to disambiguate names. |
