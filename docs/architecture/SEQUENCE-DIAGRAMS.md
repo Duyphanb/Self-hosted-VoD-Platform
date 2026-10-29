@@ -79,11 +79,18 @@ sequenceDiagram
     Note over Worker,PostgreSQL: Before listener start: sweep owned temp dirs, fail PROCESSING orphans WORKER_INTERRUPTED, clean attempt prefixes
     RabbitMQ-->>Worker: Deliver versioned IDs-only job (prefetch 1, concurrency 1)
     Worker->>PostgreSQL: Validate IDs/attempt, load trusted raw key, conditionally claim latest QUEUED pair in one JDBC transaction
-    alt duplicate, terminal or older valid attempt
+    opt claim COMMIT outcome unknown
+        Worker->>PostgreSQL: On DB reconnect, read back job/asset pair and latest attempt
+        Note over Worker,PostgreSQL: Matching latest PROCESSING pair is our own claim; continue, no re-claim or early ack
+        Note over Worker,PostgreSQL: Matching QUEUED pair retries claim; unresolved state holds delivery, never ack from non-QUEUED alone
+    end
+    alt terminal pair, different attempt or newer job
         Worker-->>RabbitMQ: Return normally, AUTO ack and skip
     else malformed, unsupported version or mismatched IDs
         Worker-->>RabbitMQ: Reject without requeue to queue-derived DLX/DLQ
-    else claimed
+    else readback unresolved or matching pair still QUEUED
+        Note over Worker,PostgreSQL: Hold delivery, retry readback or conditional claim; no ack or media work yet
+    else claim confirmed or matching latest PROCESSING readback owns claim
         Note over Worker,PostgreSQL: Commit claim; no transaction during media work
         Worker->>MinIO: Check disk from raw size, bounded download into job directory
         Worker->>FFprobe: Forced trusted demuxer, file protocol, capped output and deadline
@@ -120,7 +127,9 @@ sequenceDiagram
 
 DB unavailability at claim or finish holds delivery and retries in-process with capped backoff; it is neither FAILED nor a poison DLQ case. A startup crash is bounded by failing the orphan on restart. Only one non-overlapping worker replica is permitted. See the [recovery runbook](../deployment/README.md#encoding-recovery); every external step needs a deadline and QUEUED age never causes failure.
 
-Read back uncertain commit outcomes before cleanup: if this attempt already reached READY with its expected HLS keys, acknowledge success and retain those objects. DB outage alone does not stop the listener/worker or trigger startup orphan recovery; consumer-timeout sizing remains #74.
+An ambiguous claim COMMIT that readback identifies as this delivery's PROCESSING pair must proceed through probe/encode to READY; the single non-overlapping worker invariant supplies ownership without a claim-token column. Never skip it just because a repeated QUEUED update returned zero rows.
+
+Read back uncertain finish commit outcomes before cleanup: if this attempt already reached READY with its expected HLS keys, acknowledge success and retain those objects. DB outage alone does not stop the listener/worker or trigger startup orphan recovery; consumer-timeout sizing remains #74.
 
 ## Admin Retry Failed Encoding
 

@@ -50,7 +50,7 @@ Updated 2026-10-29 for [ADR-010](../architecture/adr/ADR-010.md). Rows for deliv
 | NFR-012 | All features | Documentation review before milestone completion |
 | NFR-013 | All MVP features | This traceability matrix plus test artifacts |
 | NFR-014 | F-021, F-022 | Compose service-name verification |
-| NFR-015 | Backend API features | Contract ApiError tests, edge 413/502/503/504 JSON/status/requestId and SPA ambiguous-error handling |
+| NFR-015 | Backend API features | Contract ApiError tests, edge 413/502/503/504 JSON/status/requestId and SPA unknown-result/no-auto-resubmit handling even while videoStatus stays READY |
 | NFR-016 | Frontend features | UI state tests or manual checklist |
 
 ## Sprint 4 design-to-test plan

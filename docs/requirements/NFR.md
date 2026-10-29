@@ -22,7 +22,7 @@ The MVP targets a single Oracle Cloud Free Tier VPS, expected baseline: Ampere A
 | NFR-012 | Documentation accuracy | Docs must match implemented behavior. | README, OpenAPI, Postman, and deployment docs are reviewed before each release milestone. |
 | NFR-013 | Testability | Business rules must be covered by automated or documented manual tests. | Traceability file maps each MVP feature to planned test evidence before implementation. |
 | NFR-014 | Portability | Local and VPS deployment must use the same service names where practical. | Compose env vars use stable service aliases: `postgres`, `redis`, `rabbitmq`, `minio`, `backend`, `worker`, `frontend`, `nginx`. |
-| NFR-015 | Error handling | API failures must be predictable and machine-readable. | Backend uses centralized ApiError responses; edge-generated API 413/502/503/504 preserves status and emits the same shape/requestId. Browsers may expose early body rejection as status 0; SPA checks inputs and refreshes state after ambiguous failures. |
+| NFR-015 | Error handling | API failures must be predictable and machine-readable. | Backend uses centralized ApiError responses; edge-generated API 413/502/503/504 preserves status and emits the same shape/requestId. Browsers may expose early body rejection as status 0; SPA checks inputs and reports an unknown upload result after ambiguous failures, without inferring acceptance from videoStatus or auto-resubmitting; deliberate re-upload is safe with in-flight 409 or extra storage after completion. |
 | NFR-016 | Browser UX | User-facing async states must be explicit. | Frontend screens for major flows include loading, error, empty, and success states. |
 
 ## MVP Performance Targets

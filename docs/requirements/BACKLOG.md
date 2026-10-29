@@ -591,6 +591,7 @@ Validate the spooled multipart file, stream raw to Silo with known length, then 
 - Set Spring file/request limits to `${MAX_UPLOAD_SIZE_MB:2048}MB`, spool `${TEMP_UPLOAD_DIR:/tmp/vod-uploads}`, threshold 0B. Validate directory and sweep only stale regular Tomcat `upload_*.tmp` files non-recursively before connector start, no symlink traversal/general temp sweep/ApplicationRunner
 - Stream `getInputStream()` with `getSize()` to private `vod-raw` at `{movieId}/{videoAssetId}.{ext}`, never `getBytes()`; release request temp files on completion/abort
 - Advisory in-flight pre-check before PUT saves storage writes; authoritative V5 partial index maps concurrent loser to 409 `VIDEO_UPLOAD_IN_PROGRESS`
+- Measure temp-disk headroom for concurrent uploads to different movies (each may spool up to the configured ceiling): values to be measured in Issue 4.4/4.6 on the target VPS. If insufficient, document a measured fallback proposal such as upload-location Nginx limit_conn 1; adopt no limit without measurement and a recorded decision
 - Raw PUT precedes the new asset/job transaction; if it does not commit (including 409 loser), best-effort delete only this request's raw key, WARN with IDs on cleanup failure. Read back uncertain commits by generated asset/job IDs; retain raw while outcome is unknown. Never delete raw on a post-commit publish failure
 - Assign asset `created_at` only inside that insert transaction, after PUT and per-movie serialization. Test overlapping PUTs: X starts first, Y commits and reaches READY before X's PUT ends, then X inserts; X must rank newest, Y stays current until X reaches READY, then X becomes current
 - Return the committed acceptance DTO (QUEUED), with no internal keys/credentials; UPLOADED stays reserved
@@ -652,8 +653,9 @@ Create protected admin upload UI and shared `ApiClient.upload()` on XMLHttpReque
 - videoStatus may stay READY during replacement; it is availability, not a complete in-flight pre-check. Server 409 remains authoritative
 - XHR percent progress; Cancel only during body transfer. At 100%, “Saving to storage…” with Cancel hidden/disabled
 - Success message shows video asset status (QUEUED)
-- Map 400/413 clearly, 409 as upload already in progress, 401 as session expired (never automatically resend body), status 0 as file too large or connection lost, 504 as refresh movie status before trying again; ambiguous disconnect/cancel also requires checking status before resubmission
-- Tests cover pre-check failure, empty MIME fallback, own-request disable, progress/saving switch, cancel availability, no 401 replay and 409/status-0/504 errors
+- Map 400/413 clearly, 409 as upload already in progress, 401 as session expired (never automatically resend body), status 0 as file too large or connection lost. After a network error once the body was fully sent, or 502/503/504, show “Upload result unknown”; never infer outcome from MovieDetail.videoStatus, which may stay READY throughout a replacement
+- Explain deliberate re-upload is safe: while the first asset is UPLOADED/QUEUED/PROCESSING the server returns 409 VIDEO_UPLOAD_IN_PROGRESS; if it already finished, re-upload creates a newer asset with extra storage cost, reclaimable by the manual purge runbook, without corrupting existing assets. Never auto-resubmit, including after ambiguous disconnect/cancel; #168 supplies a direct newest-asset view later, with no new endpoint in this issue
+- Tests cover pre-check failure, empty MIME fallback, own-request disable, progress/saving switch, cancel availability and no automatic body replay; lost replacement-upload response while videoStatus stays READY, unknown-result messaging for post-send network error/502/503/504, deliberate re-upload 409 while in-flight, and a new asset/extra-storage notice after completion
 - Admin upload page is protected with `ROLE_ADMIN` guard
 
 **Dependencies:** Issue 4.6, Issue 2.10
@@ -729,12 +731,13 @@ Implement service that updates `video_assets.status` and `encoding_jobs.status` 
 
 **Acceptance Criteria:**
 - Status update method accepts video asset ID, job ID, new status, optional failure reason
-- Claim validates latest attempt and conditionally changes both QUEUED rows to PROCESSING in one short JDBC transaction; roll back both if either precondition fails; duplicates/older valid attempts are skipped
+- Claim validates latest attempt and conditionally changes both QUEUED rows to PROCESSING in one short JDBC transaction; roll back both if either precondition fails. After an unknown claim COMMIT outcome, read back the pair when DB reconnects, not merely retry the conditional claim: matching latest PROCESSING for encodingJobId/attempt is our own claim under one non-overlapping worker, so continue probe/encode without re-claim; matching QUEUED retries claim. Terminal pair, different attempt or newer job is duplicate/stale and is acknowledged without media work; unresolved readback is held, never acknowledged from non-QUEUED status alone. No claim token/schema change; V5 stays minimal
 - Finish conditionally changes both PROCESSING rows to READY (including HLS keys/metadata) or FAILED (safe reason) in one transaction; lost expected state never overwrites a newer status. Read back ambiguous commits: same-attempt READY with the expected keys is success and retains HLS; only a genuinely lost finish cleans an unreferenced prefix
 - No transaction/DB connection is held during probe/encode/upload; DB unavailability retries final persistence without re-running media work
 - Timestamps are updated (started_at, finished_at)
 - Failure reason is stored if status is `FAILED`
-- Tests cover expected-state/zero-row semantics, atomic pair rollback, two claims, late finish, lost commit response/readback preserving READY HLS, and startup recovery; conditional update races require PostgreSQL evidence
+- Tests cover expected-state/zero-row semantics, atomic pair rollback, two claims, late finish, lost finish commit response/readback preserving READY HLS, and startup recovery; conditional update races require PostgreSQL evidence
+- PostgreSQL fault-injection test: claim COMMIT succeeds but connection drops before response; worker reconnects, reads matching latest PROCESSING pair, encodes to READY and does not leave the pair stuck PROCESSING or ack it as a duplicate
 
 **Dependencies:** Issue 5.2
 
@@ -801,7 +804,8 @@ Upload HLS artifacts to private `vod-hls` under attempt-scoped keys: `video-asse
 Implement main processing orchestrator that coordinates: mark status `PROCESSING` → download raw video → run FFprobe → run FFmpeg → upload HLS → mark status `READY` or `FAILED`. Handle failures at each step.
 
 **Acceptance Criteria:**
-- Conditionally claim latest QUEUED asset/job pair through 5.3; no work for duplicates/older valid attempts
+- Conditionally claim latest QUEUED asset/job pair through 5.3; after ambiguous claim COMMIT, read back and continue this delivery's matching latest PROCESSING claim without re-claiming. Ack without media work only for confirmed terminal/stale/different-attempt/newer-job outcomes, never just from a failed conditional re-claim
+- Test successful claim COMMIT with lost response: reconnect/readback owns PROCESSING, probe/encode/finish to READY, no stuck PROCESSING; DB outage at claim/finish remains never FAILED and never DLQ
 - Check free disk from raw object size plus output allowance **to be measured in Issue 5.7/#124**; INSUFFICIENT_DISK is a safe failure code, not a new API quota response
 - Bounded download into owned `job-*` directory; no symlink/path escape
 - Runs FFprobe and stores metadata

@@ -538,7 +538,11 @@ paths:
         (default 2048 MiB); the request ceiling includes multipart overhead.
         Invalid MIME/signature family returns 400 UNSUPPORTED_VIDEO_TYPE.
         Early rejections may appear as a connection error in browsers; after an
-        ambiguous timeout refresh movie status before submitting another upload.
+        ambiguous post-send network error or 502/503/504, show an unknown result;
+        MovieDetail.videoStatus cannot establish whether a replacement landed.
+        Never automatically resubmit. A deliberate re-upload returns 409 while
+        in-flight, or creates a newer asset with extra storage cost if the first
+        finished. A direct newest-asset view follows in #168; no new endpoint here.
       requestBody:
         required: true
         content:
@@ -1043,7 +1047,9 @@ components:
     UpstreamTimeout:
       description: >
         UPSTREAM_TIMEOUT - edge timed out (504). Upload may already have committed;
-        refresh movie status before resubmitting.
+        report an unknown result, never infer acceptance from MovieDetail.videoStatus
+        or automatically resubmit. Deliberate re-upload is safe: 409 while in-flight,
+        otherwise a newer asset with extra storage cost after completion.
       content:
         application/json:
           schema:
