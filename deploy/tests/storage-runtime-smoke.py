@@ -21,6 +21,18 @@ SBOMS = (
     "sha256:f0bde32599e2103953b33a24391b5faf2c3741d853e9b02bd0a0cc9b9ba2c632",
 )
 
+SCRIPT_CHECKS = {
+    "backend-raw-put", "worker-raw-get", "worker-hls-put", "backend-hls-get",
+    "backend-raw-read-denied", "worker-raw-delete-denied", "backend-hls-delete-denied",
+    "backend-hls-write-denied", "outside-attempt-write-denied", "thumbnail-write-denied",
+    "scoped-user-list-denied", "scoped-service-account-denied", "scoped-password-change-denied",
+    "scoped-raw-list-denied", "scoped-hls-list-denied", "scoped-bucket-creation-denied",
+    "force-delete-nested-put", "force-delete-playlist-put", "force-delete-sibling-put",
+    "force-delete-exact-attempt", "force-delete-nested-missing", "force-delete-playlist-missing",
+    "force-delete-sibling-kept", "force-delete-broad-prefix-denied", "force-delete-sibling-still-kept",
+    "force-delete-sibling-cleanup", "backend-raw-delete", "worker-hls-delete",
+}
+
 
 class SmokeCommandError(RuntimeError):
     """A safe diagnostic constructed here, never from captured command output."""
@@ -31,6 +43,16 @@ def run(args, *, timeout=240, check=True):
     if check and result.returncode:
         raise SmokeCommandError("Storage smoke command failed (output withheld): " + args[0])
     return result
+
+
+def require_script_success(result):
+    if result.returncode:
+        # Only relay a locally defined check name; captured output may contain credentials.
+        for label in SCRIPT_CHECKS:
+            if "SMOKE_CHECK:" + label + "\n" in result.stderr:
+                raise SmokeCommandError("Storage check failed: " + label)
+        raise SmokeCommandError("Storage smoke script failed (output withheld)")
+    return result.stdout
 
 
 def validate_config(services):
@@ -94,29 +116,67 @@ def main():
              and parts[1].split(":")[0] != "0B00007F"}  # Docker DNS at 127.0.0.11
     assert ports == {9000}, "Unexpected object-store listener"
     print("PASS digest pull, healthy, init twice, console off", flush=True)
-    alias = 'mc alias set local http://minio:9000 "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" >/dev/null; '
+    alias = 'printf \'%s\\n%s\\n\' "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" | mc alias set local http://minio:9000 >/dev/null 2>&1; '
     def client(script):
-        return run(compose + ["run", "--rm", "--no-deps", "--entrypoint", "/bin/sh", "minio-init", "-ec", script]).stdout
+        return require_script_success(run(compose + ["run", "--rm", "--no-deps", "--entrypoint", "/bin/sh", "minio-init", "-ec", script], check=False))
     client(alias + '''printf scope-test >/tmp/scope
+expect() { if [ "$1" != "$2" ]; then printf 'SMOKE_CHECK:%s\\n' "$3" >&2; exit 1; fi; }
 backend() { curl -sS --aws-sigv4 aws:amz:us-east-1:s3 --user "$MINIO_BACKEND_ACCESS_KEY:$MINIO_BACKEND_SECRET_KEY" -o /dev/null -w '%{http_code}' "$@"; }
 worker() { curl -sS --aws-sigv4 aws:amz:us-east-1:s3 --user "$MINIO_WORKER_ACCESS_KEY:$MINIO_WORKER_SECRET_KEY" -o /dev/null -w '%{http_code}' "$@"; }
 raw="http://minio:9000/$MINIO_BUCKET_RAW/ci-smoke/scoped.mp4"
 hls="http://minio:9000/$MINIO_BUCKET_HLS/video-assets/ci-smoke/attempt-1/master.m3u8"
-[ "$(backend -X PUT --data-binary @/tmp/scope "$raw")" = 200 ]
-[ "$(worker "$raw")" = 200 ]
-[ "$(worker -X PUT --data-binary @/tmp/scope "$hls")" = 200 ]
-[ "$(backend "$hls")" = 200 ]
-[ "$(backend "$raw")" = 403 ]
-[ "$(worker -X DELETE "$raw")" = 403 ]
-[ "$(backend -X DELETE "$hls")" = 403 ]
-[ "$(worker -X PUT --data-binary @/tmp/scope "http://minio:9000/$MINIO_BUCKET_HLS/outside-attempt/file.ts")" = 403 ]
-[ "$(backend -X PUT --data-binary @/tmp/scope "http://minio:9000/$MINIO_BUCKET_THUMBNAILS/forbidden")" = 403 ]
-mc alias set backend http://minio:9000 "$MINIO_BACKEND_ACCESS_KEY" "$MINIO_BACKEND_SECRET_KEY" >/dev/null 2>&1
-if mc admin user list backend >/dev/null 2>&1; then exit 1; fi
-[ "$(backend -X DELETE "$raw")" = 204 ]
-[ "$(worker -X DELETE "$hls")" = 204 ]
+expect "$(backend -X PUT --data-binary @/tmp/scope "$raw")" 200 backend-raw-put
+expect "$(worker "$raw")" 200 worker-raw-get
+expect "$(worker -X PUT --data-binary @/tmp/scope "$hls")" 200 worker-hls-put
+expect "$(backend "$hls")" 200 backend-hls-get
+expect "$(backend "$raw")" 403 backend-raw-read-denied
+expect "$(worker -X DELETE "$raw")" 403 worker-raw-delete-denied
+expect "$(backend -X DELETE "$hls")" 403 backend-hls-delete-denied
+expect "$(backend -X PUT --data-binary @/tmp/scope "$hls")" 403 backend-hls-write-denied
+expect "$(worker -X PUT --data-binary @/tmp/scope "http://minio:9000/$MINIO_BUCKET_HLS/outside-attempt/file.ts")" 403 outside-attempt-write-denied
+expect "$(backend -X PUT --data-binary @/tmp/scope "http://minio:9000/$MINIO_BUCKET_THUMBNAILS/forbidden")" 403 thumbnail-write-denied
+printf '%s\n%s\n' "$MINIO_BACKEND_ACCESS_KEY" "$MINIO_BACKEND_SECRET_KEY" | mc alias set backend http://minio:9000 >/dev/null 2>&1
+printf '%s\n%s\n' "$MINIO_WORKER_ACCESS_KEY" "$MINIO_WORKER_SECRET_KEY" | mc alias set worker http://minio:9000 >/dev/null 2>&1
+# JSON is captured in the disposable container and never logged. Verify an IAM
+# denial rather than accidentally accepting a connection/argument failure.
+denied() {
+ label="$1"; shift
+ if "$@" >/tmp/denied.json 2>/dev/null; then expect 0 1 "$label"; fi
+ # The bundled Silo image intentionally has no grep; inspect JSON with shell builtins.
+ case "$(cat /tmp/denied.json)" in
+  *'"Code"'*'"AccessDenied"'*|*'"code"'*'"AccessDenied"'*|*'"Code"'*'"XMinioAdminAccessDenied"'*|*'"code"'*'"XMinioAdminAccessDenied"'*) ;;
+  *) expect 0 1 "$label";;
+ esac
+}
+denied scoped-user-list-denied mc --json admin user list backend
+for role in backend worker; do
+ case "$role" in backend) own_key="$MINIO_BACKEND_ACCESS_KEY"; new_secret="$MINIO_BACKEND_SECRET_KEY";;
+   worker) own_key="$MINIO_WORKER_ACCESS_KEY"; new_secret="$MINIO_WORKER_SECRET_KEY";; esac
+ denied scoped-service-account-denied mc --json admin user svcacct add "$role" "$own_key"
+ printf '%s\n' "$new_secret" | denied scoped-password-change-denied mc --json admin user add "$role" "$own_key"
+done
+for role in backend worker; do
+ expect "$("$role" "http://minio:9000/$MINIO_BUCKET_RAW?list-type=2")" 403 scoped-raw-list-denied
+ expect "$("$role" "http://minio:9000/$MINIO_BUCKET_HLS?list-type=2")" 403 scoped-hls-list-denied
+ expect "$("$role" -X PUT "http://minio:9000/ci-forbidden-bucket")" 403 scoped-bucket-creation-denied
+done
+# Silo exact-prefix delete is authorized on the prefix object, without listing.
+attempt="http://minio:9000/$MINIO_BUCKET_HLS/video-assets/ci-force-delete/attempt-1/"
+sibling="http://minio:9000/$MINIO_BUCKET_HLS/video-assets/ci-force-delete/attempt-10/master.m3u8"
+expect "$(worker -X PUT --data-binary @/tmp/scope "${attempt}segments/one.ts")" 200 force-delete-nested-put
+expect "$(worker -X PUT --data-binary @/tmp/scope "${attempt}master.m3u8")" 200 force-delete-playlist-put
+expect "$(worker -X PUT --data-binary @/tmp/scope "$sibling")" 200 force-delete-sibling-put
+expect "$(worker -X DELETE -H 'x-minio-force-delete: true' "$attempt")" 204 force-delete-exact-attempt
+expect "$(backend "${attempt}segments/one.ts")" 404 force-delete-nested-missing
+expect "$(backend "${attempt}master.m3u8")" 404 force-delete-playlist-missing
+expect "$(backend "$sibling")" 200 force-delete-sibling-kept
+expect "$(worker -X DELETE -H 'x-minio-force-delete: true' "http://minio:9000/$MINIO_BUCKET_HLS/video-assets/")" 403 force-delete-broad-prefix-denied
+expect "$(backend "$sibling")" 200 force-delete-sibling-still-kept
+expect "$(worker -X DELETE "$sibling")" 204 force-delete-sibling-cleanup
+expect "$(backend -X DELETE "$raw")" 204 backend-raw-delete
+expect "$(worker -X DELETE "$hls")" 204 worker-hls-delete
 ''')
-    print("PASS scoped backend/worker PUT/GET/DELETE and out-of-scope denials", flush=True)
+    print("PASS scoped operations, IAM/self-credential denials and exact attempt-prefix cleanup", flush=True)
     checksum = client(alias + '''head -c 1048576 /dev/urandom >/tmp/o
 want=$(sha256sum /tmp/o); want=${want%% *}
 for b in "$MINIO_BUCKET_RAW" "$MINIO_BUCKET_HLS" "$MINIO_BUCKET_THUMBNAILS"; do
@@ -147,8 +207,11 @@ printf '%s' "$want"''').strip()
     bad = run(compose + ["run", "--rm", "--no-deps", "-e", "MINIO_SECRET_KEY=deliberately-wrong-test-only",
                          "minio-init"], timeout=150, check=False)
     assert bad.returncode != 0 and "Storage initialization failed" in bad.stderr, "Bad credentials did not fail bounded init"
-    secret = config["services"]["minio"]["environment"]["MINIO_ROOT_PASSWORD"]
-    assert secret not in "".join(init_logs + server_history) + bad.stdout + bad.stderr + current_server_logs(), "Storage credential leaked into logs"
+    combined_logs = "".join(init_logs + server_history) + bad.stdout + bad.stderr + current_server_logs()
+    secrets = [config["services"]["minio"]["environment"]["MINIO_ROOT_PASSWORD"],
+               config["services"]["minio-init"]["environment"]["MINIO_BACKEND_SECRET_KEY"],
+               config["services"]["minio-init"]["environment"]["MINIO_WORKER_SECRET_KEY"]]
+    assert all(secret not in combined_logs for secret in secrets), "Storage credential leaked into logs"
     client(alias + 'for b in "$MINIO_BUCKET_RAW" "$MINIO_BUCKET_HLS" "$MINIO_BUCKET_THUMBNAILS"; do mc rm -q "local/$b/ci-smoke/o" >/dev/null; done')
     print("PASS bounded wrong-credential init and secret-free storage logs", flush=True)
 

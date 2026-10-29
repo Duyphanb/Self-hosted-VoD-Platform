@@ -1,6 +1,7 @@
 """Exercise the real smoke entrypoint's safe failure diagnostics, without Docker/network."""
 import ast
 import json
+import importlib.util
 import os
 from pathlib import Path
 import runpy
@@ -11,6 +12,9 @@ from unittest.mock import patch
 
 SCRIPT = Path(__file__).with_name("storage-runtime-smoke.py").resolve()
 SENSITIVE = "fixture-sensitive-command-output"
+SPEC = importlib.util.spec_from_file_location("runtime_smoke", SCRIPT)
+SMOKE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(SMOKE)
 
 
 class StorageFailureDiagnosticsTests(unittest.TestCase):
@@ -48,6 +52,17 @@ class StorageFailureDiagnosticsTests(unittest.TestCase):
             if isinstance(node, ast.Assert):
                 self.assertIsInstance(node.msg, ast.Constant)
                 self.assertIsInstance(node.msg.value, str)
+
+    def test_script_failure_relays_only_known_fixed_check_labels(self):
+        result = subprocess.CompletedProcess(["docker"], 1, stdout=SENSITIVE,
+                                             stderr="SMOKE_CHECK:force-delete-exact-attempt\n" + SENSITIVE)
+        with self.assertRaisesRegex(SMOKE.SmokeCommandError, "Storage check failed: force-delete-exact-attempt"):
+            SMOKE.require_script_success(result)
+        result.stderr = "SMOKE_CHECK:" + SENSITIVE + "\n"
+        with self.assertRaises(SMOKE.SmokeCommandError) as caught:
+            SMOKE.require_script_success(result)
+        self.assertEqual(str(caught.exception), "Storage smoke script failed (output withheld)")
+        self.assertNotIn(SENSITIVE, str(caught.exception))
 
 
 if __name__ == "__main__":

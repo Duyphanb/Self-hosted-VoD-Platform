@@ -125,7 +125,7 @@ provide non-empty, non-default values for:
 - `MINIO_WORKER_SECRET_KEY`
 - `JWT_SECRET`
 
-Root storage keys are bootstrap-only. Supply distinct backend/worker identities and secrets, also distinct from root, before rerunning `minio-init` and starting the applications on an existing volume. Do not reuse an operator account or attach extra policies/groups to these dedicated users. See [the IAM policy and SDK contract](../architecture/INFRASTRUCTURE.md#storage-identities-and-policies); account provisioning does not require deleting storage data.
+Root storage keys are reserved for bootstrap and explicit operator maintenance, inside a one-off internal `minio-init` container; applications receive only scoped identities. Supply distinct backend/worker identities and secrets, also distinct from root, before rerunning `minio-init` and starting the applications on an existing volume. Do not reuse an operator account or attach extra policies/groups to these dedicated users. See [the IAM policy and SDK contract](../architecture/INFRASTRUCTURE.md#storage-identities-and-policies); account provisioning does not require deleting storage data. All three storage access keys require at least three characters, no `=` or `,`, and no leading/trailing whitespace; all three secrets require at least eight characters. Preflight reports the variable name only.
 
 It must also set `NGINX_HTTP_PORT=80`, as described in
 [Edge Port Binding](#edge-port-binding).
@@ -137,10 +137,7 @@ and never its value. Backend, worker, Flyway, and initialization services
 consume the same canonical credentials. Starting production with `--no-deps` is
 unsupported because that option explicitly bypasses dependency gates.
 
-The preflight validates the configuration being supplied; it does not rotate
-credentials already stored in initialized service volumes. PostgreSQL and
-other bootstrap credentials must be applied to fresh production volumes or
-changed with an explicit service-specific rotation procedure.
+The preflight validates the configuration being supplied; it does not itself rotate persisted credentials. A subsequent `minio-init` run updates the configured scoped storage secrets and re-enables those users. PostgreSQL and other persisted service credentials need their service-specific rotation procedure; use the storage procedure below for Silo.
 
 Run the repository regression check before a deployment:
 
@@ -151,11 +148,53 @@ sh deploy/tests/production-config-smoke.sh
 The script uses synthetic test-only values. It verifies that local Compose
 still accepts its development defaults and publishes the edge on loopback only,
 missing production values fail during configuration, published defaults and a
-loopback-bound edge fail the runtime preflight, and non-default values pass.
+loopback-bound edge fail the runtime preflight, invalid storage key/secret formats fail with variable names only, and non-default values pass.
+
+## Storage Identity Rotation and Revocation
+
+This is an operator procedure for an explicitly authorized environment. Confirm the Compose project, environment file and storage volume before changing identities. Take a recoverable backup and preserve the previous configuration securely. Never print secrets, enable shell tracing, pass secrets as CLI arguments, or paste IAM inventories into logs/issues. Keep storage ports unpublished.
+
+Init creates or overwrites the configured backend/worker users, re-enables them and attaches the corresponding policy. It does not remove an old user when an access key changes, detach other policies or reconcile unconfigured identities. A manual disable is undone if that key is still configured on the next init. Keep these dedicated users free of other policies, groups and child credentials.
+
+### Routine Secret Rotation
+
+1. Generate a fresh independent random secret in the protected environment file for the affected `MINIO_BACKEND_SECRET_KEY` or `MINIO_WORKER_SECRET_KEY`, retaining its access key. Follow the preflight format rules; do not put the value in command history.
+2. During an approved interruption of affected reads/writes, run `minio-init` once and require exit code 0, then recreate the affected app from the same updated environment. For production, the commands are:
+
+   ```bash
+   docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml run --rm --no-deps minio-init
+   docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d --no-deps --force-recreate backend worker
+   ```
+
+3. Verify backend storage readiness and scoped read/write operations, and verify the previous secret is rejected. A secret update alone is not incident revocation: Silo STS sessions issued from the old credentials can remain valid.
+
+### Incident Response and Retired Users
+
+1. Generate a **new access key and secret** for the affected role and replace that pair in the protected environment file. Keep the compromised/retired access key available only to the operator performing revocation.
+2. Run init and recreate the apps as above. Verify the replacement identity works before deleting the old parent user. Do not fall back to a compromised key.
+3. Authenticate as root in a one-off internal container and run `mc admin user remove` on the old key. Root is required here because the scoped users cannot administer other users. Open the shell with the verified project/environment (the service receives root credentials through its existing environment):
+
+   ```bash
+   docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml run --rm --no-deps --entrypoint /bin/sh minio-init
+   # Inside the ephemeral container; do not enable set -x:
+   umask 077
+   printf '%s\n%s\n' "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" | mc alias set vod-store http://minio:9000 >/dev/null 2>&1 || exit 1
+   # Set OLD_ACCESS_KEY to the reviewed retired access key, never the active/root key.
+   if ! { test -n "$OLD_ACCESS_KEY" && test "$OLD_ACCESS_KEY" != "$MINIO_ACCESS_KEY" && test "$OLD_ACCESS_KEY" != "$MINIO_BACKEND_ACCESS_KEY" && test "$OLD_ACCESS_KEY" != "$MINIO_WORKER_ACCESS_KEY"; }; then
+     echo 'Retired user selection failed' >&2
+     exit 1
+   fi
+   mc admin user remove vod-store "$OLD_ACCESS_KEY" >/dev/null 2>&1 || exit 1
+   ```
+
+   Check every command succeeds before proceeding; stop on any failed guard. Removing the old parent user revokes its service accounts and STS sessions. A regular Silo user can call STS AssumeRole despite the scoped policy: policy cannot deny this path. The explicit Deny on self service-account creation/password change prevents those two operations, but neither changing a secret nor disabling a user is the incident closeout mechanism.
+4. In the same root container, run `mc admin policy entities vod-store --policy vod-backend` and `mc admin policy entities vod-store --policy vod-worker`. Inspect the inventory privately: only the currently configured corresponding users may hold these policies, with no unexpected groups/accounts. Remove each reviewed stale identity, verify old credentials and any known child sessions are rejected, then exit so the alias credentials disappear with the container. Record safe verification outcomes without credentials.
+
+After adopting scoped app identities, rotate the root pair as well: applications held root before #169. Update the protected root configuration and recreate the storage server/init in a planned maintenance window, preserving the volume; verify root authentication, init, private buckets and app readiness. Keep a secure rollback configuration until verification, but do not restore a compromised parent identity to recover service.
 
 ## Object Storage Backup and Restore
 
-Object storage is PGSTY Silo under the existing `minio` service/volume names ([ADR-004 addendum](../architecture/adr/ADR-004.md#runtime-addendum)). Both server and init are pinned to the same verified index digest. The console is off and S3/console ports are unpublished in local and production Compose. Curl `/minio/health/live` remains the health probe. Use the following offline procedure before a version change; never test upgrades on the only copy of data.
+Object storage is PGSTY Silo under the existing `minio` service/volume names ([ADR-004 addendum](../architecture/adr/ADR-004.md#runtime-addendum)). Both server and init are pinned to the same verified index digest. The console is off and S3/console ports are unpublished in local and production Compose. Curl `/minio/health/live` remains the server health probe; backend storage readiness separately authenticates with its scoped identity. Use the following offline procedure before a version change; never test upgrades on the only copy of data.
 
 These Bash examples use production configuration. Set `PROJECT`, the **actual** volume name from your deployment, a new absolute backup directory and the exact currently deployed image from Compose/source control. Do not print the composed configuration or credentials. The directory/volume names below are examples, not discovery of existing resources.
 
@@ -185,7 +224,7 @@ docker volume create "$RESTORE_VOLUME" >/dev/null
 docker run --rm --entrypoint cp -v "$BACKUP:/backup:ro" -v "$RESTORE_VOLUME:/data" "$IMAGE" -a /backup/. /data/
 ```
 
-Use a temporary Compose overlay to point `minio.volumes` to that restored external volume, and pin the server/init to the digest recorded with the backup. Validate health, object checksums, metadata and all bucket policies on an isolated copy before reconnecting readers/writers. Do not start an older binary against metadata written by a newer version: rollback restores **both** the backup and its matching digest. Do not run `down -v` during a deployment/rollback. Establish retention, permissions and an independently tested restore before public production use. The #14 spike proved restart/recreation on a Silo-created volume, not restoration of real production data or migration from an upstream-created volume.
+Use a temporary Compose overlay to point `minio.volumes` to that restored external volume, and pin the server/init to the digest recorded with the backup. Validate health, object checksums, metadata and all bucket policies on an isolated copy before reconnecting readers/writers. The backup restores IAM metadata too: a user removed after the backup can become valid again. With readers/writers still disconnected, rerun init using the current protected configuration, then authenticate as root in a one-off internal `minio-init` container and remove identities no longer configured. Audit both policy memberships and verify retired/compromised credentials and child sessions are rejected, following [revocation](#incident-response-and-retired-users). Only then reconnect apps with their current scoped credentials and verify readiness. Do not start an older binary against metadata written by a newer version: rollback restores **both** the backup and its matching digest. Do not run `down -v` during a deployment/rollback. Establish retention, permissions and an independently tested restore before public production use. The #14 spike proved restart/recreation on a Silo-created volume, not restoration of real production data or migration from an upstream-created volume.
 
 Example restore overlay (set/export `RESTORE_VOLUME` and `STORAGE_RESTORE_IMAGE` to the verified backup values). Compose merges volume mounts by target, so this replaces `/data` without deleting the original volume:
 
@@ -293,7 +332,7 @@ WHERE video_asset_id = :'asset_id'::uuid
 ORDER BY attempt;
 ```
 
-Only terminal attempts qualify. Cross-check a stored master key, when present, against the generated same-asset/attempt prefix; reject malformed keys, empty raw keys/attempt prefixes and all bucket roots. A prefix must end with `/` so `attempt-1/` cannot select `attempt-10/`. Use an already configured internal `mc` alias (example `vod-store`) with credentials loaded securely outside Git/command output, no public storage port. Set `RAW_BUCKET`, `RAW_KEY` and `ATTEMPT_PREFIX` only from those reviewed DB rows. Use the row's `hls_bucket` for `HLS_BUCKET` when present; for an asset without it (including superseded FAILED, where no READY write occurred), use the verified private bucket from the deployment's `MINIO_BUCKET_HLS` for its DB-enumerated attempt prefixes. Confirm that configured bucket against the actual private Silo bucket before dry-run; refuse an empty/unverified bucket and never guess a bucket root. This permits purging remnants of failed best-effort attempt cleanup. Verify the exact targets before running:
+Only terminal attempts qualify. Cross-check a stored master key, when present, against the generated same-asset/attempt prefix; reject malformed keys, empty raw keys/attempt prefixes and all bucket roots. A prefix must end with `/` so `attempt-1/` cannot select `attempt-10/`. Purge and orphan audit require **root as an explicit operator identity**, inside a one-off internal `minio-init` container: use the shell/secret-through-stdin alias setup in [the revocation procedure](#incident-response-and-retired-users), omitting the user-removal commands. The scoped app identities cannot list and are unsuitable for inventory or `mc rm --recursive` dry-runs. The root alias `vod-store` lasts only in that ephemeral container; never publish a storage port. Set `RAW_BUCKET`, `RAW_KEY` and `ATTEMPT_PREFIX` only from those reviewed DB rows. Use the row's `hls_bucket` for `HLS_BUCKET` when present; for an asset without it (including superseded FAILED, where no READY write occurred), use the verified private bucket from the deployment's `MINIO_BUCKET_HLS` for its DB-enumerated attempt prefixes. Confirm that configured bucket against the actual private Silo bucket before dry-run; refuse an empty/unverified bucket and never guess a bucket root. This permits purging remnants of failed best-effort attempt cleanup. Verify the exact targets before running:
 
 ```bash
 # Preview each exact raw object and exact attempt prefix; inspect the output.

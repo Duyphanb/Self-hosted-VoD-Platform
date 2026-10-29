@@ -1,6 +1,6 @@
 # Risk Register
 
-Last reviewed: 2026-10-29, Sprint 4 design package ([ADR-010](../architecture/adr/ADR-010.md)); planned mitigations are not implementation evidence.
+Last reviewed: 2026-10-30, scoped storage SDK review fixes (#169), following the Sprint 4 design package ([ADR-010](../architecture/adr/ADR-010.md)); planned mitigations are not implementation evidence.
 
 ## Risk Scale
 
@@ -28,7 +28,7 @@ Last reviewed: 2026-10-29, Sprint 4 design package ([ADR-010](../architecture/ad
 | R-014 | HLS delivery headers are wrong. | Medium | Medium | Browser fails to play `.m3u8` or `.ts` files. | Verify MIME types and cache headers in Nginx during streaming sprint. | Deploy / Frontend | Open |
 | R-015 | Resume playback durability is misunderstood. | Medium | Medium | Redis buffer loses progress and UX looks broken. | Define flush interval and fallback behavior; test Redis-to-PostgreSQL sync. | Backend | Open |
 | R-016 | Portfolio claims exceed implemented behavior. | Medium | High | README or CV says optional features exist before they work. | Keep README honest; final review must compare claims to evidence. | Project owner | Open |
-| R-017 | Platform or image maintenance churn blocks feature work. | High | Medium | An upstream image or platform line stops receiving updates or cannot be pulled: Silo maintenance/registry availability (#14), RabbitMQ 3.13 (#74), unpinned images (#54); the Spring Boot 3 open-source end was resolved by moving to Spring Boot 4.1 (#50). | Weekly dependency audit; Silo pinned with provenance/SBOM and runtime smoke (#14); monitor its primary-maintainer bus factor and advisory ledger, keep offline backups/self-build exit plan; pin other images by digest (#54); track every platform decision in an issue and an ADR. | Project owner / Deploy | Open |
+| R-017 | Platform or image maintenance churn blocks feature work. | High | Medium | An upstream image, SDK or platform line stops receiving updates or cannot be pulled: Silo maintenance/registry availability (#14), minio-java dependencies and failed-multipart callback bug (#169), RabbitMQ 3.13 (#74), unpinned images (#54); the Spring Boot 3 open-source end was resolved by moving to Spring Boot 4.1 (#50). | Weekly dependency audit; SDK version overrides/exclusions, bounded multipart regression and ObjectStorage adapter exit plan (ADR-004/#169); Silo pinned with provenance/SBOM and runtime smoke (#14); monitor its primary-maintainer bus factor and advisory ledger, keep offline backups/self-build exit plan; pin other images by digest (#54); track every platform decision in an issue and an ADR. | Project owner / Deploy | Open |
 | R-018 | Hostile or malformed media compromises or stalls the worker. | Medium | High | Fake MIME/playlist, decoder defect, unbounded probe/encode or exhausted temp disk; research found an unpatched jammy FFmpeg running as root in a local image, not CI certification. | 4.4 family signature check; 5.4/5.5 forced demuxer/file protocol/typed args/closed stdin/capped diagnostics; 5.7 measured caps/deadlines/disk check/process-tree kill; 5.8 non-root/read-only/cap-drop hardening. #54 must verify patched decoder source before Sprint 5. ADR-010 accepts residual shared-worker network/credential risk; stronger invocation isolation post-MVP. | Worker / Deploy / Project owner | Open |
 
 ## Highest Priority Risks

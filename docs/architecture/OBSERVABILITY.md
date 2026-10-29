@@ -30,6 +30,8 @@ Required visibility:
 
 Backend readiness must verify PostgreSQL, Redis, RabbitMQ, and MinIO after those integrations exist.
 
+The #169 backend storage contributor authenticates with the scoped backend identity and GETs the never-written key `video-assets/readiness-probe/attempt-0/never-written` in the configured HLS bucket. The non-UUID asset segment cannot be a real generated asset. `NoSuchKey` means UP because authentication and allowed object access succeeded; access/signature errors, transport failure and timeout mean DOWN with a fixed safe detail. The separate health client caps its connect/read/write/call and DNS wait budgets at 2000 ms, disables SDK retries and has its own dispatcher so uploads do not queue readiness. An outer 2000 ms future wait separately bounds the health caller, including a stalled underlying operation. A single daemon worker retains the probe permit until the actual call ends, even after that timeout; concurrent probes return safe DOWN immediately and cannot accumulate work. Native DNS lookups also use a bounded shared pool. It needs no bucket HEAD or ListBucket grant. The server's `/minio/health/live` probe remains separate. Health endpoint tests stub this storage boundary; the opt-in Silo smoke verifies correct credentials → UP and wrong secret → DOWN. [INFRASTRUCTURE.md](INFRASTRUCTURE.md#storage-identities-and-policies) records the client safeguards and configuration.
+
 ## Logging
 
 Logging requirements:

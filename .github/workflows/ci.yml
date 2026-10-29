@@ -87,7 +87,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 -m unittest discover -s deploy/tests -p test_storage_runtime_smoke.py
+          python3 -m unittest discover -s deploy/tests -p 'test_*.py'
           python3 deploy/tests/storage-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --verify-only
 
       - name: Verify production configuration fails closed
@@ -158,6 +158,15 @@ jobs:
             echo "FAIL Newman Sprint 3 catalog collection (response details withheld)"
             exit 1
           fi
+
+      - name: Preserve redacted storage SDK diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: storage-sdk-diagnostics
+          path: backend/common/target/storage-sdk-smoke/**/first-failure.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   frontend-build:
     name: Frontend build

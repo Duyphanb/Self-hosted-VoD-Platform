@@ -77,7 +77,7 @@ Issue 5.8 adds and documents a disk-backed writable volume/mount for `WORKER_TEM
 
 ## MinIO Buckets
 
-PGSTY Silo provides this contract under the existing `minio` service name; see the [ADR-004 addendum](adr/ADR-004.md#runtime-addendum). Server and initialization share one verified digest. `MINIO_BROWSER: "off"` disables the console in local and production stacks; no storage port is published. The curl `/minio/health/live` probe and all backend/worker `MINIO_*` settings remain unchanged. [Backup/restore and a temporary local console](../deployment/README.md#object-storage-backup-and-restore) are documented separately.
+PGSTY Silo provides this contract under the existing `minio` service name; see the [ADR-004 addendum](adr/ADR-004.md#runtime-addendum). Server and initialization share one verified digest. `MINIO_BROWSER: "off"` disables the console in local and production stacks; no storage port is published. The server curl `/minio/health/live` probe is unchanged; application credentials now use the [scoped mapping and positive timeouts](#storage-identities-and-policies) below, with an authenticated backend storage readiness probe. [Backup/restore and a temporary local console](../deployment/README.md#object-storage-backup-and-restore) are documented separately.
 
 | Bucket | Purpose | Access |
 |---|---|---|
@@ -88,27 +88,6 @@ PGSTY Silo provides this contract under the existing `minio` service name; see t
 Key layout: raw `{movieId}/{videoAssetId}.{ext}`; HLS `video-assets/{videoAssetId}/attempt-{n}/master.m3u8` and `.../segments/*.ts`. Backend derives the private attempt prefix from the READY asset's stored master key; public HLS paths are unchanged. Retention/compensation follows [ADR-010](adr/ADR-010.md#hls-objects-and-cleanup-d22-d23); manual purge/orphan audit follows the [runbook](../deployment/README.md#media-purge-and-orphan-audit). Buckets remain private.
 
 ## Environment Configuration
-
-### Storage identities and policies
-
-Issue #169 implements the [ADR-004 SDK choice](adr/ADR-004.md#runtime-addendum). `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` in the host environment remain root bootstrap credentials for the server and `minio-init` (the production gate validates them without contacting storage). Applications never receive them. `MINIO_BACKEND_ACCESS_KEY`/`MINIO_BACKEND_SECRET_KEY` and `MINIO_WORKER_ACCESS_KEY`/`MINIO_WORKER_SECRET_KEY` are independent dedicated identities; Compose maps each pair to the corresponding application's existing `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` variables. Production requires all six values, rejects published defaults and reused identities/secrets. Keep dedicated users free of additional policies/groups.
-
-`deploy/minio-init.sh` creates/secures the three buckets, creates/updates the two users and their `vod-backend`/`vod-worker` policies, and attaches each policy idempotently. Root credentials stay only in bootstrap services; the applications do not create buckets or change policies. All failures have safe diagnostics; no credentials or signed headers are logged. Existing initialized volumes are retained; supply the new independent application credentials and rerun init before starting apps. Never remove a volume to adopt these accounts.
-
-Resource notation below uses the configured bucket names; default raw/HLS buckets are `vod-raw`/`vod-hls`:
-
-| Identity | Actions | Resources |
-|---|---|---|
-| Backend raw writer/compensation | `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` | `arn:aws:s3:::<raw>` and `arn:aws:s3:::<raw>/*` |
-| Backend HLS reader | `s3:GetObject` | `arn:aws:s3:::<hls>/video-assets/*/attempt-*/*` |
-| Worker raw reader | `s3:GetObject` | `arn:aws:s3:::<raw>/*` |
-| Worker attempt writer/cleanup | `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` | `arn:aws:s3:::<hls>` and `arn:aws:s3:::<hls>/video-assets/*/attempt-*/*` |
-
-Bare bucket ARNs are required by Silo's write authorization in addition to object ARNs. They do not grant object access outside the listed prefix: signed S3 and Java SDK negative tests enforce that boundary. No ListBucket, GetBucketLocation, bucket creation, anonymous policy, IAM admin, thumbnail access, backend raw GET, backend HLS write/delete, or worker raw write/delete is granted. The fixed SDK region `us-east-1` avoids bucket-region discovery permissions; path-style access uses `MINIO_ENDPOINT` (default `http://minio:9000`). These policies scope worker output to attempt-shaped paths, not per-job ownership; trusted DB keys and application access checks remain required.
-
-The backend adapter accepts a caller-owned InputStream and known non-negative length; it never reads the whole object into an array and does not close the caller's input. The caller must close a returned GET stream to release HTTP resources. Negative lengths are rejected before I/O. Storage errors are safe IOExceptions without SDK diagnostic payloads. `MINIO_CONNECT_TIMEOUT_MS=10000`, `MINIO_READ_TIMEOUT_MS=60000`, `MINIO_WRITE_TIMEOUT_MS=60000` configure positive SDK operation waits. No retry orchestration/upload endpoint is implemented here.
-
-`storage-runtime-smoke.py` proves init idempotency/privacy, scoped operations and denied access using signed requests, with provenance/SBOM checks retained. `storage-sdk-smoke.py` provisions a separate fresh project, runs the real Java adapter with generated 128 MiB objects under `-Xmx64m`, proves GET/PUT/DELETE and IAM denials, then removes only its own resources. CI runs both checks; normal backend tests skip the explicitly opt-in Silo test.
 
 All runtime configuration comes from environment variables. `.env.example` is the safe template and must not contain real secrets.
 
@@ -130,6 +109,38 @@ Frontend public runtime values should point at Nginx paths:
 
 - API base: `/api/v1`
 - HLS base: `/hls`
+
+### Storage identities and policies
+
+Issue #169 implements the [ADR-004 SDK choice](adr/ADR-004.md#runtime-addendum). `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` in the host environment remain root credentials for the server, bootstrap and explicit operator maintenance inside a one-off internal `minio-init` container (the production gate validates them without contacting storage). Applications never receive them. `MINIO_BACKEND_ACCESS_KEY`/`MINIO_BACKEND_SECRET_KEY` and `MINIO_WORKER_ACCESS_KEY`/`MINIO_WORKER_SECRET_KEY` are independent dedicated identities; Compose maps each pair to the corresponding application's existing `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY` variables. Production requires all six values, rejects published defaults and reused identities/secrets, validates access keys of at least three characters with no `=`, `,` or edge whitespace, and secrets of at least eight characters. Keep dedicated users free of additional policies/groups.
+
+`deploy/minio-init.sh` creates/secures the three buckets, overwrites and re-enables the configured users, updates their `vod-backend`/`vod-worker` policies and attaches each policy idempotently. It passes credentials to `mc` through stdin and suppresses tool output; failures name only the provisioning step. It does not remove old identities or reconcile extra memberships. Existing initialized volumes are retained; supply the new independent application credentials and rerun init before starting apps. Follow [rotation/revocation](../deployment/README.md#storage-identity-rotation-and-revocation), including removal of retired users and post-restore IAM reconciliation. Never remove a volume to adopt these accounts.
+
+Resource notation below uses the configured bucket names; default raw/HLS buckets are `vod-raw`/`vod-hls`:
+
+| Identity | Actions | Resources |
+|---|---|---|
+| Backend raw writer/compensation | `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` | `arn:aws:s3:::<raw>/*` |
+| Backend HLS reader | `s3:GetObject` | `arn:aws:s3:::<hls>/video-assets/*/attempt-*/*` |
+| Worker raw reader | `s3:GetObject` | `arn:aws:s3:::<raw>/*` |
+| Worker attempt writer/cleanup | `s3:PutObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` | `arn:aws:s3:::<hls>/video-assets/*/attempt-*/*` |
+| Both identities (explicit Deny) | `admin:CreateServiceAccount`, `admin:ChangeMyPassword` | Self-service operations, denied without a resource restriction |
+
+Only object ARNs are needed for these operations; no bare bucket ARN is present. No ListBucket, GetBucketLocation, bucket creation, anonymous policy, general IAM administration, thumbnail access, backend raw GET, backend HLS write/delete, or worker raw write/delete is granted. The self-service service-account/password actions require the explicit Deny above because Silo otherwise permits them for the caller's own identity. Silo cannot block a regular user's STS AssumeRole through policy; incident revocation must remove the parent user, as the [runbook](../deployment/README.md#incident-response-and-retired-users) describes. The fixed SDK region `us-east-1` avoids bucket-region discovery permissions; path-style access uses `MINIO_ENDPOINT` (default `http://minio:9000`). These policies scope worker output to attempt-shaped paths, not per-job ownership; trusted DB keys and application access checks remain required.
+
+Without listing, worker exact-attempt cleanup is supported by Silo's DeleteObject extension `x-minio-force-delete: true` on `video-assets/{id}/attempt-{n}/`. The trailing `/` is required: deleting `attempt-1/` must retain sibling `attempt-10/`; broader prefixes such as `video-assets/` are denied. This is a Silo extension, not portable AWS S3 behavior. A future AWS S3 adapter would need an explicitly approved prefix-conditioned `s3:ListBucket` permission and list/delete implementation. Issue 5.7 owns the final cleanup mechanism; #169 pins this policy behavior in smoke without adding ListBucket. Root operator purge/audit with listing is a separate [runbook procedure](../deployment/README.md#media-purge-and-orphan-audit).
+
+The backend adapter accepts a caller-owned InputStream, known non-negative length and non-null content type; it never reads the whole object into an array and does not close the caller's input. The caller must close a returned GET stream to release HTTP resources. Negative length, null stream and null content type are rejected before I/O. SDK/transport failures become fixed safe IOExceptions with no cause. The SDK redacts signing credentials, but diagnostic messages retain the internal URL, bucket and object key, so the adapter drops those diagnostics.
+
+`StorageProperties` maps `MINIO_*` through application configuration, validates an HTTP(S) origin, non-blank credentials and positive timeouts, and has no credential defaults. Compose and `.env.example` supply local placeholders. `MINIO_CONNECT_TIMEOUT_MS=10000`, `MINIO_READ_TIMEOUT_MS=60000` and `MINIO_WRITE_TIMEOUT_MS=60000` feed the named OkHttp setters. Executing HTTP calls also have a call timeout equal to the largest of these three values; OkHttp's async call timeout does not cover dispatcher queue time or interrupt a blocked JVM DNS resolver. These are per-call budgets, not a total-object upload deadline; the PUT backstop below prevents the SDK abort deadlock.
+
+`BoundedStorageDns` separately bounds each resolver wait by the connect budget (capped at 2000 ms for health). A JVM-wide daemon pool permits at most 16 actual DNS lookups, uses direct handoff with no queue and returns a fixed safe failure when full. Timed-out lookups are cancelled best effort; if native DNS ignores interruption, its worker remains occupied until that lookup ends, so repeated failures cannot create unlimited resolver threads. Idle workers expire after 30 seconds. Clients do not close the shared pool.
+
+The shared client has an explicit dispatcher with 64 global/32 per-host requests and a fair internal backstop of eight concurrent PUTs. The invariant is `active PUTs < maxRequestsPerHost`, leaving headroom for SDK abort callbacks, GET and DELETE. Raising dispatcher limits alone is insufficient: minio-java 9.0.3 synchronously joins abort from a failed multipart callback before releasing that call's slot. The eight PUTs bound SDK part buffers to roughly 64–96 MiB within the 768 MiB production backend; this is an internal SDK/heap safeguard above the expected MVP load, not global upload rate or connection admission control from ADR-010. A caller waiting for a PUT permit gets at most `MINIO_CONNECT_TIMEOUT_MS` before the same safe storage IOException. No retry orchestration/upload endpoint is implemented here. Issue 5.2 must carry these safeguards into the worker client.
+
+Backend storage readiness uses a separate short-budget client/dispatcher and an authenticated GET of `video-assets/readiness-probe/attempt-0/never-written` in `MINIO_BUCKET_HLS`. Its non-UUID asset segment cannot collide with a generated real asset. The key is never written. `NoSuchKey` proves authenticated access and means UP; access/signature errors, transport failure or timeout mean DOWN with a fixed safe detail. The health client's connect/read/write/call timeouts are capped at 2000 ms and SDK retries are disabled. A dedicated single daemon worker runs the probe, while an outer 2000 ms future wait bounds the health caller even if the underlying operation stalls. The single-probe permit is held until that actual operation finishes, including after the caller times out; concurrent probes return the same safe DOWN immediately and cannot accumulate tasks. It requires no bucket HEAD, listing or additional grant; see [OBSERVABILITY.md](OBSERVABILITY.md#health-checks).
+
+`storage-runtime-smoke.py` runs init twice, proves privacy, scoped operations, self-service/bucket/list denials, exact-prefix force-delete behavior and secret-free logs, with provenance/SBOM checks retained. Its caller must create a fresh disposable project and trap cleanup, including failures. `storage-sdk-smoke.py` owns its fresh project and cleanup: it waits for the server, requires a successful one-shot init, then exercises the production Java configuration with generated 128 MiB objects under `-Xmx64m`. It checks GET/PUT/DELETE and IAM denials, failed multipart aborts for both scoped identities (root verifies no incomplete upload remains), and readiness UP/DOWN for correct/wrong credentials. PASS requires executed, unskipped successful surefire tests and an in-test smaller-than-object heap assertion. Redacted first-failure diagnostics survive cleanup errors. Cleanup must remove only the disposable resources created for that run. CI runs both checks; normal backend tests skip the explicitly opt-in Silo test, while no-Docker regression tests exercise concurrent failed multipart calls and subsequent GET on a loopback fake S3, bounded DNS/pool exhaustion and a stalled readiness probe.
 
 ### Upload and encoding settings
 
