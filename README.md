@@ -84,9 +84,10 @@ To use admin features locally, register an account and promote it with the [firs
 ```bash
 curl --fail http://localhost/
 curl --fail http://localhost/api/v1/health
+curl --fail http://localhost/actuator/health
 ```
 
-On Windows PowerShell, use `curl.exe` instead of the `curl` alias. The API health response should report `{"status":"UP"}`.
+On Windows PowerShell, use `curl.exe` instead of the `curl` alias. The API health response should report `{"status":"UP"}`. Use aggregate `/actuator/health` for deployment readiness, including storage and the other integrated dependencies; the availability-only `/actuator/health/readiness` group is not that readiness signal. Health responses expose no dependency details.
 
 ## Local Ports and Routes
 
@@ -96,6 +97,7 @@ Nginx is the only service published to the host by the local Compose file, and b
 |---|---|---|
 | `http://localhost/` | frontend:80 | Frontend single-page app |
 | `http://localhost/api/v1/*` | backend:8080 | Public API route |
+| `http://localhost/actuator/health` | backend:8080 | Aggregate deployment readiness |
 | `http://localhost/hls/*` | backend:8080 | Authenticated HLS proxy route |
 | `${NGINX_HTTP_PORT:-127.0.0.1:80}` | nginx:80 | Configurable host HTTP address and port, loopback only by default |
 

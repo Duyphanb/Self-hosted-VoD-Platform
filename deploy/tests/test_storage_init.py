@@ -17,11 +17,26 @@ if SHELL is None:
 
 @unittest.skipUnless(SHELL, "POSIX shell is required for init protocol tests")
 class StorageInitProtocolTests(unittest.TestCase):
-    def execute(self, failed_step=""):
+    def execute(self, failed_step="", root_input_mutation=None):
         with tempfile.TemporaryDirectory(prefix=".storage-init-test-", dir=REPOSITORY / "deploy/tests") as directory:
             temporary = Path(directory)
             # Keep all files created by the real script inside this test fixture.
             source = (REPOSITORY / "deploy/minio-init.sh").read_text(encoding="utf-8")
+            if root_input_mutation is not None:
+                original = 'until printf \'%s\\n%s\\n\' "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" |'
+                mutations = {
+                    "wrong-access": 'printf \'%s\\n%s\\n\' "fixture-wrong-root" "$MINIO_SECRET_KEY"',
+                    "swapped": 'printf \'%s\\n%s\\n\' "$MINIO_SECRET_KEY" "$MINIO_ACCESS_KEY"',
+                    "missing-secret": 'printf \'%s\\n\' "$MINIO_ACCESS_KEY"',
+                    "extra-line": 'printf \'%s\\n%s\\n%s\\n\' "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" "extra"',
+                    "extra-unterminated": 'printf \'%s\\n%s\\n%s\' "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" "extra"',
+                }
+                self.assertEqual(source.count(original), 1, "Root stdin mutation target changed")
+                source = source.replace(original, "until " + mutations[root_input_mutation] + " |")
+                # A protocol failure needs one attempt; this fixture does not test retry timing.
+                retry_limit = 'if [ "$attempts" -ge 60 ]; then'
+                self.assertEqual(source.count(retry_limit), 1, "Init retry fixture target changed")
+                source = source.replace(retry_limit, 'if [ "$attempts" -ge 1 ]; then')
             script = temporary / "init.sh"
             script.write_text(source.replace("/tmp/", temporary.as_posix() + "/"), encoding="utf-8", newline="\n")
             executable = temporary / "mc"
@@ -32,10 +47,13 @@ for argument in "$@"; do
 done
 case "$1 $2 $3" in
  'alias set local')
-  [ "$#" = 4 ]
-  IFS= read -r access
-  IFS= read -r secret
-  [ "$access" = "$MINIO_ACCESS_KEY" ] && [ "$secret" = "$MINIO_SECRET_KEY" ]
+  [ "$#" = 4 ] || exit 72
+  IFS= read -r access || exit 73
+  IFS= read -r secret || exit 74
+  extra=''
+  if IFS= read -r extra || [ -n "$extra" ]; then exit 75; fi
+  [ "$access" = "$MINIO_ACCESS_KEY" ] || exit 76
+  [ "$secret" = "$MINIO_SECRET_KEY" ] || exit 77
   printf alias >> "$AUDIT/protocol"
   ;;
  'admin user add')
@@ -84,6 +102,25 @@ esac
         result, _, _ = self.execute("backend")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Storage initialization failed: backend user provisioning", result.stderr)
+
+    def test_wrong_root_access_key_is_rejected(self):
+        result, protocol, policies = self.execute(root_input_mutation="wrong-access")
+        self.assertNotEqual(result.returncode, 0, "Wrong root access key must fail the stdin protocol")
+        self.assertEqual(protocol, "")
+        self.assertEqual(policies, {})
+        self.assertIn("Storage initialization failed: authentication or endpoint unavailable", result.stderr)
+
+    def test_swapped_root_access_and_secret_are_rejected(self):
+        result, protocol, _ = self.execute(root_input_mutation="swapped")
+        self.assertNotEqual(result.returncode, 0, "Swapped root credentials must fail the stdin protocol")
+        self.assertEqual(protocol, "")
+
+    def test_root_alias_stdin_requires_exactly_two_complete_lines(self):
+        for mutation in ("missing-secret", "extra-line", "extra-unterminated"):
+            with self.subTest(mutation=mutation):
+                result, protocol, _ = self.execute(root_input_mutation=mutation)
+                self.assertNotEqual(result.returncode, 0, "Root alias stdin must contain exactly two lines")
+                self.assertEqual(protocol, "")
 
 
 if __name__ == "__main__":

@@ -134,8 +134,11 @@ The production-only `production-config-check` service rejects the published
 development placeholders and a loopback-bound edge before PostgreSQL,
 RabbitMQ, MinIO, or Nginx can start. It reports only the rejected variable name
 and never its value. Backend, worker, Flyway, and initialization services
-consume the same canonical credentials. Starting production with `--no-deps` is
-unsupported because that option explicitly bypasses dependency gates.
+consume the same canonical credentials. Starting production applications or
+provisioning with `--no-deps` is unsupported because that option bypasses the
+dependency gates. The one intended production exception is the explicit root
+maintenance shell below, after preflight and the target storage server have
+been verified; it must not start applications or replace the normal init path.
 
 The preflight validates the configuration being supplied; it does not itself rotate persisted credentials. A subsequent `minio-init` run updates the configured scoped storage secrets and re-enables those users. PostgreSQL and other persisted service credentials need their service-specific rotation procedure; use the storage procedure below for Silo.
 
@@ -159,20 +162,24 @@ Init creates or overwrites the configured backend/worker users, re-enables them 
 ### Routine Secret Rotation
 
 1. Generate a fresh independent random secret in the protected environment file for the affected `MINIO_BACKEND_SECRET_KEY` or `MINIO_WORKER_SECRET_KEY`, retaining its access key. Follow the preflight format rules; do not put the value in command history.
-2. During an approved interruption of affected reads/writes, run `minio-init` once and require exit code 0, then recreate the affected app from the same updated environment. For production, the commands are:
+2. During an approved interruption of affected reads/writes, require preflight and `minio-init` to exit 0, then apply the updated environment to only the affected app through the normal production dependency path. Select `backend` for `MINIO_BACKEND_*` or `worker` for `MINIO_WORKER_*`; do not restart both for a single-role rotation. For production, run:
 
    ```bash
-   docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml run --rm --no-deps minio-init
-   docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d --no-deps --force-recreate backend worker
+   STORAGE_APP=backend  # use worker only when rotating MINIO_WORKER_*
+   case "$STORAGE_APP" in backend|worker) ;; *) exit 1;; esac
+   docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml run --rm production-config-check || exit 1
+   docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml run --rm minio-init || exit 1
+   docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d "$STORAGE_APP" || exit 1
    ```
 
-3. Verify backend storage readiness and scoped read/write operations, and verify the previous secret is rejected. A secret update alone is not incident revocation: Silo STS sessions issued from the old credentials can remain valid.
+   Stop if any command fails. Compose recreates the affected app because its configured credentials changed; unchanged dependencies follow their normal health/completion gates.
+3. Verify aggregate `/actuator/health` reports UP, verify the affected role's scoped read/write operations, and verify the previous secret is rejected. A secret update alone is not incident revocation: Silo STS sessions issued from the old credentials can remain valid.
 
 ### Incident Response and Retired Users
 
 1. Generate a **new access key and secret** for the affected role and replace that pair in the protected environment file. Keep the compromised/retired access key available only to the operator performing revocation.
-2. Run init and recreate the apps as above. Verify the replacement identity works before deleting the old parent user. Do not fall back to a compromised key.
-3. Authenticate as root in a one-off internal container and run `mc admin user remove` on the old key. Root is required here because the scoped users cannot administer other users. Open the shell with the verified project/environment (the service receives root credentials through its existing environment):
+2. Run preflight, init and the normal `up` path for only the affected app as above. Verify the replacement identity works before deleting the old parent user. Do not fall back to a compromised key.
+3. Authenticate as root in a one-off internal container and run `mc admin user remove` on the old key. Root is required here because the scoped users cannot administer other users. This maintenance shell is the intended production `--no-deps` exception: use it only after the normal preflight/init path and target storage health have succeeded, without starting apps or rerunning provisioning. Open it with the verified project/environment (the service receives root credentials through its existing environment):
 
    ```bash
    docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml run --rm --no-deps --entrypoint /bin/sh minio-init
