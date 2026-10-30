@@ -71,7 +71,7 @@ class StorageConfigurationTests {
             assertEquals(33333, http.connectTimeoutMillis());
             assertEquals(111111, http.readTimeoutMillis());
             assertEquals(222222, http.writeTimeoutMillis());
-            assertEquals(222222, http.callTimeoutMillis());
+            assertEquals(0, http.callTimeoutMillis(), "Application streams must have no total call deadline");
             assertInstanceOf(BoundedStorageDns.class, http.dns());
             assertEquals(32, http.dispatcher().getMaxRequestsPerHost());
             assertTrue(StorageConfiguration.MAX_CONCURRENT_PUTS < http.dispatcher().getMaxRequestsPerHost());
@@ -94,6 +94,20 @@ class StorageConfigurationTests {
     }
 
     @Test
+    void mapsSdkWrappedTlsTrustFailuresWithoutExposingDiagnosticsForEveryOperation() throws Exception {
+        MinioClient client = mock(MinioClient.class);
+        var diagnostic = new IllegalStateException(new java.security.cert.CertificateException("private TLS details"));
+        when(client.putObject(any())).thenThrow(diagnostic);
+        when(client.getObject(any())).thenThrow(diagnostic);
+        doThrow(diagnostic).when(client).removeObject(any());
+        var storage = new MinioObjectStorage(client, 100);
+        assertSafe(assertThrows(IOException.class,
+                () -> storage.put("vod-raw", "key", InputStream.nullInputStream(), 0, "video/mp4")), "PUT");
+        assertSafe(assertThrows(IOException.class, () -> storage.get("vod-hls", "key")), "GET");
+        assertSafe(assertThrows(IOException.class, () -> storage.delete("vod-raw", "key")), "DELETE");
+    }
+
+    @Test
     void rejectsNullCallerArgumentsBeforeIoAndPreservesOtherSdkProgrammingErrors() throws Exception {
         MinioClient client = mock(MinioClient.class);
         var storage = new MinioObjectStorage(client, 100);
@@ -101,9 +115,13 @@ class StorageConfigurationTests {
         assertThrows(NullPointerException.class,
                 () -> storage.put("vod-raw", "key", InputStream.nullInputStream(), 0, null));
         verifyNoInteractions(client);
-        var programmingError = new IllegalStateException("not a transport error");
-        when(client.getObject(any())).thenThrow(programmingError);
-        assertSame(programmingError, assertThrows(IllegalStateException.class, () -> storage.get("vod-hls", "key")));
+        for (var programmingError : new IllegalStateException[] {new IllegalStateException("not a transport error"),
+                new IllegalStateException(new NullPointerException("programming error")),
+                new IllegalStateException(new IllegalArgumentException("programming error")),
+                new IllegalStateException(new AssertionError("programming error"))}) {
+            doThrow(programmingError).when(client).getObject(any());
+            assertSame(programmingError, assertThrows(IllegalStateException.class, () -> storage.get("vod-hls", "key")));
+        }
     }
 
     @Test

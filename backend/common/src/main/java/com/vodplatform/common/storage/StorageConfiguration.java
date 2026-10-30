@@ -1,6 +1,7 @@
 package com.vodplatform.common.storage;
 
 import com.vodplatform.shared.storage.ObjectStorage;
+import io.minio.Http;
 import io.minio.MinioClient;
 import java.util.concurrent.TimeUnit;
 import okhttp3.Dispatcher;
@@ -28,18 +29,22 @@ public class StorageConfiguration {
         long connect = Math.min(properties.connectTimeoutMs(), timeoutCap);
         long read = Math.min(properties.readTimeoutMs(), timeoutCap);
         long write = Math.min(properties.writeTimeoutMs(), timeoutCap);
+        boolean readiness = timeoutCap != Long.MAX_VALUE;
         OkHttpClient httpClient = new OkHttpClient.Builder().dispatcher(dispatcher)
                 .dns(new BoundedStorageDns(connect))
                 .connectTimeout(connect, TimeUnit.MILLISECONDS)
                 .readTimeout(read, TimeUnit.MILLISECONDS)
                 .writeTimeout(write, TimeUnit.MILLISECONDS)
-                // Bound each dispatched HTTP call, including retries; the PUT gate reserves queue headroom.
-                .callTimeout(Math.max(connect, Math.max(read, write)), TimeUnit.MILLISECONDS)
+                // Application GET bodies may keep flowing beyond the socket stall budgets.
+                // Only readiness has a total call cap; the PUT gate preserves abort headroom.
+                .callTimeout(readiness ? Math.max(connect, Math.max(read, write)) : 0, TimeUnit.MILLISECONDS)
                 .build();
         MinioClient client = MinioClient.builder().endpoint(properties.endpoint())
                 .credentials(properties.accessKey(), properties.secretKey()).region("us-east-1")
                 .httpClient(httpClient, true).build();
-        if (timeoutCap != Long.MAX_VALUE) client.setRetry(java.util.Set.of(), 0L, 1);
+        // Status retries remain inside the same dispatched call, preserving the PUT-gate invariant.
+        if (readiness) client.setRetry(java.util.Set.of(), 0L, 1);
+        else client.setRetry(Http.RETRIABLE_STATUS_CODES, 100L, 5);
         return client;
     }
 

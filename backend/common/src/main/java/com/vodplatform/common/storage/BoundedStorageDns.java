@@ -4,7 +4,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -30,7 +30,7 @@ final class BoundedStorageDns implements Dns {
     }
 
     static ThreadPoolExecutor lookupExecutor(int maximumLookups) {
-        // JVM-wide bounded handoff: no queue, no replacement for a still-blocked lookup.
+        // JVM-wide bounded handoff: no stored queue, no replacement for a still-blocked lookup.
         // Daemon threads expire after 30 idle seconds; clients do not own/close the shared pool.
         return new ThreadPoolExecutor(0, maximumLookups, 30, TimeUnit.SECONDS, new SynchronousQueue<>(),
                 Thread.ofPlatform().daemon(true).name("storage-dns-", 0).factory(),
@@ -39,14 +39,20 @@ final class BoundedStorageDns implements Dns {
 
     @Override
     public List<InetAddress> lookup(String hostname) throws UnknownHostException {
-        Future<List<InetAddress>> pending;
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        var pending = new FutureTask<>(() -> delegate.lookup(hostname));
         try {
-            pending = executor.submit(() -> delegate.lookup(hostname));
-        } catch (RejectedExecutionException ignored) {
-            throw unavailable();
-        }
-        try {
-            return pending.get(timeoutMs, TimeUnit.MILLISECONDS);
+            try {
+                executor.execute(pending);
+            } catch (RejectedExecutionException ignored) {
+                // A cold healthy burst can briefly fill the pool. Wait for a worker handoff within
+                // this lookup's existing budget instead of rejecting the seventeenth caller.
+                if (executor.isShutdown() || !executor.getQueue().offer(pending,
+                        remainingNanos(deadline), TimeUnit.NANOSECONDS)) {
+                    throw unavailable();
+                }
+            }
+            return pending.get(remainingNanos(deadline), TimeUnit.NANOSECONDS);
         } catch (InterruptedException ignored) {
             pending.cancel(true);
             Thread.currentThread().interrupt();
@@ -58,6 +64,10 @@ final class BoundedStorageDns implements Dns {
         } catch (ExecutionException ignored) {
             throw unavailable();
         }
+    }
+
+    private static long remainingNanos(long deadline) {
+        return Math.max(0, deadline - System.nanoTime());
     }
 
     private static UnknownHostException unavailable() {

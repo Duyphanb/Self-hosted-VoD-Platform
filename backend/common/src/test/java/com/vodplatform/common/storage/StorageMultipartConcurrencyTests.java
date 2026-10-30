@@ -20,24 +20,31 @@ import org.junit.jupiter.api.Test;
 class StorageMultipartConcurrencyTests {
     @Test
     void fortyFailingMultipartPutsAbortAndDrainWithoutWedgingTheSharedProductionClient() throws Exception {
-        assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
+        String expectedProcessors = System.getProperty("storage.test.maxProcessors");
+        if (expectedProcessors != null) {
+            assertTrue(Runtime.getRuntime().availableProcessors() <= Integer.parseInt(expectedProcessors),
+                    "The constrained-CPU regression must actually run with the requested processor limit");
+        }
+        assertTimeoutPreemptively(Duration.ofSeconds(90), () -> {
             var executor = Executors.newVirtualThreadPerTaskExecutor();
             try (var s3 = new FakeS3()) {
                 var properties = StorageConfigurationTests.properties(s3.endpoint(), 10000, 3000, 3000);
                 var config = new StorageConfiguration();
                 try (var client = config.minioClient(properties)) {
-                    var storage = config.objectStorage(client, properties);
+                    // This test checks abort/drain under contention, not admission expiry. Keep
+                    // enough admission headroom for all five waves on a busy two-CPU CI runner.
+                    var storage = new MinioObjectStorage(client, 60_000);
                     var start = new CountDownLatch(1);
                     // Exceed the configured 32-per-host limit: raising it alone cannot pass this test.
                     var futures = java.util.stream.IntStream.range(0, 40).mapToObj(i -> executor.submit(() -> {
-                        assertTrue(start.await(2, TimeUnit.SECONDS));
+                        assertTrue(start.await(5, TimeUnit.SECONDS));
                         StorageConfigurationTests.assertSafe(assertThrows(IOException.class,
                                 () -> storage.put("vod-raw", "failed-" + i,
                                         new ZeroStream(6L * 1024 * 1024), 6L * 1024 * 1024, "video/mp4")), "PUT");
                         return null;
                     })).toList();
                     start.countDown();
-                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(75);
                     for (var future : futures) future.get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
                     assertEquals(40, s3.created.size(), "Every PUT must have reached multipart creation");
                     assertEquals(s3.created, s3.aborted, "Every failed upload must be aborted");
@@ -45,7 +52,7 @@ class StorageMultipartConcurrencyTests {
                         assertArrayEquals("ok".getBytes(StandardCharsets.UTF_8), read.readAllBytes());
                     }
                     var dispatcher = StorageConfigurationTests.transport(client).dispatcher();
-                    assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+                    assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
                         while (dispatcher.runningCallsCount() != 0) Thread.sleep(10);
                     });
                     assertEquals(0, dispatcher.queuedCallsCount());

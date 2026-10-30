@@ -35,7 +35,7 @@ public final class MinioObjectStorage implements ObjectStorage {
         try {
             // SDK 9.0.3 joins abort inside an OkHttp callback, retaining that PUT's slot.
             // Eight PUTs stay below 32 per-host slots, reserving abort/GET/DELETE headroom
-            // and bounding multipart buffers to roughly 64-96 MiB in the 768 MiB backend.
+            // and bounding multipart buffers to roughly 64-96 MiB of the effective JVM heap.
             acquired = putPermits.tryAcquire(admissionTimeoutMs, TimeUnit.MILLISECONDS);
             if (!acquired) throw new IOException("Object storage PUT failed");
             client.putObject(PutObjectArgs.builder().bucket(bucket).object(key)
@@ -79,6 +79,8 @@ public final class MinioObjectStorage implements ObjectStorage {
     }
 
     private static boolean isTransportFailure(IllegalStateException failure) {
-        return failure.getCause() instanceof IOException;
+        // The SDK can unwrap TLS trust failures to a checked security exception instead of IOException.
+        Throwable cause = failure.getCause();
+        return cause instanceof Exception && !(cause instanceof RuntimeException);
     }
 }
