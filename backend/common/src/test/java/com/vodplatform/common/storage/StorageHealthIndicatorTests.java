@@ -11,12 +11,17 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.Status;
 
 class StorageHealthIndicatorTests {
@@ -24,9 +29,11 @@ class StorageHealthIndicatorTests {
     void missingProbeKeyMeansAuthenticatedStorageIsUp() throws Exception {
         MinioClient client = mock(MinioClient.class);
         when(client.getObject(any())).thenThrow(error("NoSuchKey"));
-        var health = new StorageHealthIndicator(client, "vod-hls").health();
-        assertEquals(Status.UP, health.getStatus());
-        assertTrue(health.getDetails().isEmpty());
+        try (var indicator = new StorageHealthIndicator(client, "vod-hls")) {
+            var health = indicator.health();
+            assertEquals(Status.UP, health.getStatus());
+            assertTrue(health.getDetails().isEmpty());
+        }
     }
 
     @Test
@@ -36,9 +43,11 @@ class StorageHealthIndicatorTests {
                 new IllegalStateException(new java.net.SocketTimeoutException("private diagnostic"))}) {
             MinioClient client = mock(MinioClient.class);
             when(client.getObject(any())).thenThrow(failure);
-            var health = new StorageHealthIndicator(client, "vod-hls").health();
-            assertEquals(Status.DOWN, health.getStatus());
-            assertEquals(java.util.Map.of("storage", "Authenticated storage probe failed"), health.getDetails());
+            try (var indicator = new StorageHealthIndicator(client, "vod-hls")) {
+                var health = indicator.health();
+                assertEquals(Status.DOWN, health.getStatus());
+                assertEquals(java.util.Map.of("storage", "Authenticated storage probe failed"), health.getDetails());
+            }
         }
     }
 
@@ -57,25 +66,116 @@ class StorageHealthIndicatorTests {
     }
 
     @Test
-    void simultaneousReadinessRequestsFailFastWhileAProbeIsAlreadyRunning() throws Exception {
+    void oneHundredConcurrentReadinessCallersShareOneHealthyProbe() throws Exception {
         MinioClient client = mock(MinioClient.class);
-        var started = new java.util.concurrent.CountDownLatch(1);
-        var release = new java.util.concurrent.CountDownLatch(1);
+        var ready = new CountDownLatch(100);
+        var go = new CountDownLatch(1);
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var clock = new AtomicLong();
         when(client.getObject(any())).thenAnswer(invocation -> {
             started.countDown();
-            assertTrue(release.await(3, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(release.await(5, TimeUnit.SECONDS));
             throw error("NoSuchKey");
         });
-        var indicator = new StorageHealthIndicator(client, "vod-hls");
-        try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-            var first = executor.submit(() -> { return indicator.health(); });
+        try (var indicator = new StorageHealthIndicator(client, "vod-hls", 2000, clock::get);
+                var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var results = new ArrayList<Future<Health>>();
             try {
-                assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS));
-                assertTimeoutPreemptively(java.time.Duration.ofMillis(200),
-                        () -> assertEquals(Status.DOWN, indicator.health().getStatus()));
+                for (int i = 0; i < 100; i++) {
+                    results.add(executor.submit(() -> {
+                        ready.countDown();
+                        assertTrue(go.await(5, TimeUnit.SECONDS));
+                        return indicator.health();
+                    }));
+                }
+                assertTrue(ready.await(5, TimeUnit.SECONDS));
+                go.countDown();
+                assertTrue(started.await(2, TimeUnit.SECONDS));
+                assertTrue(results.stream().noneMatch(Future::isDone), "A healthy busy probe must not return DOWN");
+                release.countDown();
+                for (var result : results) {
+                    assertEquals(Status.UP, result.get(2, TimeUnit.SECONDS).getStatus());
+                }
                 verify(client, times(1)).getObject(any());
-            } finally { release.countDown(); }
-            assertEquals(Status.UP, first.get(1, java.util.concurrent.TimeUnit.SECONDS).getStatus());
+            } finally {
+                go.countDown();
+                release.countDown();
+            }
+        }
+    }
+
+    @Test
+    void requestFloodUsesOneProbePerTtlMeasuredFromResultCompletion() throws Exception {
+        MinioClient client = mock(MinioClient.class);
+        var clock = new AtomicLong();
+        when(client.getObject(any())).thenAnswer(invocation -> {
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(750));
+            throw error("NoSuchKey");
+        });
+        try (var indicator = new StorageHealthIndicator(client, "vod-hls", 2000, clock::get)) {
+            assertEquals(Status.UP, indicator.health().getStatus());
+            clock.addAndGet(StorageHealthIndicator.CACHE_TTL_NANOS - 1);
+            for (int i = 0; i < 100; i++) assertEquals(Status.UP, indicator.health().getStatus());
+            verify(client, times(1)).getObject(any());
+            clock.incrementAndGet();
+            assertEquals(Status.UP, indicator.health().getStatus());
+            verify(client, times(2)).getObject(any());
+        }
+    }
+
+    @Test
+    void failedProbeIsCachedSafelyAndCanRecoverAfterExpiry() throws Exception {
+        MinioClient client = mock(MinioClient.class);
+        when(client.getObject(any())).thenThrow(error("AccessDenied"), error("NoSuchKey"));
+        var clock = new AtomicLong();
+        try (var indicator = new StorageHealthIndicator(client, "vod-hls", 2000, clock::get)) {
+            var failed = indicator.health();
+            assertEquals(Status.DOWN, failed.getStatus());
+            assertEquals(java.util.Map.of("storage", "Authenticated storage probe failed"), failed.getDetails());
+            for (int i = 0; i < 100; i++) assertSame(failed, indicator.health());
+            verify(client, times(1)).getObject(any());
+            clock.addAndGet(StorageHealthIndicator.CACHE_TTL_NANOS);
+            var recovered = indicator.health();
+            assertEquals(Status.UP, recovered.getStatus());
+            assertTrue(recovered.getDetails().isEmpty());
+            verify(client, times(2)).getObject(any());
+        }
+    }
+
+    @Test
+    void laterCallerKeepsOriginalDeadlineAndExpiredCacheCannotQueueBehindStalledNativeWork() throws Exception {
+        MinioClient client = mock(MinioClient.class);
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var clock = new AtomicLong();
+        when(client.getObject(any())).thenAnswer(invocation -> {
+            started.countDown();
+            while (release.getCount() != 0) {
+                try { release.await(); } catch (InterruptedException ignored) { /* Native resolver ignores it. */ }
+            }
+            throw error("NoSuchKey");
+        });
+        try (var indicator = new StorageHealthIndicator(client, "vod-hls", 2000, clock::get);
+                var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            try {
+                var first = executor.submit(() -> { return indicator.health(); });
+                assertTrue(started.await(2, TimeUnit.SECONDS));
+                first.cancel(true); // An interrupted caller must not change the shared probe's result.
+                clock.set(TimeUnit.MILLISECONDS.toNanos(1900));
+                long before = System.nanoTime();
+                assertTimeoutPreemptively(Duration.ofMillis(500),
+                        () -> assertEquals(Status.DOWN, indicator.health().getStatus()));
+                assertTrue(System.nanoTime() - before >= TimeUnit.MILLISECONDS.toNanos(50),
+                        "A busy probe must wait for its original deadline instead of failing immediately");
+                clock.addAndGet(2 * StorageHealthIndicator.CACHE_TTL_NANOS);
+                assertTimeoutPreemptively(Duration.ofMillis(300), () -> {
+                    for (int i = 0; i < 100; i++) assertEquals(Status.DOWN, indicator.health().getStatus());
+                });
+                verify(client, times(1)).getObject(any());
+            } finally {
+                release.countDown();
+            }
         }
     }
 

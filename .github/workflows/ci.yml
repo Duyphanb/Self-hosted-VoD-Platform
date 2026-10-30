@@ -134,7 +134,8 @@ jobs:
           python3 deploy/tests/storage-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME"
           python3 deploy/tests/storage-sdk-smoke.py --project "${COMPOSE_PROJECT_NAME}-sdk"
           # Fresh full stack, including private storage/init and the dedicated worker.
-          docker compose --env-file /dev/null -f deploy/docker-compose.yml up --wait --wait-timeout 180 --no-build
+          docker compose --env-file /dev/null -f deploy/docker-compose.yml up -d --wait --wait-timeout 180 --no-build
+          python3 -c 'import json, urllib.request; response = urllib.request.urlopen("http://127.0.0.1:18087/actuator/health", timeout=10); assert response.status == 200 and json.load(response)["status"] == "UP", "Backend dependency readiness through Nginx failed"'
           python3 deploy/tests/auth-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087
           # Assertion diagnostics can include response tokens. Keep only the exit status.
           if npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-2-auth.postman_collection.json -e docs/testing/postman/vod-platform-local.postman_environment.json --env-var baseUrl=http://127.0.0.1:18087 --silent; then
