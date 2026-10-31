@@ -5,6 +5,7 @@ import static org.mockito.Mockito.when;
 
 import com.vodplatform.common.health.HealthResponse;
 import com.vodplatform.common.storage.StorageHealthIndicator;
+import org.springframework.context.annotation.Import;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
         properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes"
 )
 @AutoConfigureRestTestClient
+@Import(RabbitReadinessStub.class)
 class VodBackendApplicationTests {
 
     @MockitoBean

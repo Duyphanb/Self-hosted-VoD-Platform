@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -19,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 /** Real storage contributor and HTTP health aggregation, with only local H2/closed-port fixtures. */
 @SpringBootTest(properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes")
 @AutoConfigureMockMvc
+@Import(RabbitReadinessStub.class)
 class StorageReadinessIntegrationTests {
     private static final int CLOSED_PORT = closedPort();
 

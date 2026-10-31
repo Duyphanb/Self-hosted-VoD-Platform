@@ -22,10 +22,11 @@ CVE-2026-47884 / GHSA-pc63-qcmh-9cmg (`XsltView`, Issue #96) and CVE-2026-47890 
 
 ## Managed Version Overrides
 
-`spring-boot-starter-parent` manages Spring and many third-party dependency versions. Spring Boot 4.1.1 manages Tomcat 11.0.24 and Jackson 3.1.5, which Trivy flags with HIGH/CRITICAL findings, so `backend/pom.xml` and `worker/pom.xml` override these two third-party versions through the parent's version properties, with the same values in both POMs. The SDK-specific Jackson 2/Guava/Snappy overrides and exclusion below are backend-only: the worker does not yet use the SDK. No Spring artifact is overridden.
+`spring-boot-starter-parent` manages Spring and many third-party dependency versions. Spring Boot 4.1.1 manages Tomcat 11.0.24 and Jackson 3.1.5, which Trivy flags with HIGH/CRITICAL findings, so `backend/pom.xml` and `worker/pom.xml` override these third-party versions, plus the vulnerable RabbitMQ Java client, through the parent's version properties, with the same values in both POMs. The SDK-specific Jackson 2/Guava/Snappy overrides and exclusion below are backend-only: the worker does not yet use the SDK. No Spring artifact is overridden.
 
 | Property | Override | Managed by Spring Boot 4.1.1 | Findings in the managed version | Remove when |
 |---|---|---|---|---|
+| `rabbit-amqp-client.version` | 5.37.0 | 5.30.0 | CVE-2026-63337, CVE-2026-69219, CVE-2026-69220, CVE-2026-75516 (all fixed by 5.34.0); newest 5.x, with no matching GitHub advisory on 2026-10-31 | Boot manages amqp-client 5.37.0 or newer |
 | `tomcat.version` | 11.0.27 | 11.0.24 | CVE-2026-65182, CVE-2026-65905, CVE-2026-68525 (fixed in 11.0.25) | A Spring Boot 4.1.x patch release manages Tomcat 11.0.27 or newer |
 | `jackson-bom.version` | 3.1.7 | 3.1.5 | CVE-2026-89407, CVE-2026-89425, CVE-2026-68497, CVE-2026-91776, CVE-2026-91777 (fixed in 3.1.7) | A Spring Boot 4.1.x patch release manages Jackson 3.1.7 or newer |
 | `jackson-2-bom.version` (backend) | 2.21.7 | 2.21.5 | Jackson core: CVE-2026-89425, CVE-2026-89407; databind: CVE-2026-91777, CVE-2026-91776, CVE-2026-68497 | Boot manages Jackson 2.21.7 or newer, or the SDK no longer requires Jackson 2 |
