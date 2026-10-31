@@ -27,7 +27,7 @@ migrate() {
         -v "$root/backend/common/src/main/resources/db/migration:/flyway/sql:ro" \
         -e FLYWAY_URL=jdbc:postgresql://localhost:5432/fixture \
         -e FLYWAY_USER=fixture -e FLYWAY_PASSWORD=fixture-only \
-        flyway/flyway:12.10.0 "$@" migrate >"$log" 2>&1
+        flyway/flyway:12.10.0 -connectRetries=10 "$@" migrate >"$log" 2>&1
 }
 migrate -target=3
 sql "INSERT INTO users (id,email,password_hash,display_name,status,created_at,updated_at) VALUES

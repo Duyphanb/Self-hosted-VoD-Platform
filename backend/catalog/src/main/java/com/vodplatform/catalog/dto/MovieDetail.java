@@ -7,11 +7,12 @@ import java.util.UUID;
 
 /**
  * Catalog fields of a movie detail ({@code MovieDetail} in the API contract). Fields owned by
- * other modules, such as the poster URL, average rating, the caller's rating, watchlist state,
- * playback progress and video status, are added by the API layer ({@link MovieDetailResponse}).
+ * other modules, such as the poster URL, average rating, the caller's rating, watchlist state
+ * and playback progress, are added by the API layer ({@link MovieDetailResponse}).
  *
  * @param genres genre names ordered by genre slug
  * @param people credits in display order ({@code sort_order})
+ * @param videoStatus READY if a READY asset exists, otherwise newest asset status, or null without assets
  */
 public record MovieDetail(
         UUID id,
@@ -22,7 +23,8 @@ public record MovieDetail(
         MaturityRating maturityRating,
         List<String> genres,
         List<CreditedPerson> people,
-        MovieStatus status
+        MovieStatus status,
+        String videoStatus
 ) {
 
     public MovieDetail {

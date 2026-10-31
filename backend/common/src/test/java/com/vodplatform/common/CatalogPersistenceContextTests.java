@@ -15,6 +15,11 @@ import com.vodplatform.catalog.persistence.MovieCredit;
 import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.catalog.persistence.Person;
 import com.vodplatform.catalog.persistence.PersonRepository;
+import com.vodplatform.catalog.service.VideoStatusLookup;
+import com.vodplatform.encoding.persistence.EncodingJob;
+import com.vodplatform.encoding.persistence.EncodingJobRepository;
+import com.vodplatform.encoding.persistence.VideoAsset;
+import com.vodplatform.encoding.persistence.VideoAssetRepository;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.metamodel.EntityType;
 import java.util.Set;
@@ -58,7 +63,9 @@ class CatalogPersistenceContextTests {
                 Movie.class,
                 Genre.class,
                 Person.class,
-                MovieCredit.class
+                MovieCredit.class,
+                VideoAsset.class,
+                EncodingJob.class
         );
     }
 
@@ -70,5 +77,8 @@ class CatalogPersistenceContextTests {
         assertThat(applicationContext.getBeanNamesForType(UserRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(RoleRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(RefreshTokenRepository.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(VideoAssetRepository.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(EncodingJobRepository.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(VideoStatusLookup.class)).hasSize(1);
     }
 }

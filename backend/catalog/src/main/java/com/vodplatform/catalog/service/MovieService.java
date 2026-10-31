@@ -83,17 +83,20 @@ public class MovieService {
     private final MovieAssignmentResolver assignmentResolver;
     private final Clock clock;
     private final CatalogWriteRetry writeRetry;
+    private final VideoStatusLookup videoStatusLookup;
 
     MovieService(
             MovieRepository movieRepository,
             MovieAssignmentResolver assignmentResolver,
             Clock clock,
-            CatalogWriteRetry writeRetry
+            CatalogWriteRetry writeRetry,
+            VideoStatusLookup videoStatusLookup
     ) {
         this.movieRepository = movieRepository;
         this.assignmentResolver = assignmentResolver;
         this.clock = clock;
         this.writeRetry = writeRetry;
+        this.videoStatusLookup = Objects.requireNonNull(videoStatusLookup, "videoStatusLookup");
     }
 
     /**
@@ -129,7 +132,8 @@ public class MovieService {
                 clock.instant()
         )));
         assignGenresAndCredits(movie, input, credits);
-        return MovieMapper.toDetail(movie);
+        // A movie inserted in this transaction cannot have a video asset yet.
+        return MovieMapper.toDetail(movie, null);
     }
 
     /**
@@ -176,7 +180,7 @@ public class MovieService {
             return movie;
         });
         assignGenresAndCredits(movie, input, credits);
-        return MovieMapper.toDetail(movie);
+        return MovieMapper.toDetail(movie, videoStatusLookup.videoStatus(movieId));
     }
 
     /**
@@ -207,7 +211,7 @@ public class MovieService {
         Movie movie = movieRepository.findById(movieId)
                 .filter(found -> visibility.includes(found.getStatus()))
                 .orElseThrow(MovieNotFoundException::new);
-        return MovieMapper.toDetail(movie);
+        return MovieMapper.toDetail(movie, videoStatusLookup.videoStatus(movieId));
     }
 
     /**
@@ -249,19 +253,22 @@ public class MovieService {
     }
 
     /**
-     * The one mapping path of movie lists: reads the genres of the whole page with a single query,
+     * The one mapping path of movie lists: reads genres and video statuses for the whole page,
      * then maps each movie, so the number of statements does not grow with the page size. Every
      * list of {@link MovieSummary} goes through it. An empty page reads nothing more.
      */
     private Page<MovieSummary> toSummaries(Page<Movie> movies) {
+        List<UUID> movieIds = movies.map(Movie::getId).getContent();
         Map<UUID, List<Genre>> genresByMovie = movies.isEmpty()
                 ? Map.of()
-                : movieRepository.findGenreAssignments(movies.map(Movie::getId).getContent()).stream()
+                : movieRepository.findGenreAssignments(movieIds).stream()
                         .collect(Collectors.groupingBy(
                                 MovieGenreAssignment::movieId,
                                 Collectors.mapping(MovieGenreAssignment::genre, Collectors.toList())
                         ));
-        return movies.map(movie -> MovieMapper.toSummary(movie, genresByMovie.getOrDefault(movie.getId(), List.of())));
+        Map<UUID, String> videoStatuses = movies.isEmpty() ? Map.of() : videoStatusLookup.videoStatuses(movieIds);
+        return movies.map(movie -> MovieMapper.toSummary(
+                movie, genresByMovie.getOrDefault(movie.getId(), List.of()), videoStatuses.get(movie.getId())));
     }
 
     /**
