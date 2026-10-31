@@ -2,6 +2,7 @@ package com.vodplatform.common;
 
 import static com.vodplatform.common.contract.ContractValidation.offContract;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -9,10 +10,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.Arrays;
 import java.util.List;
+import com.vodplatform.common.storage.StorageHealthIndicator;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.health.contributor.Health;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -28,6 +33,14 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 )
 @AutoConfigureMockMvc
 class CorsSecurityIntegrationTests {
+
+    @MockitoBean
+    private StorageHealthIndicator storageHealthIndicator;
+
+    @BeforeEach
+    void storageReadinessIsAvailableForCorsTests() {
+        when(storageHealthIndicator.health()).thenReturn(Health.up().build());
+    }
 
     private static final String ALLOWED_ORIGIN = "https://app.example.test";
     private static final String DISALLOWED_ORIGIN = "https://untrusted.example.test";

@@ -21,7 +21,7 @@ Required visibility:
 | Component | Health Signal |
 |---|---|
 | nginx | HTTP 200 for `/` and proxy reachability for `/api/v1/health` |
-| backend | `/api/v1/health` for public smoke checks and `/actuator/health` internally |
+| backend | `/api/v1/health` for process smoke checks; aggregate `/actuator/health` for deployment readiness, internally or through Nginx |
 | worker | Spring Boot Actuator health plus startup log confirming FFmpeg and FFprobe availability |
 | PostgreSQL | Compose health check using database readiness |
 | Redis | `PING` health check |
@@ -29,6 +29,12 @@ Required visibility:
 | MinIO | MinIO health endpoint |
 
 Backend readiness must verify PostgreSQL, Redis, RabbitMQ, and MinIO after those integrations exist.
+
+The deployment readiness signal is the aggregate `/actuator/health`, including storage and the other dependency contributors as their integrations exist. Nginx proxies that endpoint; CI checks it through the edge after full-stack startup. `/api/v1/health` remains a lightweight process smoke signal. Spring's availability-only `/actuator/health/readiness` group is not the deployment readiness signal: its default membership omits dependency contributors such as storage and DB.
+
+The #169 backend storage contributor authenticates with the scoped backend identity and GETs the never-written key `video-assets/readiness-probe/attempt-0/never-written` in the configured HLS bucket. The non-UUID asset segment cannot be a real generated asset. `NoSuchKey` means UP because authentication and allowed object access succeeded; access/signature errors, transport failure and timeout mean DOWN with a fixed safe detail. The separate health client caps its connect/read/write/call and DNS wait budgets at 2000 ms, disables SDK status retries and has its own dispatcher so uploads do not queue readiness. The shared application client separately retains the SDK's five status attempts with 100 ms backoff inside the same dispatched call.
+
+Readiness has an outer 2000 ms deadline and at most one actual probe. Concurrent callers share its result with only the time remaining to that original deadline, while completed results are cached for one second from logical completion. A request flood therefore causes at most one new Silo probe per cache TTL. If the deadline expires, callers receive safe DOWN and the single daemon worker retains that in-flight operation until it actually ends; its late success cannot overwrite the timeout result. No additional probe tasks accumulate. Native DNS lookups also use a bounded shared pool. The probe needs no bucket HEAD or ListBucket grant; the server's `/minio/health/live` probe remains separate. Unrelated health/CORS suites stub storage, while a real-indicator Spring test checks aggregate HTTP 503 DOWN without details against a closed loopback port. Bean wiring tests assert the short transport budgets and separate dispatcher; the opt-in Silo smoke verifies correct credentials → UP and wrong secret → DOWN. [INFRASTRUCTURE.md](INFRASTRUCTURE.md#storage-identities-and-policies) records the client safeguards and configuration.
 
 ## Logging
 

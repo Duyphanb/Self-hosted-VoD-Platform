@@ -9,16 +9,29 @@ log_file="$temp_directory/output.log"
 env_file="$temp_directory/production.env"
 config_json="$temp_directory/compose.json"
 empty_env_file="$temp_directory/empty.env"
-compose_project="vod-production-config-test-$$"
+python_command=$(command -v python3 || command -v python)
+run_token=$("$python_command" -c 'import secrets; print(secrets.token_hex(12))')
+# Generate independent credentials once; repeated negative cases reuse this fixture.
+# None of their entropy is exposed in the Docker project name.
+credential_tokens=$("$python_command" -c 'import secrets; print(" ".join(secrets.token_hex(24) for _ in range(9)))')
+read -r root_access_token root_secret_token backend_access_token backend_secret_token worker_access_token worker_secret_token postgres_secret_token rabbitmq_secret_token jwt_secret_token <<EOF
+$credential_tokens
+EOF
+unset credential_tokens
+compose_project="vod-auth-audit-config-$run_token"
 
 set_synthetic_values() {
-  postgres_user_value="ci_postgres_user"
-  postgres_password_value="ci-postgres-password-46"
-  rabbitmq_username_value="ci_rabbitmq_user"
-  rabbitmq_password_value="ci-rabbitmq-password-46"
-  minio_access_key_value="ci_minio_access_key"
-  minio_secret_key_value="ci-minio-secret-key-46"
-  jwt_secret_value="ci-jwt-signing-secret-with-at-least-thirty-two-bytes"
+  postgres_user_value="ci_postgres_$run_token"
+  postgres_password_value="ci-postgres-$postgres_secret_token"
+  rabbitmq_username_value="ci_rabbitmq_$run_token"
+  rabbitmq_password_value="ci-rabbitmq-$rabbitmq_secret_token"
+  minio_access_key_value="ci_root_$root_access_token"
+  minio_secret_key_value="ci-root-secret-$root_secret_token"
+  minio_backend_access_key_value="ci_backend_$backend_access_token"
+  minio_backend_secret_key_value="ci-backend-secret-$backend_secret_token"
+  minio_worker_access_key_value="ci_worker_$worker_access_token"
+  minio_worker_secret_key_value="ci-worker-secret-$worker_secret_token"
+  jwt_secret_value="ci-jwt-signing-secret-$jwt_secret_token"
   nginx_http_port_value="80"
 }
 
@@ -29,6 +42,10 @@ set_published_defaults() {
   rabbitmq_password_value="change-me"
   minio_access_key_value="vod_minio"
   minio_secret_key_value="change-me"
+  minio_backend_access_key_value="vod_backend"
+  minio_backend_secret_key_value="change-me-backend-only"
+  minio_worker_access_key_value="vod_worker"
+  minio_worker_secret_key_value="change-me-worker-only"
   jwt_secret_value="change-me-use-a-long-random-secret"
   nginx_http_port_value="127.0.0.1:80"
 }
@@ -41,6 +58,10 @@ value_for() {
     RABBITMQ_PASSWORD) printf '%s' "$rabbitmq_password_value" ;;
     MINIO_ACCESS_KEY) printf '%s' "$minio_access_key_value" ;;
     MINIO_SECRET_KEY) printf '%s' "$minio_secret_key_value" ;;
+    MINIO_BACKEND_ACCESS_KEY) printf '%s' "$minio_backend_access_key_value" ;;
+    MINIO_BACKEND_SECRET_KEY) printf '%s' "$minio_backend_secret_key_value" ;;
+    MINIO_WORKER_ACCESS_KEY) printf '%s' "$minio_worker_access_key_value" ;;
+    MINIO_WORKER_SECRET_KEY) printf '%s' "$minio_worker_secret_key_value" ;;
     JWT_SECRET) printf '%s' "$jwt_secret_value" ;;
     NGINX_HTTP_PORT) printf '%s' "$nginx_http_port_value" ;;
     *) printf '%s\n' "Unknown test variable: $1" >&2; exit 1 ;;
@@ -58,6 +79,10 @@ write_env_file() {
     RABBITMQ_USERNAME \
     RABBITMQ_PASSWORD \
     MINIO_ACCESS_KEY \
+    MINIO_BACKEND_ACCESS_KEY \
+    MINIO_BACKEND_SECRET_KEY \
+    MINIO_WORKER_ACCESS_KEY \
+    MINIO_WORKER_SECRET_KEY \
     MINIO_SECRET_KEY \
     JWT_SECRET \
     NGINX_HTTP_PORT
@@ -78,6 +103,10 @@ run_check() {
   RABBITMQ_PASSWORD="$rabbitmq_password_value" \
   MINIO_ACCESS_KEY="$minio_access_key_value" \
   MINIO_SECRET_KEY="$minio_secret_key_value" \
+  MINIO_BACKEND_ACCESS_KEY="$minio_backend_access_key_value" \
+  MINIO_BACKEND_SECRET_KEY="$minio_backend_secret_key_value" \
+  MINIO_WORKER_ACCESS_KEY="$minio_worker_access_key_value" \
+  MINIO_WORKER_SECRET_KEY="$minio_worker_secret_key_value" \
   JWT_SECRET="$jwt_secret_value" \
   NGINX_HTTP_PORT="$nginx_http_port_value" \
     sh "$check_script"
@@ -90,6 +119,10 @@ run_production_compose() {
   RABBITMQ_PASSWORD="$rabbitmq_password_value" \
   MINIO_ACCESS_KEY="$minio_access_key_value" \
   MINIO_SECRET_KEY="$minio_secret_key_value" \
+  MINIO_BACKEND_ACCESS_KEY="$minio_backend_access_key_value" \
+  MINIO_BACKEND_SECRET_KEY="$minio_backend_secret_key_value" \
+  MINIO_WORKER_ACCESS_KEY="$minio_worker_access_key_value" \
+  MINIO_WORKER_SECRET_KEY="$minio_worker_secret_key_value" \
   JWT_SECRET="$jwt_secret_value" \
   NGINX_HTTP_PORT="$nginx_http_port_value" \
   CORS_ALLOWED_ORIGINS= \
@@ -108,6 +141,10 @@ run_production_compose_from_file() {
     -u RABBITMQ_PASSWORD \
     -u MINIO_ACCESS_KEY \
     -u MINIO_SECRET_KEY \
+    -u MINIO_BACKEND_ACCESS_KEY \
+    -u MINIO_BACKEND_SECRET_KEY \
+    -u MINIO_WORKER_ACCESS_KEY \
+    -u MINIO_WORKER_SECRET_KEY \
     -u JWT_SECRET \
     -u NGINX_HTTP_PORT \
     -u CORS_ALLOWED_ORIGINS \
@@ -149,6 +186,10 @@ expect_default_rejection() {
     RABBITMQ_PASSWORD) rabbitmq_password_value="$published_default" ;;
     MINIO_ACCESS_KEY) minio_access_key_value="$published_default" ;;
     MINIO_SECRET_KEY) minio_secret_key_value="$published_default" ;;
+    MINIO_BACKEND_ACCESS_KEY) minio_backend_access_key_value="$published_default" ;;
+    MINIO_BACKEND_SECRET_KEY) minio_backend_secret_key_value="$published_default" ;;
+    MINIO_WORKER_ACCESS_KEY) minio_worker_access_key_value="$published_default" ;;
+    MINIO_WORKER_SECRET_KEY) minio_worker_secret_key_value="$published_default" ;;
     JWT_SECRET) jwt_secret_value="$published_default" ;;
   esac
 
@@ -183,8 +224,32 @@ expect_edge_rejection() {
     "Production configuration rejected: NGINX_HTTP_PORT $expected_reason"
 }
 
+expect_storage_format_rejection() {
+  variable_name="$1"
+  invalid_value="$2"
+  expected_reason="$3"
+  set_synthetic_values
+  case "$variable_name" in
+    MINIO_ACCESS_KEY) minio_access_key_value="$invalid_value" ;;
+    MINIO_BACKEND_ACCESS_KEY) minio_backend_access_key_value="$invalid_value" ;;
+    MINIO_WORKER_ACCESS_KEY) minio_worker_access_key_value="$invalid_value" ;;
+    MINIO_SECRET_KEY) minio_secret_key_value="$invalid_value" ;;
+    MINIO_BACKEND_SECRET_KEY) minio_backend_secret_key_value="$invalid_value" ;;
+    MINIO_WORKER_SECRET_KEY) minio_worker_secret_key_value="$invalid_value" ;;
+  esac
+  if run_check > "$log_file" 2>&1; then
+    printf '%s\n' "$variable_name invalid format was accepted" >&2
+    exit 1
+  fi
+  assert_log_contains "Production configuration rejected: $variable_name $expected_reason"
+  if grep -Fq -- "$invalid_value" "$log_file"; then
+    printf '%s\n' "$variable_name value leaked into preflight output" >&2
+    exit 1
+  fi
+}
+
 assert_local_edge_on_loopback() {
-  python3 - "$config_json" <<'PY'
+  "$python_command" - "$config_json" <<'PY'
 import json
 import sys
 
@@ -223,8 +288,49 @@ expect_default_rejection "RABBITMQ_USERNAME" "vod_app"
 expect_default_rejection "RABBITMQ_PASSWORD" "change-me"
 expect_default_rejection "MINIO_ACCESS_KEY" "vod_minio"
 expect_default_rejection "MINIO_SECRET_KEY" "change-me"
+expect_default_rejection "MINIO_BACKEND_ACCESS_KEY" "vod_backend"
+expect_default_rejection "MINIO_BACKEND_SECRET_KEY" "change-me-backend-only"
+expect_default_rejection "MINIO_WORKER_ACCESS_KEY" "vod_worker"
+expect_default_rejection "MINIO_WORKER_SECRET_KEY" "change-me-worker-only"
 expect_default_rejection "JWT_SECRET" "change-me-use-a-long-random-secret"
 printf '%s\n' "Published-default rejection checks passed"
+
+for collision in backend-root-user worker-root-user shared-user backend-root-secret worker-root-secret shared-secret
+do
+  set_synthetic_values
+  case "$collision" in
+    backend-root-user) minio_backend_access_key_value="$minio_access_key_value" ;;
+    worker-root-user) minio_worker_access_key_value="$minio_access_key_value" ;;
+    shared-user) minio_worker_access_key_value="$minio_backend_access_key_value" ;;
+    backend-root-secret) minio_backend_secret_key_value="$minio_secret_key_value" ;;
+    worker-root-secret) minio_worker_secret_key_value="$minio_secret_key_value" ;;
+    shared-secret) minio_worker_secret_key_value="$minio_backend_secret_key_value" ;;
+  esac
+  if run_check > "$log_file" 2>&1; then
+    printf '%s\n' "Reused storage identity/secret was accepted" >&2
+    exit 1
+  fi
+  assert_log_contains "Scoped storage credentials must be independent"
+done
+printf '%s\n' "Independent storage identity checks passed"
+
+for variable_name in MINIO_ACCESS_KEY MINIO_BACKEND_ACCESS_KEY MINIO_WORKER_ACCESS_KEY
+do
+  expect_storage_format_rejection "$variable_name" "xy" "must have at least 3 characters"
+  for invalid_key in 'bad=key' 'bad,key' ' leading-key' 'trailing-key ' "$(printf '\tleading-key')" "$(printf 'trailing-key\t')" \
+    "$(printf '%b' '\0302\0240')leading-key" "trailing-key$(printf '%b' '\0302\0240')" \
+    "$(printf '%b' '\0342\0200\0203')leading-key" "trailing-key$(printf '%b' '\0342\0200\0203')"
+  do
+    expect_storage_format_rejection "$variable_name" "$invalid_key" \
+      "must not contain = or , or leading/trailing whitespace"
+  done
+done
+for variable_name in MINIO_SECRET_KEY MINIO_BACKEND_SECRET_KEY MINIO_WORKER_SECRET_KEY
+do
+  expect_storage_format_rejection "$variable_name" "short7x" "must have at least 8 characters"
+done
+printf '%s\n' "Storage credential format checks passed"
+
 
 expect_edge_rejection "" "must be set explicitly"
 expect_edge_rejection "127.0.0.1:80" "must not bind the production edge to loopback"
@@ -256,6 +362,10 @@ for variable_name in \
   RABBITMQ_PASSWORD \
   MINIO_ACCESS_KEY \
   MINIO_SECRET_KEY \
+  MINIO_BACKEND_ACCESS_KEY \
+  MINIO_BACKEND_SECRET_KEY \
+  MINIO_WORKER_ACCESS_KEY \
+  MINIO_WORKER_SECRET_KEY \
   JWT_SECRET \
   NGINX_HTTP_PORT
 do
@@ -324,47 +434,55 @@ printf '%s\n' "Production dependency gate check passed"
 
 set_synthetic_values
 run_production_compose config --format json > "$config_json"
-python3 - "$config_json" <<'PY'
+write_env_file
+"$python_command" - "$config_json" "$env_file" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as config_file:
     services = json.load(config_file)["services"]
 
+with open(sys.argv[2], encoding="utf-8") as credentials_file:
+    values = dict(line.rstrip("\n").split("=", 1) for line in credentials_file)
+
 expected = {
     "production-config-check": {
-        "POSTGRES_USER": "ci_postgres_user",
-        "POSTGRES_PASSWORD": "ci-postgres-password-46",
-        "RABBITMQ_USERNAME": "ci_rabbitmq_user",
-        "RABBITMQ_PASSWORD": "ci-rabbitmq-password-46",
-        "MINIO_ACCESS_KEY": "ci_minio_access_key",
-        "MINIO_SECRET_KEY": "ci-minio-secret-key-46",
-        "JWT_SECRET": "ci-jwt-signing-secret-with-at-least-thirty-two-bytes",
+        "POSTGRES_USER": values["POSTGRES_USER"],
+        "POSTGRES_PASSWORD": values["POSTGRES_PASSWORD"],
+        "RABBITMQ_USERNAME": values["RABBITMQ_USERNAME"],
+        "RABBITMQ_PASSWORD": values["RABBITMQ_PASSWORD"],
+        "MINIO_ACCESS_KEY": values["MINIO_ACCESS_KEY"],
+        "MINIO_SECRET_KEY": values["MINIO_SECRET_KEY"],
+        "MINIO_BACKEND_ACCESS_KEY": values["MINIO_BACKEND_ACCESS_KEY"],
+        "MINIO_BACKEND_SECRET_KEY": values["MINIO_BACKEND_SECRET_KEY"],
+        "MINIO_WORKER_ACCESS_KEY": values["MINIO_WORKER_ACCESS_KEY"],
+        "MINIO_WORKER_SECRET_KEY": values["MINIO_WORKER_SECRET_KEY"],
+        "JWT_SECRET": values["JWT_SECRET"],
         "NGINX_HTTP_PORT": "80",
     },
-    "postgres": {"POSTGRES_USER": "ci_postgres_user", "POSTGRES_PASSWORD": "ci-postgres-password-46"},
-    "rabbitmq": {"RABBITMQ_DEFAULT_USER": "ci_rabbitmq_user", "RABBITMQ_DEFAULT_PASS": "ci-rabbitmq-password-46"},
-    "minio": {"MINIO_ROOT_USER": "ci_minio_access_key", "MINIO_ROOT_PASSWORD": "ci-minio-secret-key-46"},
-    "flyway": {"FLYWAY_USER": "ci_postgres_user", "FLYWAY_PASSWORD": "ci-postgres-password-46"},
-    "minio-init": {"MINIO_ACCESS_KEY": "ci_minio_access_key", "MINIO_SECRET_KEY": "ci-minio-secret-key-46"},
+    "postgres": {"POSTGRES_USER": values["POSTGRES_USER"], "POSTGRES_PASSWORD": values["POSTGRES_PASSWORD"]},
+    "rabbitmq": {"RABBITMQ_DEFAULT_USER": values["RABBITMQ_USERNAME"], "RABBITMQ_DEFAULT_PASS": values["RABBITMQ_PASSWORD"]},
+    "minio": {"MINIO_ROOT_USER": values["MINIO_ACCESS_KEY"], "MINIO_ROOT_PASSWORD": values["MINIO_SECRET_KEY"]},
+    "flyway": {"FLYWAY_USER": values["POSTGRES_USER"], "FLYWAY_PASSWORD": values["POSTGRES_PASSWORD"]},
+    "minio-init": {"MINIO_ACCESS_KEY": values["MINIO_ACCESS_KEY"], "MINIO_SECRET_KEY": values["MINIO_SECRET_KEY"], "MINIO_BACKEND_ACCESS_KEY": values["MINIO_BACKEND_ACCESS_KEY"], "MINIO_BACKEND_SECRET_KEY": values["MINIO_BACKEND_SECRET_KEY"], "MINIO_WORKER_ACCESS_KEY": values["MINIO_WORKER_ACCESS_KEY"], "MINIO_WORKER_SECRET_KEY": values["MINIO_WORKER_SECRET_KEY"]},
     "backend": {
-        "SPRING_DATASOURCE_USERNAME": "ci_postgres_user",
-        "SPRING_DATASOURCE_PASSWORD": "ci-postgres-password-46",
+        "SPRING_DATASOURCE_USERNAME": values["POSTGRES_USER"],
+        "SPRING_DATASOURCE_PASSWORD": values["POSTGRES_PASSWORD"],
         "SPRING_JPA_HIBERNATE_DDL_AUTO": "validate",
-        "JWT_SECRET": "ci-jwt-signing-secret-with-at-least-thirty-two-bytes",
+        "JWT_SECRET": values["JWT_SECRET"],
         "CORS_ALLOWED_ORIGINS": "",
-        "RABBITMQ_USERNAME": "ci_rabbitmq_user",
-        "RABBITMQ_PASSWORD": "ci-rabbitmq-password-46",
-        "MINIO_ACCESS_KEY": "ci_minio_access_key",
-        "MINIO_SECRET_KEY": "ci-minio-secret-key-46",
+        "RABBITMQ_USERNAME": values["RABBITMQ_USERNAME"],
+        "RABBITMQ_PASSWORD": values["RABBITMQ_PASSWORD"],
+        "MINIO_ACCESS_KEY": values["MINIO_BACKEND_ACCESS_KEY"],
+        "MINIO_SECRET_KEY": values["MINIO_BACKEND_SECRET_KEY"],
     },
     "worker": {
-        "SPRING_DATASOURCE_USERNAME": "ci_postgres_user",
-        "SPRING_DATASOURCE_PASSWORD": "ci-postgres-password-46",
-        "RABBITMQ_USERNAME": "ci_rabbitmq_user",
-        "RABBITMQ_PASSWORD": "ci-rabbitmq-password-46",
-        "MINIO_ACCESS_KEY": "ci_minio_access_key",
-        "MINIO_SECRET_KEY": "ci-minio-secret-key-46",
+        "SPRING_DATASOURCE_USERNAME": values["POSTGRES_USER"],
+        "SPRING_DATASOURCE_PASSWORD": values["POSTGRES_PASSWORD"],
+        "RABBITMQ_USERNAME": values["RABBITMQ_USERNAME"],
+        "RABBITMQ_PASSWORD": values["RABBITMQ_PASSWORD"],
+        "MINIO_ACCESS_KEY": values["MINIO_WORKER_ACCESS_KEY"],
+        "MINIO_SECRET_KEY": values["MINIO_WORKER_SECRET_KEY"],
     },
 }
 

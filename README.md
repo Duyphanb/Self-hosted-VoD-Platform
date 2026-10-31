@@ -50,11 +50,11 @@ Bash:
 cp .env.example .env
 ```
 
-The committed `.env.example` contains placeholders only. Before sharing the stack or using persistent data, replace at least `JWT_SECRET`, `POSTGRES_PASSWORD`, `SPRING_DATASOURCE_PASSWORD`, `RABBITMQ_PASSWORD`, and `MINIO_SECRET_KEY` in the ignored `.env` file.
+The committed `.env.example` contains placeholders only. Before sharing the stack or using persistent data, replace at least `JWT_SECRET`, `POSTGRES_PASSWORD`, `SPRING_DATASOURCE_PASSWORD`, `RABBITMQ_PASSWORD`, `MINIO_SECRET_KEY`, and the independent `MINIO_BACKEND_*`/`MINIO_WORKER_*` credentials in the ignored `.env` file. Storage root keys are reserved for bootstrap and explicit operator maintenance; [scoped application policies](docs/architecture/INFRASTRUCTURE.md#storage-identities-and-policies) are provisioned by minio-init.
 
 For the default local Compose setup, `SPRING_DATASOURCE_PASSWORD` must match `POSTGRES_PASSWORD`. If you also change the PostgreSQL database name or username, keep `SPRING_DATASOURCE_URL` and `SPRING_DATASOURCE_USERNAME` aligned with the corresponding `POSTGRES_*` values.
 
-Do not commit `.env`. Credentials stored in existing named volumes do not change automatically when `.env` changes.
+Do not commit `.env`. Rerunning `minio-init` overwrites and re-enables the configured scoped storage users, including their secrets; changing an access key leaves the old user valid until explicitly removed. Other services' persisted credentials need their own rotation procedure. Follow the [storage identity rotation and revocation runbook](docs/deployment/README.md#storage-identity-rotation-and-revocation) for existing volumes.
 
 ### 2. Build and start
 
@@ -84,9 +84,10 @@ To use admin features locally, register an account and promote it with the [firs
 ```bash
 curl --fail http://localhost/
 curl --fail http://localhost/api/v1/health
+curl --fail http://localhost/actuator/health
 ```
 
-On Windows PowerShell, use `curl.exe` instead of the `curl` alias. The API health response should report `{"status":"UP"}`.
+On Windows PowerShell, use `curl.exe` instead of the `curl` alias. The API health response should report `{"status":"UP"}`. Use aggregate `/actuator/health` for deployment readiness, including storage and the other integrated dependencies; the availability-only `/actuator/health/readiness` group is not that readiness signal. Health responses expose no dependency details.
 
 ## Local Ports and Routes
 
@@ -96,6 +97,7 @@ Nginx is the only service published to the host by the local Compose file, and b
 |---|---|---|
 | `http://localhost/` | frontend:80 | Frontend single-page app |
 | `http://localhost/api/v1/*` | backend:8080 | Public API route |
+| `http://localhost/actuator/health` | backend:8080 | Aggregate deployment readiness |
 | `http://localhost/hls/*` | backend:8080 | Authenticated HLS proxy route |
 | `${NGINX_HTTP_PORT:-127.0.0.1:80}` | nginx:80 | Configurable host HTTP address and port, loopback only by default |
 

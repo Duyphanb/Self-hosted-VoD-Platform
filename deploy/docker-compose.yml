@@ -93,28 +93,16 @@ services:
       MINIO_BUCKET_RAW: ${MINIO_BUCKET_RAW:-vod-raw}
       MINIO_BUCKET_HLS: ${MINIO_BUCKET_HLS:-vod-hls}
       MINIO_BUCKET_THUMBNAILS: ${MINIO_BUCKET_THUMBNAILS:-vod-thumbnails}
+      MINIO_BACKEND_ACCESS_KEY: ${MINIO_BACKEND_ACCESS_KEY:-vod_backend}
+      MINIO_BACKEND_SECRET_KEY: ${MINIO_BACKEND_SECRET_KEY:-change-me-backend-only}
+      MINIO_WORKER_ACCESS_KEY: ${MINIO_WORKER_ACCESS_KEY:-vod_worker}
+      MINIO_WORKER_SECRET_KEY: ${MINIO_WORKER_SECRET_KEY:-change-me-worker-only}
     depends_on:
       minio:
         condition: service_healthy
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        attempts=0
-        until mc alias set local http://minio:9000 "$${MINIO_ACCESS_KEY}" "$${MINIO_SECRET_KEY}" >/dev/null 2>&1; do
-          attempts=$$((attempts + 1))
-          if [ "$$attempts" -ge 60 ]; then
-            echo "Storage initialization failed: authentication or endpoint unavailable" >&2
-            exit 1
-          fi
-          sleep 2
-        done
-        mc mb --ignore-existing "local/$${MINIO_BUCKET_RAW}"
-        mc mb --ignore-existing "local/$${MINIO_BUCKET_HLS}"
-        mc mb --ignore-existing "local/$${MINIO_BUCKET_THUMBNAILS}"
-        mc anonymous set none "local/$${MINIO_BUCKET_RAW}"
-        mc anonymous set none "local/$${MINIO_BUCKET_HLS}"
-        mc anonymous set none "local/$${MINIO_BUCKET_THUMBNAILS}"
+    entrypoint: ["/bin/sh", "/init/storage-init.sh"]
+    volumes:
+      - ./minio-init.sh:/init/storage-init.sh:ro
     networks:
       - vod_internal
 
@@ -145,8 +133,11 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-change-me}
       RABBITMQ_ENCODING_QUEUE: ${RABBITMQ_ENCODING_QUEUE:-video-encoding-queue}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-vod_minio}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me}
+      MINIO_CONNECT_TIMEOUT_MS: ${MINIO_CONNECT_TIMEOUT_MS:-10000}
+      MINIO_READ_TIMEOUT_MS: ${MINIO_READ_TIMEOUT_MS:-60000}
+      MINIO_WRITE_TIMEOUT_MS: ${MINIO_WRITE_TIMEOUT_MS:-60000}
+      MINIO_ACCESS_KEY: ${MINIO_BACKEND_ACCESS_KEY:-vod_backend}
+      MINIO_SECRET_KEY: ${MINIO_BACKEND_SECRET_KEY:-change-me-backend-only}
       MINIO_BUCKET_RAW: ${MINIO_BUCKET_RAW:-vod-raw}
       MINIO_BUCKET_HLS: ${MINIO_BUCKET_HLS:-vod-hls}
       MINIO_BUCKET_THUMBNAILS: ${MINIO_BUCKET_THUMBNAILS:-vod-thumbnails}
@@ -190,8 +181,11 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-change-me}
       RABBITMQ_ENCODING_QUEUE: ${RABBITMQ_ENCODING_QUEUE:-video-encoding-queue}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-vod_minio}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-me}
+      MINIO_CONNECT_TIMEOUT_MS: ${MINIO_CONNECT_TIMEOUT_MS:-10000}
+      MINIO_READ_TIMEOUT_MS: ${MINIO_READ_TIMEOUT_MS:-60000}
+      MINIO_WRITE_TIMEOUT_MS: ${MINIO_WRITE_TIMEOUT_MS:-60000}
+      MINIO_ACCESS_KEY: ${MINIO_WORKER_ACCESS_KEY:-vod_worker}
+      MINIO_SECRET_KEY: ${MINIO_WORKER_SECRET_KEY:-change-me-worker-only}
       MINIO_BUCKET_RAW: ${MINIO_BUCKET_RAW:-vod-raw}
       MINIO_BUCKET_HLS: ${MINIO_BUCKET_HLS:-vod-hls}
       MINIO_BUCKET_THUMBNAILS: ${MINIO_BUCKET_THUMBNAILS:-vod-thumbnails}
