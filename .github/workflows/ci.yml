@@ -93,9 +93,6 @@ jobs:
       - name: Verify production configuration fails closed
         run: sh deploy/tests/production-config-smoke.sh
 
-      - name: Verify RabbitMQ publisher on a disposable broker
-        run: python3 deploy/tests/rabbitmq-publisher-smoke.py --project "${COMPOSE_PROJECT_NAME}-amqp"
-
       - name: Build backend image
         run: docker build -t vod-backend-skeleton ./backend
 
@@ -113,6 +110,9 @@ jobs:
 
       - name: Build compose application images
         run: docker compose -f deploy/docker-compose.yml build backend worker frontend
+
+      - name: Verify RabbitMQ publisher on a disposable broker
+        run: python3 deploy/tests/rabbitmq-publisher-smoke.py --project "${COMPOSE_PROJECT_NAME}-amqp"
 
       - name: Verify auth and catalog against PostgreSQL and Nginx
         env:

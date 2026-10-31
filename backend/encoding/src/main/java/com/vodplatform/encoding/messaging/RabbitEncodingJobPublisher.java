@@ -19,7 +19,16 @@ import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
-/** Explicit JSON bytes plus per-send confirms and mandatory returns; no template-level retry. */
+/**
+ * Explicit JSON bytes plus per-send confirms and mandatory returns; no template-level retry.
+ * The confirm deadline starts AFTER send returns, not at method entry. A cold connection
+ * adds TCP connect and AMQP handshake budgets (5 s each in production), channel setup
+ * and topology RPCs (5 s per RPC; four topology declarations), then the configured confirm
+ * wait (5 s by default). These budgets are additive, not a 5 s total publish deadline.
+ * There is no finite end-to-end bound: DNS, connection-lock contention and socket writes
+ * can add time outside those budgets. Issue 4.5 must not size its eager-publish path from
+ * confirmTimeout alone. A timed-out publication may still reach the broker.
+ */
 public final class RabbitEncodingJobPublisher implements EncodingJobPublisher {
     private static final Logger log = LoggerFactory.getLogger(RabbitEncodingJobPublisher.class);
     private static final Pattern REQUEST_ID = Pattern.compile("[A-Za-z0-9._-]{1,64}");

@@ -5,10 +5,12 @@ import com.vodplatform.encoding.messaging.EncodingJobPublisher;
 import com.vodplatform.encoding.messaging.EncodingQueueTopology;
 import com.vodplatform.encoding.messaging.RabbitEncodingJobPublisher;
 import org.springframework.amqp.core.Declarables;
-import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.amqp.autoconfigure.ConnectionFactoryCustomizer;
+import org.springframework.boot.amqp.autoconfigure.RabbitProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -25,13 +27,30 @@ public class EncodingMessagingConfiguration {
     }
 
     @Bean
-    RabbitAdmin amqpAdmin(ConnectionFactory connectionFactory, Environment environment) {
+    RabbitAdmin amqpAdmin(CachingConnectionFactory connectionFactory, Environment environment) {
         validateConnectionSettings(environment);
-        RabbitAdmin admin = new RabbitAdmin(connectionFactory);
+        RabbitAdmin admin = new RabbitAdmin(connectionFactory) {
+            @Override
+            public void initialize() {
+                try {
+                    super.initialize();
+                } catch (RuntimeException failure) {
+                    // onCreate is not repeated on a cached open connection. Discard it so
+                    // neither later publishes nor readiness bypass a failed declaration.
+                    connectionFactory.resetConnection();
+                    throw failure;
+                }
+            }
+        };
         // 4.1 uses Spring Core retry; null explicitly disables declaration retry.
         admin.setRetryTemplate(null);
         admin.setIgnoreDeclarationExceptions(false);
         return admin;
+    }
+
+    @Bean
+    ConnectionFactoryCustomizer encodingHandshakeTimeout(RabbitProperties properties) {
+        return factory -> factory.setHandshakeTimeout(Math.toIntExact(properties.getConnectionTimeout().toMillis()));
     }
 
     public static void validateConnectionSettings(Environment environment) {

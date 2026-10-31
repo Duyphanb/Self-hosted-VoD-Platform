@@ -31,13 +31,26 @@ class EncodingWireContractTest {
         assertThat(codec.decode(fixture, JOB.toString())).isEqualTo(message);
         assertThat(json.readTree(codec.encode(message))).isEqualTo(json.readTree(fixture));
         String adr = Files.readString(root.resolve("docs/architecture/adr/ADR-010.md"));
-        int start = adr.indexOf("```json\n");
         // readString preserves platform newlines: normalize before locating the frozen block.
         adr = adr.replace("\r\n", "\n");
-        start = adr.indexOf("```json\n");
+        int start = adr.indexOf("```json\n");
         assertThat(start).isGreaterThanOrEqualTo(0);
         String example = adr.substring(start + 8, adr.indexOf("\n```", start + 8));
         assertThat(json.readTree(fixture)).isEqualTo(json.readTree(example));
+    }
+
+    @Test
+    void duplicatedWireClassesStayIdenticalAcrossReactors() throws Exception {
+        Path root = root();
+        for (String name : List.of("EncodingJobMessage", "EncodingJobMessageCodec",
+                "InvalidEncodingJobMessageException", "EncodingQueueTopology")) {
+            String backend = Files.readString(root.resolve(
+                    "backend/encoding/src/main/java/com/vodplatform/encoding/messaging/" + name + ".java"));
+            String worker = Files.readString(root.resolve(
+                    "worker/queue/src/main/java/com/vodplatform/worker/queue/messaging/" + name + ".java"));
+            assertThat(worker.replace("com.vodplatform.worker.queue", "com.vodplatform.encoding").replace("\r\n", "\n"))
+                    .as(name).isEqualTo(backend.replace("\r\n", "\n"));
+        }
     }
 
     @Test

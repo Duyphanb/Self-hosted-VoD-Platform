@@ -47,6 +47,7 @@ class EncodingQueueBrokerTests {
         String password = required("PASSWORD");
         String container = required("CONTAINER");
         verifyDisposableProject(container);
+        assertThat(docker("port", container, "5672/tcp").trim()).isEqualTo("127.0.0.1:" + port);
         String queue = System.getenv("ENCODING_TEST_RABBITMQ_QUEUE");
         queue = EncodingQueueTopology.validateQueueName(queue == null ? "video-encoding-queue" : queue);
 

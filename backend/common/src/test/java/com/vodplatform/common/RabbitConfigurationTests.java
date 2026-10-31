@@ -57,6 +57,7 @@ class RabbitConfigurationTests {
                     assertEquals(CachingConnectionFactory.ConfirmType.CORRELATED, rabbit.getPublisherConfirmType());
                     assertTrue(rabbit.isPublisherReturns());
                     CachingConnectionFactory connection = context.getBean(CachingConnectionFactory.class);
+                    assertEquals(5000, connection.getRabbitConnectionFactory().getHandshakeTimeout());
                     assertTrue(connection.isPublisherConfirms());
                     assertTrue(connection.isPublisherReturns());
                     assertTrue(context.getBean(RabbitTemplate.class)
@@ -119,6 +120,8 @@ class RabbitConfigurationTests {
                     assertNull(context.getStartupFailure());
                     assertInstanceOf(CachingConnectionFactory.class,
                             context.getBean(org.springframework.amqp.rabbit.connection.ConnectionFactory.class));
+                    assertEquals(100, context.getBean(CachingConnectionFactory.class)
+                            .getRabbitConnectionFactory().getHandshakeTimeout());
                     EncodingJobPublisher publisher = context.getBean(EncodingJobPublisher.class);
                     PublishOutcome outcome = assertTimeoutPreemptively(Duration.ofSeconds(3), () -> publisher.publish(
                             new EncodingJobMessage(UUID.randomUUID(), UUID.randomUUID(), 1), Optional.empty()));
