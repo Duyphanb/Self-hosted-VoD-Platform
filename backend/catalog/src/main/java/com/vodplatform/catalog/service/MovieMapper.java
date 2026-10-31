@@ -25,7 +25,7 @@ final class MovieMapper {
     /**
      * @param genres the genres assigned to the movie, in any order
      */
-    static MovieSummary toSummary(Movie movie, Collection<Genre> genres) {
+    static MovieSummary toSummary(Movie movie, Collection<Genre> genres, String videoStatus) {
         return new MovieSummary(
                 movie.getId(),
                 movie.getTitle(),
@@ -33,11 +33,12 @@ final class MovieMapper {
                 movie.getDescription(),
                 movie.getReleaseYear(),
                 genreNames(genres),
-                movie.getStatus()
+                movie.getStatus(),
+                videoStatus
         );
     }
 
-    static MovieDetail toDetail(Movie movie) {
+    static MovieDetail toDetail(Movie movie, String videoStatus) {
         List<CreditedPerson> people = movie.getCredits().stream()
                 .map(credit -> new CreditedPerson(
                         credit.getPerson().getId(),
@@ -54,7 +55,8 @@ final class MovieMapper {
                 movie.getMaturityRating(),
                 genreNames(movie.getGenres()),
                 people,
-                movie.getStatus()
+                movie.getStatus(),
+                videoStatus
         );
     }
 

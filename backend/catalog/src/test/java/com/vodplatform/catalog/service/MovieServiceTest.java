@@ -20,7 +20,9 @@ import com.vodplatform.catalog.config.CatalogConfiguration;
 import com.vodplatform.catalog.dto.CreditedPerson;
 import com.vodplatform.catalog.dto.MovieCreditInput;
 import com.vodplatform.catalog.dto.MovieDetail;
+import com.vodplatform.catalog.dto.MovieDetailResponse;
 import com.vodplatform.catalog.dto.MovieSummary;
+import com.vodplatform.catalog.dto.MovieSummaryResponse;
 import com.vodplatform.catalog.exception.CatalogValidationException;
 import com.vodplatform.catalog.exception.MovieNotFoundException;
 import com.vodplatform.catalog.exception.MovieSlugConflictException;
@@ -104,9 +106,13 @@ class MovieServiceTest {
     @Autowired
     private CatalogWriteRetry writeRetry;
 
+    @Autowired
+    private RecordingVideoStatusLookup videoStatusLookup;
+
     @BeforeEach
     void resetClock() {
         clock.set(T0);
+        videoStatusLookup.clear();
     }
 
     // ---- create ----
@@ -509,7 +515,8 @@ class MovieServiceTest {
         }
         PersonRepository people = mock(PersonRepository.class, AdditionalAnswers.delegatesTo(personRepository));
         MovieService service = new MovieService(
-                movieRepository, new MovieAssignmentResolver(genreRepository, people), clock, writeRetry);
+                movieRepository, new MovieAssignmentResolver(genreRepository, people), clock, writeRetry,
+                videoStatusLookup);
 
         MovieDetail created = service.create(new MovieRequestBuilder().people(credits).build());
         flushAndClear();
@@ -844,7 +851,7 @@ class MovieServiceTest {
         // Equal creation times fall back to the id, descending.
         assertThat(ids).containsExactly(uuid(4), uuid(3), uuid(2), uuid(1));
         assertThat(first.getContent().get(1)).isEqualTo(new MovieSummary(
-                uuid(3), "Phim 3", "phim-3", "Mô tả", null, List.of("Hài", "Hành Động"), PUBLISHED));
+                uuid(3), "Phim 3", "phim-3", "Mô tả", null, List.of("Hài", "Hành Động"), PUBLISHED, null));
     }
 
     @Test
@@ -947,21 +954,25 @@ class MovieServiceTest {
         List<Integer> statementCounts = new ArrayList<>();
         for (int size : List.of(2, 8)) {
             RecordingStatementInspector.clear();
+            videoStatusLookup.calls.clear();
             Page<MovieSummary> published = movieService.listPublished(null, null, 0, size, MovieSort.LATEST);
             statementCounts.add(RecordingStatementInspector.statements().size());
+            assertThat(videoStatusLookup.calls).containsExactly(published.map(MovieSummary::id).getContent());
             assertThat(statementsReading("movie_genres")).hasSize(1);
             assertThat(published.getContent()).hasSize(size);
             entityManager.clear();
 
             RecordingStatementInspector.clear();
+            videoStatusLookup.calls.clear();
             Page<MovieSummary> everyStatus = movieService.listForAdmin(null, 0, size, MovieSort.LATEST);
             statementCounts.add(RecordingStatementInspector.statements().size());
+            assertThat(videoStatusLookup.calls).containsExactly(everyStatus.map(MovieSummary::id).getContent());
             assertThat(statementsReading("movie_genres")).hasSize(1);
             assertThat(everyStatus.getContent()).hasSize(size);
             entityManager.clear();
         }
 
-        // Page query, count query and one genre query, whatever the page size.
+        // Page, count and genres; this port stub runs no SQL. Encoding checks its one-statement query.
         assertThat(statementCounts).containsOnly(3);
         Page<MovieSummary> firstEight = movieService.listForAdmin(null, 0, 8, MovieSort.LATEST);
         assertThat(firstEight.getContent())
@@ -985,6 +996,63 @@ class MovieServiceTest {
         assertThat(movieService.listPublished(null, null, 0, 10, MovieSort.LATEST)).isEmpty();
         assertThat(movieService.listForAdmin(ARCHIVED, 0, 10, MovieSort.LATEST)).isEmpty();
         assertThat(statementsReading("movie_genres")).isEmpty();
+        assertThat(videoStatusLookup.calls).isEmpty();
+    }
+
+    @Test
+    void listsMapStatusesFromOnePageLookupWithoutMaskingDraftsOrInventingMissingValues() {
+        persist(movie(1, "ready", PUBLISHED));
+        persist(movie(2, "no-assets", PUBLISHED));
+        persist(movie(3, "draft-queued", DRAFT));
+        videoStatusLookup.statuses.put(uuid(1), "READY");
+        videoStatusLookup.statuses.put(uuid(3), "QUEUED");
+        flushAndClear();
+
+        Page<MovieSummary> published = movieService.listPublished(null, null, 0, 10, MovieSort.LATEST);
+
+        assertThat(videoStatusLookup.calls).containsExactly(List.of(uuid(2), uuid(1)));
+        assertThat(published.getContent()).extracting(MovieSummary::id, MovieSummary::videoStatus)
+                .containsExactly(tuple(uuid(2), null), tuple(uuid(1), "READY"));
+        assertThat(MovieSummaryResponse.of(published.getContent().get(1)).videoStatus()).isEqualTo("READY");
+
+        videoStatusLookup.calls.clear();
+        Page<MovieSummary> admin = movieService.listForAdmin(null, 0, 2, MovieSort.LATEST);
+
+        assertThat(videoStatusLookup.calls).containsExactly(List.of(uuid(3), uuid(2)));
+        assertThat(admin.getContent()).extracting(MovieSummary::id, MovieSummary::videoStatus)
+                .containsExactly(tuple(uuid(3), "QUEUED"), tuple(uuid(2), null));
+    }
+
+    @Test
+    void detailAndUpdateDeriveStatusButCreateDoesNotCallTheLookup() {
+        MovieDetail created = movieService.create(new MovieRequestBuilder().build());
+        assertThat(created.videoStatus()).isNull();
+        assertThat(videoStatusLookup.calls).isEmpty();
+        videoStatusLookup.statuses.put(created.id(), "READY");
+
+        MovieDetail detail = movieService.getMovie(created.id(), MovieVisibility.ANY_STATUS);
+
+        assertThat(detail.videoStatus()).isEqualTo("READY");
+        assertThat(MovieDetailResponse.of(detail).videoStatus()).isEqualTo("READY");
+        assertThat(videoStatusLookup.calls).containsExactly(List.of(created.id()));
+        videoStatusLookup.calls.clear();
+        MovieDetail updated = movieService.update(created.id(), new MovieRequestBuilder().title("Phim Mới").build());
+
+        assertThat(updated.videoStatus()).isEqualTo("READY");
+        assertThat(MovieDetailResponse.of(updated).videoStatus()).isEqualTo("READY");
+        assertThat(videoStatusLookup.calls).containsExactly(List.of(created.id()));
+    }
+
+    @Test
+    void hiddenAndMissingMoviesNeverCallTheVideoLookup() {
+        persist(movie(1, "draft", DRAFT));
+        flushAndClear();
+
+        assertThat(catchThrowableOfType(MovieNotFoundException.class,
+                () -> movieService.getMovie(uuid(1), MovieVisibility.PUBLISHED_ONLY))).isNotNull();
+        assertThat(catchThrowableOfType(MovieNotFoundException.class,
+                () -> movieService.getMovie(uuid(2), MovieVisibility.ANY_STATUS))).isNotNull();
+        assertThat(videoStatusLookup.calls).isEmpty();
     }
 
     @Test
@@ -1072,7 +1140,8 @@ class MovieServiceTest {
         MovieRepository stale = mock(MovieRepository.class, AdditionalAnswers.delegatesTo(movieRepository));
         doReturn(false).when(stale).existsBySlug(anyString());
         doReturn(false).when(stale).existsBySlugAndIdNot(anyString(), any());
-        return new MovieService(stale, new MovieAssignmentResolver(genres, personRepository), clock, writeRetry);
+        return new MovieService(stale, new MovieAssignmentResolver(genres, personRepository), clock, writeRetry,
+                videoStatusLookup);
     }
 
     private static void assertSlugConflict(MovieSlugConflictException conflict) {
@@ -1137,6 +1206,11 @@ class MovieServiceTest {
         @Bean
         MutableClock clock() {
             return new MutableClock(T0);
+        }
+
+        @Bean
+        RecordingVideoStatusLookup videoStatusLookup() {
+            return new RecordingVideoStatusLookup();
         }
     }
 }

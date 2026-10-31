@@ -6,10 +6,11 @@ import java.util.UUID;
 
 /**
  * Catalog fields of a movie list item ({@code MovieSummary} in the API contract). Fields owned by
- * other modules, such as the poster URL, average rating and video status, are added by the API
+ * other modules, such as the poster URL and average rating, are added by the API
  * layer ({@link MovieSummaryResponse}).
  *
  * @param genres genre names ordered by genre slug
+ * @param videoStatus READY if a READY asset exists, otherwise newest asset status, or null without assets
  */
 public record MovieSummary(
         UUID id,
@@ -18,7 +19,8 @@ public record MovieSummary(
         String description,
         Integer releaseYear,
         List<String> genres,
-        MovieStatus status
+        MovieStatus status,
+        String videoStatus
 ) {
 
     public MovieSummary {

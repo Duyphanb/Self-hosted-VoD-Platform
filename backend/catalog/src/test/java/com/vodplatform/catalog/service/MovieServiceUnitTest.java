@@ -50,6 +50,9 @@ class MovieServiceUnitTest {
     @Mock
     private MovieAssignmentResolver assignmentResolver;
 
+    @Mock
+    private VideoStatusLookup videoStatusLookup;
+
     private final MutableClock clock = new MutableClock(T0);
 
     private MovieService movieService;
@@ -57,7 +60,8 @@ class MovieServiceUnitTest {
     @BeforeEach
     void createService() {
         movieService = new MovieService(
-                movieRepository, assignmentResolver, clock, new CatalogWriteRetry(new NoOpTransactionManager()));
+                movieRepository, assignmentResolver, clock,
+                new CatalogWriteRetry(new NoOpTransactionManager()), videoStatusLookup);
     }
 
     @Test
@@ -115,7 +119,7 @@ class MovieServiceUnitTest {
     void creditsAreResolvedBeforeAndGenresAfterTheMovieRowIsWritten() {
         when(movieRepository.saveAndFlush(any(Movie.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(movieRepository.findForUpdateById(MOVIE_ID)).thenReturn(Optional.of(movie(MovieStatus.PUBLISHED)));
-        InOrder order = inOrder(movieRepository, assignmentResolver);
+        InOrder order = inOrder(movieRepository, assignmentResolver, videoStatusLookup);
 
         movieService.create(new MovieRequestBuilder().build());
 
@@ -124,6 +128,7 @@ class MovieServiceUnitTest {
         order.verify(movieRepository).saveAndFlush(any(Movie.class));
         order.verify(assignmentResolver).resolveGenres(anyList());
         order.verify(movieRepository).flush();
+        verifyNoInteractions(videoStatusLookup);
 
         movieService.update(MOVIE_ID, new MovieRequestBuilder().build());
 
@@ -133,6 +138,7 @@ class MovieServiceUnitTest {
         order.verify(movieRepository).flush();
         order.verify(assignmentResolver).resolveGenres(anyList());
         order.verify(movieRepository).flush();
+        order.verify(videoStatusLookup).videoStatus(MOVIE_ID);
         order.verifyNoMoreInteractions();
     }
 

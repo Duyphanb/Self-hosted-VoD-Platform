@@ -164,7 +164,8 @@ class CatalogWriteRetryTransactionTest {
         }).when(people).insertIfSlugFree(any(), any(), any());
         MovieRepository movies = mock(MovieRepository.class, AdditionalAnswers.delegatesTo(movieRepository));
         MovieService service = new MovieService(
-                movies, new MovieAssignmentResolver(genreRepository, people), clock, writeRetry);
+                movies, new MovieAssignmentResolver(genreRepository, people), clock, writeRetry,
+                movieIds -> java.util.Map.of());
 
         MovieDetail created = service.create(new MovieRequestBuilder()
                 .slug("phim")
@@ -207,7 +208,8 @@ class CatalogWriteRetryTransactionTest {
         }).when(genres).insertIfAbsent(any(), any(), any());
         MovieRepository movies = mock(MovieRepository.class, AdditionalAnswers.delegatesTo(movieRepository));
         MovieService service = new MovieService(
-                movies, new MovieAssignmentResolver(genres, personRepository), clock, writeRetry);
+                movies, new MovieAssignmentResolver(genres, personRepository), clock, writeRetry,
+                movieIds -> java.util.Map.of());
 
         MovieDetail updated = service.update(uuid(10), new MovieRequestBuilder()
                 .title("Phim Mới")
@@ -329,7 +331,8 @@ class CatalogWriteRetryTransactionTest {
         GenreRepository genres = mock(GenreRepository.class, AdditionalAnswers.delegatesTo(genreRepository));
         PersonRepository people = mock(PersonRepository.class, AdditionalAnswers.delegatesTo(personRepository));
         MovieService movieService = new MovieService(
-                movies, new MovieAssignmentResolver(genreRepository, personRepository), clock, writeRetry);
+                movies, new MovieAssignmentResolver(genreRepository, personRepository), clock, writeRetry,
+                movieIds -> java.util.Map.of());
 
         assertThat(catchThrowable(() -> movieService.create(new MovieRequestBuilder().slug("phim").build())))
                 .isInstanceOf(MovieSlugConflictException.class);

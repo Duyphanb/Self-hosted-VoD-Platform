@@ -431,7 +431,8 @@ class CreationOrderPostgresTest {
 
     private MovieService movieService(GenreRepository genres, PersonRepository people, CatalogWriteRetry writeRetry) {
         return new MovieService(
-                movieRepository, new MovieAssignmentResolver(genres, people), Clock.systemUTC(), writeRetry);
+                movieRepository, new MovieAssignmentResolver(genres, people), Clock.systemUTC(), writeRetry,
+                movieIds -> java.util.Map.of());
     }
 
     /**

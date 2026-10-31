@@ -12,9 +12,8 @@ import java.util.UUID;
  * @param posterUrl     always null: posters are deferred (ERD {@code poster_object_key})
  * @param genres        genre names ordered by genre slug
  * @param averageRating null until ratings are implemented
- * @param videoStatus   latest video availability, a {@code VideoAssetStatus} value; null when the
- *                      movie has no video asset, which is always the case until video upload is
- *                      implemented
+ * @param videoStatus   READY if a READY asset exists, otherwise the newest asset's status by
+ *                      {@code (created_at, id)}; null when the movie has no video asset
  */
 public record MovieSummaryResponse(
         UUID id,
@@ -49,7 +48,7 @@ public record MovieSummaryResponse(
                 summary.genres(),
                 null,
                 summary.status(),
-                null
+                summary.videoStatus()
         );
     }
 }

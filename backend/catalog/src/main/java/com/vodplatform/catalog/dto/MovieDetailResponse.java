@@ -15,9 +15,8 @@ import java.util.UUID;
  * @param posterUrl     always null: posters are deferred (ERD {@code poster_object_key})
  * @param genres        genre names ordered by genre slug
  * @param averageRating null until ratings are implemented
- * @param videoStatus   latest video availability, a {@code VideoAssetStatus} value; null when the
- *                      movie has no video asset, which is always the case until video upload is
- *                      implemented
+ * @param videoStatus   READY if a READY asset exists, otherwise the newest asset's status by
+ *                      {@code (created_at, id)}; null when the movie has no video asset
  * @param people        credits in display order ({@code sort_order})
  * @param userRating    the caller's rating; null until ratings are implemented
  * @param inWatchlist   whether the movie is on the caller's watchlist; false until the watchlist
@@ -61,7 +60,7 @@ public record MovieDetailResponse(
                 detail.genres(),
                 null,
                 detail.status(),
-                null,
+                detail.videoStatus(),
                 detail.maturityRating(),
                 detail.people(),
                 null,

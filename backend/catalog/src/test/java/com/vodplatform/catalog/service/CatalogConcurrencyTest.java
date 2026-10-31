@@ -375,5 +375,10 @@ class CatalogConcurrencyTest {
         MutableClock clock() {
             return new MutableClock(Instant.parse("2026-10-01T08:00:00Z"));
         }
+
+        @Bean
+        VideoStatusLookup videoStatusLookup() {
+            return movieIds -> java.util.Map.of();
+        }
     }
 }
