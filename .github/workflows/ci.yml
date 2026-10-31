@@ -93,6 +93,9 @@ jobs:
       - name: Verify production configuration fails closed
         run: sh deploy/tests/production-config-smoke.sh
 
+      - name: Verify RabbitMQ publisher on a disposable broker
+        run: python3 deploy/tests/rabbitmq-publisher-smoke.py --project "${COMPOSE_PROJECT_NAME}-amqp"
+
       - name: Build backend image
         run: docker build -t vod-backend-skeleton ./backend
 
@@ -166,6 +169,15 @@ jobs:
         with:
           name: storage-sdk-diagnostics
           path: backend/common/target/storage-sdk-smoke/**/first-failure.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Preserve redacted RabbitMQ publisher diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rabbitmq-publisher-diagnostics
+          path: backend/common/target/rabbitmq-publisher-smoke/**/*.log
           if-no-files-found: ignore
           retention-days: 7
 
