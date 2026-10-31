@@ -233,9 +233,10 @@ class VideoAssetPostgresTest {
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch tryLock = new CountDownLatch(1);
         AtomicInteger waiterPid = new AtomicInteger();
-        AtomicReference<Instant> transactionStart = new AtomicReference<>();
+        AtomicReference<Instant> waiterStart = new AtomicReference<>();
         Future<VideoAsset> waiter = executor.submit(() -> tx().execute(status -> {
-            transactionStart.set(jdbc.queryForObject("select now()", (rs, row) -> rs.getTimestamp(1).toInstant()));
+            // Keep every timestamp comparison on the JVM clock; the PostgreSQL VM may differ.
+            waiterStart.set(appClock.instant());
             waiterPid.set(jdbc.queryForObject("select pg_backend_pid()", Integer.class));
             started.countDown();
             await(tryLock);
@@ -255,7 +256,7 @@ class VideoAssetPostgresTest {
                 waitForLock(waiterPid.get());
                 // Terminal fixture represents the earlier completed asset, leaving room for the waiter.
                 Instant created = appClock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
-                assertThat(created).isAfter(transactionStart.get());
+                assertThat(created).isAfter(waiterStart.get());
                 assets.saveAndFlush(new VideoAsset(UUID.randomUUID(), lock.movieId(), "raw-fixture",
                         UUID.randomUUID().toString(), null, null, VideoAssetStatus.READY,
                         null, null, null, null, null, null, created, created));
@@ -263,7 +264,7 @@ class VideoAssetPostgresTest {
             });
             VideoAsset inserted = waiter.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             assertThat(inserted.getCreatedAt()).isAfter(holderTime);
-            assertThat(transactionStart.get()).isBefore(holderTime);
+            assertThat(waiterStart.get()).isBefore(holderTime);
             assertThat(assets.findNewestByMovieId(movie)).get().extracting(VideoAsset::getId)
                     .isEqualTo(inserted.getId());
         } finally {

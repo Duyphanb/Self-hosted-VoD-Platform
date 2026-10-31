@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,6 +29,15 @@ class EncodingSchemaMappingTest {
     @Autowired EntityManager entityManager;
     @Autowired VideoAssetRepository assets;
     @Autowired EncodingJobRepository jobs;
+
+    @ParameterizedTest
+    @EnumSource(value = VideoAssetStatus.class, names = {"UPLOADED", "PROCESSING", "READY", "FAILED"})
+    void firstAttemptRejectsEveryNonQueuedAsset(VideoAssetStatus status) {
+        VideoAsset asset = asset(uuid(1), uuid(10), status, T0);
+        assertThat(catchThrowable(() -> EncodingJob.firstAttempt(asset, uuid(101))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("First attempt requires a QUEUED asset");
+    }
 
     @Test
     void registersExactlyTheEncodingEntities() {

@@ -206,7 +206,7 @@ jobs:
   schema-migration:
     name: Flyway schema migration
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -259,33 +259,6 @@ jobs:
       - name: Verify video asset migration preflight and in-flight index
         run: sh deploy/tests/video-asset-migration-smoke.sh
 
-  encoding-postgres:
-    name: Video asset persistence on PostgreSQL
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: vod
-          POSTGRES_USER: vod
-          POSTGRES_PASSWORD: vod
-          POSTGRES_INITDB_ARGS: --locale-provider=icu --icu-locale=vi
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U vod -d vod"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - name: Set up Java
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
@@ -293,17 +266,6 @@ jobs:
           verify-signature: true
           java-version: "21"
           cache: maven
-
-      - name: Apply Flyway migration
-        run: >-
-          docker run --rm --network host
-          -v "${{ github.workspace }}/backend/common/src/main/resources/db/migration:/flyway/sql:ro"
-          flyway/flyway:12.10.0
-          -url=jdbc:postgresql://localhost:5432/vod
-          -user=vod
-          -password=vod
-          -connectRetries=60
-          migrate
 
       - name: Verify video asset persistence against required PostgreSQL
         working-directory: backend

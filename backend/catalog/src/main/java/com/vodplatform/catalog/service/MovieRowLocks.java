@@ -26,8 +26,10 @@ public class MovieRowLocks {
      * the asset (or conditionally claim a FAILED retry), then insert the unpublished job. Commit
      * before publishing. Generate the asset id and finish raw PUT before entering this transaction.
      *
-     * <p>For retry, read the asset's immutable movie id first, then acquire this lock and reread
-     * the newest/in-flight state. The worker does not acquire this lock. PESSIMISTIC_WRITE uses
+     * <p>For retry, read the asset's immutable movie id through a scalar projection or an earlier
+     * transaction, so no VideoAsset is managed before acquiring this lock. Then reread the
+     * newest/in-flight state; the conditional update's row count decides the retry outcome.
+     * The worker does not acquire this lock. PESSIMISTIC_WRITE uses
      * FOR NO KEY UPDATE on PostgreSQL and FOR UPDATE on H2, as catalog update/archive do.
      *
      * @throws MovieNotFoundException if the movie does not exist
