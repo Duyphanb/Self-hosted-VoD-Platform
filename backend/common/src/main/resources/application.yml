@@ -2,6 +2,13 @@ server:
   port: ${SERVER_PORT:8080}
 
 spring:
+  servlet:
+    multipart:
+      resolve-lazily: true
+      max-file-size: ${MAX_UPLOAD_SIZE_MB:2048}MB
+      max-request-size: ${MAX_UPLOAD_SIZE_MB:2048}MB
+      file-size-threshold: 0B
+      location: ${TEMP_UPLOAD_DIR:/tmp/vod-uploads}
   rabbitmq:
     host: ${RABBITMQ_HOST:}
     port: ${RABBITMQ_PORT:5672}
@@ -53,7 +60,13 @@ storage:
   write-timeout-ms: ${MINIO_WRITE_TIMEOUT_MS:60000}
   hls-bucket: ${MINIO_BUCKET_HLS:vod-hls}
 
+upload:
+  raw-bucket: ${MINIO_BUCKET_RAW:vod-raw}
+  allowed-mime-types: ${ALLOWED_VIDEO_MIME_TYPES:video/mp4,video/x-matroska,video/webm,video/quicktime}
+
 encoding:
+  relay:
+    interval-seconds: ${ENCODING_RELAY_INTERVAL_SECONDS:10}
   queue:
     name: ${RABBITMQ_ENCODING_QUEUE:video-encoding-queue}
     publish-confirm-timeout-ms: ${ENCODING_PUBLISH_CONFIRM_TIMEOUT_MS:5000}

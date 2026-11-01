@@ -49,6 +49,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * with ENCODING_TEST_POSTGRES_URL; CI also sets ENCODING_TEST_POSTGRES_REQUIRED=true so a missing
  * URL fails rather than silently skipping. Credentials are separate from the URL. Only this
  * class's random movie fixtures (and their cascading assets/jobs) are removed afterwards.
+ * The URL must target the exact loopback database vod_upload_test; no URL parameters are allowed.
  */
 @DataJpaTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @ContextConfiguration(classes = {EncodingConfiguration.class, CatalogConfiguration.class,
@@ -90,12 +91,17 @@ class VideoAssetPostgresTest {
     @DynamicPropertySource
     static void postgres(DynamicPropertyRegistry registry) {
         String url = url();
-        if (url == null || !url.startsWith("jdbc:postgresql:")) {
-            throw new IllegalStateException("A disposable PostgreSQL URL is required for encoding tests");
-        }
+        requireDisposableUrl(url);
         registry.add("spring.datasource.url", () -> url);
         registry.add("spring.datasource.username", () -> fixtureSetting("USER"));
         registry.add("spring.datasource.password", () -> fixtureSetting("PASSWORD"));
+    }
+
+    static void requireDisposableUrl(String url) {
+        if (url == null || !url.matches(
+                "jdbc:postgresql://(localhost|127\\.0\\.0\\.1):[0-9]+/vod_upload_test")) {
+            throw new IllegalStateException("Exact disposable loopback database vod_upload_test is required");
+        }
     }
 
     private static String fixtureSetting(String name) {
