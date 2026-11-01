@@ -26,6 +26,7 @@ import com.vodplatform.catalog.exception.MovieNotFoundException;
 import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.exception.UploadDatabaseException;
 import com.vodplatform.encoding.exception.VideoUploadInProgressException;
+import com.vodplatform.encoding.messaging.EncodingJobMessage;
 import com.vodplatform.encoding.service.EncodingJobService;
 import com.vodplatform.shared.error.ApiException;
 import com.vodplatform.shared.error.ApiFieldError;
@@ -36,8 +37,11 @@ import jakarta.servlet.MultipartConfigElement;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockMultipartFile;
@@ -53,6 +57,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 class VideoUploadServiceTest {
 
@@ -141,7 +146,7 @@ class VideoUploadServiceTest {
     }
 
     @Test
-    void oversizeWithValidSignatureIsRejectedBeforeFamilyInspection() {
+    void oversizeFileWithValidSignatureReturnsPayloadTooLarge() {
         byte[] body = Arrays.copyOf(iso, 101);
         assertInvalid(
                 service,
@@ -285,43 +290,58 @@ class VideoUploadServiceTest {
         }
     }
 
+    static Stream<Arguments> requestIds() {
+        return Stream.of(
+                Arguments.of("request-id_123", true),
+                Arguments.of("a".repeat(63) + ".", true),
+                Arguments.of("a".repeat(64), true),
+                Arguments.of("a".repeat(65), false),
+                Arguments.of("bad\ninjected", false),
+                Arguments.of("bad space", false),
+                Arguments.of("bad/slash", false),
+                Arguments.of("", false));
+    }
+
     @ParameterizedTest
-    @ValueSource(
-            strings = {
-                "request-id_123",
-                "bad\ninjected",
-                "bad space",
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            })
-    void rawStoredAndAcceptedLogsSanitizeRequestId(String requestId) {
+    @MethodSource("requestIds")
+    void rawStoredAndAcceptedLogsContainOnlyIdsAndSanitizedRequestId(
+            String requestId, boolean accepted) {
         Logger logger = (Logger) LoggerFactory.getLogger(VideoUploadService.class);
         ListAppender<ILoggingEvent> capture = new ListAppender<>();
         capture.start();
         logger.addAppender(capture);
         try {
-            service.upload(movie, file("video/mp4", iso), Optional.of(requestId));
+            var result = service.upload(movie, file("video/mp4", iso), Optional.of(requestId));
+            var message = ArgumentCaptor.forClass(EncodingJobMessage.class);
+            verify(jobs)
+                    .publish(
+                            message.capture(),
+                            eq(accepted ? Optional.of(requestId) : Optional.empty()));
+            assertThat(message.getValue().videoAssetId()).isEqualTo(result.videoAssetId());
+            String ids =
+                    " movieId="
+                            + movie
+                            + " videoAssetId="
+                            + result.videoAssetId()
+                            + " encodingJobId="
+                            + message.getValue().encodingJobId()
+                            + " requestId="
+                            + (accepted ? requestId : "null");
             assertThat(capture.list).hasSize(2);
             assertThat(capture.list.getFirst().getFormattedMessage())
-                    .startsWith("raw object stored ");
-            assertThat(capture.list.getLast().getFormattedMessage()).startsWith("upload accepted ");
+                    .isEqualTo("raw object stored" + ids);
+            assertThat(capture.list.getLast().getFormattedMessage())
+                    .isEqualTo("upload accepted" + ids);
             capture.list.forEach(
                     event -> {
                         assertThat(event.getLevel()).isEqualTo(Level.INFO);
                         assertThat(event.getFormattedMessage())
-                                .endsWith(
-                                        "requestId="
-                                                + (requestId.equals("request-id_123")
-                                                        ? requestId
-                                                        : "null"));
+                                .doesNotContain(
+                                        "vod-raw",
+                                        "secret-do-not-use.txt",
+                                        movie + "/" + result.videoAssetId() + ".mp4");
                         assertThat(event.getThrowableProxy()).isNull();
                     });
-            verify(jobs)
-                    .publish(
-                            any(),
-                            eq(
-                                    requestId.equals("request-id_123")
-                                            ? Optional.of(requestId)
-                                            : Optional.empty()));
         } finally {
             logger.detachAppender(capture);
             capture.stop();

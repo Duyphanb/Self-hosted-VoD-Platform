@@ -46,6 +46,11 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.sql.DataSource;
 
+/**
+ * Uses only a freshly migrated disposable vod_upload_test database. Reusing it with leftover
+ * pending jobs deliberately fails relay fixture-ownership checks before the relay can touch other
+ * jobs.
+ */
 @SpringBootTest(
         properties = {
             "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
@@ -255,7 +260,8 @@ class UploadPostgresTests extends UploadTransactionTests {
                                         connection.prepareStatement(
                                                 "insert into video_assets"
                                                     + " (id,movie_id,raw_bucket,raw_object_key,status,"
-                                                    + "created_at,updated_at) values"
+                                                    + "created_at,updated_at)"
+                                                    + " values"
                                                     + " (?,?,'vod-raw','fixture-held','QUEUED',now(),now())")) {
                                     statement.setObject(1, heldAsset);
                                     statement.setObject(2, movie);

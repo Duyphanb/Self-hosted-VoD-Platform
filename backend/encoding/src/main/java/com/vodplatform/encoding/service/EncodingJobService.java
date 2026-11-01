@@ -12,6 +12,7 @@ import com.vodplatform.encoding.persistence.EncodingJob;
 import com.vodplatform.encoding.persistence.EncodingJobRepository;
 import com.vodplatform.encoding.persistence.VideoAsset;
 import com.vodplatform.encoding.persistence.VideoAssetRepository;
+import com.vodplatform.shared.error.ApiException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,7 +81,7 @@ public class EncodingJobService {
                             throw new VideoUploadInProgressException();
                         }
                     });
-        } catch (com.vodplatform.shared.error.ApiException business) {
+        } catch (ApiException business) {
             throw business;
         } catch (RuntimeException failure) {
             throw new UploadDatabaseException();
@@ -142,7 +143,7 @@ public class EncodingJobService {
                     failure, EncodingConstraints.VIDEO_ASSETS_MOVIE_IN_FLIGHT)) {
                 throw new VideoUploadInProgressException();
             }
-            if (failure instanceof com.vodplatform.shared.error.ApiException business) {
+            if (failure instanceof ApiException business) {
                 throw business;
             }
             throw new UploadDatabaseException();

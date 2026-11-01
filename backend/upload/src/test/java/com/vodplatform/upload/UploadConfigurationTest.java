@@ -43,12 +43,26 @@ class UploadConfigurationTest {
         switch (rule) {
             case "unequal" -> properties.setMaxRequestSize(DataSize.ofMegabytes(2049));
             case "threshold" -> properties.setFileSizeThreshold(DataSize.ofBytes(1));
-            case "zero" -> properties.setMaxFileSize(DataSize.ofBytes(0));
-            case "negative" -> properties.setMaxFileSize(DataSize.ofBytes(-1));
+            case "zero" -> {
+                properties.setMaxFileSize(DataSize.ofBytes(0));
+                properties.setMaxRequestSize(DataSize.ofBytes(0));
+            }
+            case "negative" -> {
+                properties.setMaxFileSize(DataSize.ofBytes(-1));
+                properties.setMaxRequestSize(DataSize.ofBytes(-1));
+            }
             default -> throw new AssertionError(rule);
         }
         assertThatThrownBy(() -> new UploadConfiguration().multipartConfigElement(properties))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        switch (rule) {
+                            case "zero", "negative" -> "Multipart file size must be positive";
+                            case "unequal" -> "Multipart file and request limits must be equal";
+                            case "threshold" ->
+                                    "Multipart threshold must be zero for disk spooling";
+                            default -> throw new AssertionError(rule);
+                        });
         assertThat(Path.of(properties.getLocation())).doesNotExist();
     }
 
