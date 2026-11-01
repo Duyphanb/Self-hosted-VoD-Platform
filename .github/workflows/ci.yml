@@ -224,7 +224,7 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: vod
+          POSTGRES_DB: vod_upload_test
           POSTGRES_USER: vod
           POSTGRES_PASSWORD: vod
           # Same cluster collation as deploy/docker-compose.yml (ADR-009).
@@ -232,7 +232,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U vod -d vod"
+          --health-cmd "pg_isready -U vod -d vod_upload_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
@@ -248,7 +248,7 @@ jobs:
           docker run --rm --network host
           -v "${{ github.workspace }}/backend/common/src/main/resources/db/migration:/flyway/sql:ro"
           flyway/flyway:12.10.0
-          -url=jdbc:postgresql://localhost:5432/vod
+          -url=jdbc:postgresql://localhost:5432/vod_upload_test
           -user=vod
           -password=vod
           -connectRetries=60
@@ -257,7 +257,7 @@ jobs:
       - name: Verify ERD schema counts
         run: |
           query() {
-            docker run --rm --network host -e PGPASSWORD=vod postgres:16-alpine psql -h localhost -U vod -d vod -Atc "$1"
+            docker run --rm --network host -e PGPASSWORD=vod postgres:16-alpine psql -h localhost -U vod -d vod_upload_test -Atc "$1"
           }
           test "$(query "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> 'flyway_schema_history';")" = "15"
           test "$(query "SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname ~ '^(ux|ix)_';")" = "32"
@@ -282,7 +282,7 @@ jobs:
       - name: Verify video asset persistence against required PostgreSQL
         working-directory: backend
         env:
-          ENCODING_TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/vod
+          ENCODING_TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/vod_upload_test
           ENCODING_TEST_POSTGRES_USER: vod
           ENCODING_TEST_POSTGRES_PASSWORD: vod
           ENCODING_TEST_POSTGRES_REQUIRED: "true"
