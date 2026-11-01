@@ -1,0 +1,642 @@
+{
+  "info": {
+    "_postman_id": "7c2e4a19-3f5d-4b6e-9a8c-1d2e3f4a5b6c",
+    "name": "VoD Platform - Sprint 4 Upload",
+    "description": "Sprint 4 admin upload checks through Nginx: 401/403 before parsing, 400 unsupported type, 404 missing movie, 409 in-flight asset, backend 413 ApiError and 202 QUEUED, each error with a requestId. Needs adminEmail/adminPassword (an administrator promoted with the documented SQL), uploadMovieId/inFlightMovieId and the files from deploy/tests/newman-upload-fixtures.py (run Newman with --working-dir pointing at them) and a backend started with MAX_UPLOAD_SIZE_MB=1.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 - Sign in as the administrator",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const suffix = Date.now().toString(36) + pm.variables.replaceIn('{{$randomInt}}');",
+              "pm.environment.set('testEmail', 'newman-upload-' + suffix + '@example.com');",
+              "pm.environment.set('missingMovieId', pm.variables.replaceIn('{{$guid}}'));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('Administrator session includes ROLE_ADMIN', () => {",
+              "  pm.expect(body.user.roles).to.include('ROLE_ADMIN');",
+              "});",
+              "pm.environment.set('adminAccessToken', body.accessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "login"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "02 - Register a regular user",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 201', () => {",
+              "  pm.response.to.have.status(201);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/register",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "register"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"displayName\": \"Newman Upload Viewer\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "03 - Sign in as the regular user",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "pm.environment.set('accessToken', pm.response.json().accessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "login"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "04 - Reject an anonymous upload before parsing",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 401', () => {",
+              "  pm.response.to.have.status(401);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('ApiError UNAUTHORIZED with a safe requestId', () => {",
+              "  pm.expect(body.status).to.equal(401);",
+              "  pm.expect(body.code).to.equal('UNAUTHORIZED');",
+              "  pm.expect(body.timestamp).to.be.a('string');",
+              "  pm.expect(body.message).to.be.a('string');",
+              "  pm.expect(body.requestId).to.match(/^[A-Za-z0-9._-]{1,64}$/);",
+              "});",
+              "pm.test('No storage internals in the body', () => {",
+              "  pm.expect(pm.response.text()).to.not.include('vod-raw');",
+              "  pm.expect(pm.response.text()).to.not.include('Exception');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "admin",
+            "movies",
+            "{{uploadMovieId}}",
+            "video"
+          ]
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "valid.mp4",
+              "contentType": "video/mp4"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "05 - Reject an upload by a regular user",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 403', () => {",
+              "  pm.response.to.have.status(403);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('ApiError FORBIDDEN with a safe requestId', () => {",
+              "  pm.expect(body.status).to.equal(403);",
+              "  pm.expect(body.code).to.equal('FORBIDDEN');",
+              "  pm.expect(body.timestamp).to.be.a('string');",
+              "  pm.expect(body.message).to.be.a('string');",
+              "  pm.expect(body.requestId).to.match(/^[A-Za-z0-9._-]{1,64}$/);",
+              "});",
+              "pm.test('No storage internals in the body', () => {",
+              "  pm.expect(pm.response.text()).to.not.include('vod-raw');",
+              "  pm.expect(pm.response.text()).to.not.include('Exception');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{accessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "admin",
+            "movies",
+            "{{uploadMovieId}}",
+            "video"
+          ]
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "valid.mp4",
+              "contentType": "video/mp4"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "06 - Reject an unsupported file type",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 400', () => {",
+              "  pm.response.to.have.status(400);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('ApiError UNSUPPORTED_VIDEO_TYPE with a safe requestId', () => {",
+              "  pm.expect(body.status).to.equal(400);",
+              "  pm.expect(body.code).to.equal('UNSUPPORTED_VIDEO_TYPE');",
+              "  pm.expect(body.timestamp).to.be.a('string');",
+              "  pm.expect(body.message).to.be.a('string');",
+              "  pm.expect(body.requestId).to.match(/^[A-Za-z0-9._-]{1,64}$/);",
+              "});",
+              "pm.test('No storage internals in the body', () => {",
+              "  pm.expect(pm.response.text()).to.not.include('vod-raw');",
+              "  pm.expect(pm.response.text()).to.not.include('Exception');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "admin",
+            "movies",
+            "{{uploadMovieId}}",
+            "video"
+          ]
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "note.txt",
+              "contentType": "text/plain"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "07 - Reject an upload for a missing movie",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 404', () => {",
+              "  pm.response.to.have.status(404);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('ApiError MOVIE_NOT_FOUND with a safe requestId', () => {",
+              "  pm.expect(body.status).to.equal(404);",
+              "  pm.expect(body.code).to.equal('MOVIE_NOT_FOUND');",
+              "  pm.expect(body.timestamp).to.be.a('string');",
+              "  pm.expect(body.message).to.be.a('string');",
+              "  pm.expect(body.requestId).to.match(/^[A-Za-z0-9._-]{1,64}$/);",
+              "});",
+              "pm.test('No storage internals in the body', () => {",
+              "  pm.expect(pm.response.text()).to.not.include('vod-raw');",
+              "  pm.expect(pm.response.text()).to.not.include('Exception');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/movies/{{missingMovieId}}/video",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "admin",
+            "movies",
+            "{{missingMovieId}}",
+            "video"
+          ]
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "valid.mp4",
+              "contentType": "video/mp4"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "08 - Reject an upload while another is in flight",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 409', () => {",
+              "  pm.response.to.have.status(409);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('ApiError VIDEO_UPLOAD_IN_PROGRESS with a safe requestId', () => {",
+              "  pm.expect(body.status).to.equal(409);",
+              "  pm.expect(body.code).to.equal('VIDEO_UPLOAD_IN_PROGRESS');",
+              "  pm.expect(body.timestamp).to.be.a('string');",
+              "  pm.expect(body.message).to.be.a('string');",
+              "  pm.expect(body.requestId).to.match(/^[A-Za-z0-9._-]{1,64}$/);",
+              "});",
+              "pm.test('No storage internals in the body', () => {",
+              "  pm.expect(pm.response.text()).to.not.include('vod-raw');",
+              "  pm.expect(pm.response.text()).to.not.include('Exception');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/movies/{{inFlightMovieId}}/video",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "admin",
+            "movies",
+            "{{inFlightMovieId}}",
+            "video"
+          ]
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "valid.mp4",
+              "contentType": "video/mp4"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "09 - Reject an oversized upload with ApiError through the edge",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 413', () => {",
+              "  pm.response.to.have.status(413);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('ApiError PAYLOAD_TOO_LARGE with a safe requestId', () => {",
+              "  pm.expect(body.status).to.equal(413);",
+              "  pm.expect(body.code).to.equal('PAYLOAD_TOO_LARGE');",
+              "  pm.expect(body.timestamp).to.be.a('string');",
+              "  pm.expect(body.message).to.be.a('string');",
+              "  pm.expect(body.requestId).to.match(/^[A-Za-z0-9._-]{1,64}$/);",
+              "});",
+              "pm.test('No storage internals in the body', () => {",
+              "  pm.expect(pm.response.text()).to.not.include('vod-raw');",
+              "  pm.expect(pm.response.text()).to.not.include('Exception');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "admin",
+            "movies",
+            "{{uploadMovieId}}",
+            "video"
+          ]
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "oversize.mp4",
+              "contentType": "video/mp4"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "10 - Accept a valid upload as QUEUED",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 202', () => {",
+              "  pm.response.to.have.status(202);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('Accepted asset is QUEUED without internal keys', () => {",
+              "  pm.expect(body.status).to.equal('QUEUED');",
+              "  pm.expect(body.videoAssetId).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);",
+              "  pm.expect(body).to.not.have.property('requestId');",
+              "  pm.expect(pm.response.text()).to.not.include('vod-raw');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{adminAccessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "admin",
+            "movies",
+            "{{uploadMovieId}}",
+            "video"
+          ]
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "valid.mp4",
+              "contentType": "video/mp4"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

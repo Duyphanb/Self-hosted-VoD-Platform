@@ -114,11 +114,14 @@ jobs:
       - name: Verify RabbitMQ publisher on a disposable broker
         run: python3 deploy/tests/rabbitmq-publisher-smoke.py --project "${COMPOSE_PROJECT_NAME}-amqp"
 
-      - name: Verify auth and catalog against PostgreSQL and Nginx
+      - name: Verify auth, catalog and upload against PostgreSQL and Nginx
         env:
           GH_TOKEN: ${{ github.token }}
           NGINX_HTTP_PORT: 127.0.0.1:18087
           CORS_ALLOWED_ORIGINS: http://localhost:18087
+          # This step only: a 1 MiB backend limit lets the upload collection prove the backend 413
+          # ApiError through the edge with a small generated file. Other suites send no multipart.
+          MAX_UPLOAD_SIZE_MB: "1"
         run: |
           cleanup() { docker compose --env-file /dev/null -f deploy/docker-compose.yml down --volumes --remove-orphans; }
           trap cleanup EXIT
@@ -160,6 +163,19 @@ jobs:
             echo "PASS Newman Sprint 3 catalog collection"
           else
             echo "FAIL Newman Sprint 3 catalog collection (response details withheld)"
+            exit 1
+          fi
+          # The upload collection reuses the same administrator. Its files are generated at runtime and
+          # its two movies are seeded (one with an in-flight asset for the 409), so no worker timing
+          # is involved. The accepted upload streams to the stack's private raw bucket.
+          UPLOAD_FIXTURES_DIR="$RUNNER_TEMP/newman-upload"
+          UPLOAD_FIXTURES="$(python3 deploy/tests/newman-upload-fixtures.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087 --fixtures-dir "$UPLOAD_FIXTURES_DIR")"
+          UPLOAD_MOVIE_ID="$(printf '%s\n' "$UPLOAD_FIXTURES" | sed -n 's/^uploadMovieId=//p')"
+          IN_FLIGHT_MOVIE_ID="$(printf '%s\n' "$UPLOAD_FIXTURES" | sed -n 's/^inFlightMovieId=//p')"
+          if npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-4-upload.postman_collection.json -e docs/testing/postman/vod-platform-local.postman_environment.json --working-dir "$UPLOAD_FIXTURES_DIR" --env-var baseUrl=http://127.0.0.1:18087 --env-var "adminEmail=$NEWMAN_ADMIN_EMAIL" --env-var "adminPassword=$NEWMAN_ADMIN_PASSWORD" --env-var "uploadMovieId=$UPLOAD_MOVIE_ID" --env-var "inFlightMovieId=$IN_FLIGHT_MOVIE_ID" --silent; then
+            echo "PASS Newman Sprint 4 upload collection"
+          else
+            echo "FAIL Newman Sprint 4 upload collection (response details withheld)"
             exit 1
           fi
 
@@ -286,14 +302,15 @@ jobs:
           ENCODING_TEST_POSTGRES_USER: vod
           ENCODING_TEST_POSTGRES_PASSWORD: vod
           ENCODING_TEST_POSTGRES_REQUIRED: "true"
-        run: mvn -B -ntp -pl common -am -Dtest=VideoAssetPostgresTest,UploadPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test
+        run: mvn -B -ntp -pl common -am -Dtest=VideoAssetPostgresTest,UploadPostgresTests,UploadEndpointPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test
 
       - name: Require executed PostgreSQL test evidence
         run: |
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           paths = ['backend/encoding/target/surefire-reports/TEST-com.vodplatform.encoding.persistence.VideoAssetPostgresTest.xml',
-                   'backend/common/target/surefire-reports/TEST-com.vodplatform.common.UploadPostgresTests.xml']
+                   'backend/common/target/surefire-reports/TEST-com.vodplatform.common.UploadPostgresTests.xml',
+                   'backend/common/target/surefire-reports/TEST-com.vodplatform.common.UploadEndpointPostgresTests.xml']
           for path in paths:
               report = ET.parse(path).getroot()
               assert int(report.attrib['tests']) > 0, 'PostgreSQL suite must execute tests'

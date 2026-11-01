@@ -1,6 +1,9 @@
 package com.vodplatform.upload.exception;
 
-/** Safe service failure; 4.6 owns its HTTP mapping. */
+/**
+ * Raw storage or spool I/O failed before commit, so the upload was not accepted. The upload
+ * endpoint maps it to 503 {@code UPLOAD_STORAGE_UNAVAILABLE}.
+ */
 public final class UploadStorageException extends RuntimeException {
     public UploadStorageException() {
         super("Upload storage operation failed");

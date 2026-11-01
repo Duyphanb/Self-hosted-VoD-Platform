@@ -22,28 +22,42 @@ sequenceDiagram
     Backend->>Backend: Validate JWT and ROLE_ADMIN before multipart parsing
     Backend->>Backend: Spool to dedicated temp disk, validate size, MIME and signature family
     Backend->>PostgreSQL: Check movie and in-flight asset (early advisory check)
+    Note over Backend,PostgreSQL: Spool I/O failure returns 503 UPLOAD_STORAGE_UNAVAILABLE and a precheck DB failure 500 UPLOAD_DATABASE_ERROR, both before any PUT
     Backend->>MinIO: PUT raw at movieId/videoAssetId.ext with known size
-    Backend->>PostgreSQL: BEGIN, serialize per movie, assign asset created_at now, INSERT asset QUEUED and job attempt 1, published_at NULL
-    alt one-in-flight index or DB transaction fails
-        Backend->>PostgreSQL: ROLLBACK, or read back uncertain commit before compensation
+    alt raw PUT fails
         Backend->>MinIO: Best-effort delete this request's raw key
-        Backend-->>Frontend: 409 VIDEO_UPLOAD_IN_PROGRESS for index loser, or safe DB error
-    else transaction succeeds
-        Backend->>PostgreSQL: COMMIT asset and job before any publish
-        Backend->>RabbitMQ: Persistent version-1 IDs-only JSON, mandatory, correlated confirm
-        alt confirmed and not returned
-            Backend->>PostgreSQL: Set published_at only if NULL (never reset status)
-        else failed, returned or confirm timeout
-            Note over Backend,PostgreSQL: Keep committed QUEUED, raw retained, relay will publish
+        Backend-->>Frontend: 503 UPLOAD_STORAGE_UNAVAILABLE, upload not accepted
+    else raw stored
+        Backend->>PostgreSQL: BEGIN, serialize per movie, assign asset created_at now, INSERT asset QUEUED and job attempt 1, published_at NULL, COMMIT
+        alt one-in-flight index loser or in-flight asset found under the movie lock
+            Backend->>PostgreSQL: ROLLBACK
+            Backend->>MinIO: Best-effort delete this request's raw key
+            Backend-->>Frontend: 409 VIDEO_UPLOAD_IN_PROGRESS
+        else DB failure before COMMIT, or readback after a failed COMMIT finds neither row
+            Backend->>PostgreSQL: ROLLBACK, or read back asset and job by generated IDs under the movie lock
+            Backend->>MinIO: Best-effort delete this request's raw key
+            Backend-->>Frontend: 500 UPLOAD_DATABASE_ERROR, upload not accepted
+        else readback after a failed COMMIT cannot confirm the outcome
+            Backend->>PostgreSQL: Read back asset and job by generated IDs under the movie lock
+            Note over Backend,MinIO: Raw retained, no compensating delete
+            Backend-->>Frontend: 500 UPLOAD_OUTCOME_UNKNOWN, never resubmit automatically
+        else COMMIT succeeds, or readback confirms both rows
+            Note over Backend,PostgreSQL: Asset and job committed before any publish
+            Backend->>RabbitMQ: Persistent version-1 IDs-only JSON, mandatory, correlated confirm
+            alt confirmed and not returned
+                Backend->>PostgreSQL: Set published_at only if NULL (never reset status)
+            else failed, returned or confirm timeout
+                Note over Backend,PostgreSQL: Keep committed QUEUED, raw retained, relay will publish
+            end
+            Backend-->>Nginx: 202 Accepted with videoAssetId and QUEUED status
+            Nginx-->>Frontend: 202 Accepted
+            Frontend-->>Admin: Show queued processing status
         end
-        Backend-->>Nginx: 202 Accepted with videoAssetId and QUEUED status
-        Nginx-->>Frontend: 202 Accepted
-        Frontend-->>Admin: Show queued processing status
     end
     Backend->>Backend: Release request multipart temp file
 ```
 
-The SPA pre-check GET uses the existing auth refresh path, validates file size/type, and shows XHR progress. At 100% it shows “Saving to storage…” without Cancel; no automatic body replay after 401. `202` is the committed acceptance snapshot; a fast worker may already have advanced the DB status. Keep raw while a commit outcome is unknown; compensate only after establishing the transaction did not commit. UPLOADED is reserved. Edge/body-limit details are in [INFRASTRUCTURE.md](INFRASTRUCTURE.md#upload-transport).
+The SPA pre-check GET uses the existing auth refresh path, validates file size/type, and shows XHR progress. At 100% it shows “Saving to storage…” without Cancel; no automatic body replay after 401. `202` is the committed acceptance snapshot; a fast worker may already have advanced the DB status. Keep raw while a commit outcome is unknown (`UPLOAD_OUTCOME_UNKNOWN`); compensate only after a failed raw PUT or after establishing the transaction did not commit. Upload error bodies are `ApiError` with `requestId`. UPLOADED is reserved. Edge/body-limit details are in [INFRASTRUCTURE.md](INFRASTRUCTURE.md#upload-transport).
 
 ### Unpublished-job relay
 

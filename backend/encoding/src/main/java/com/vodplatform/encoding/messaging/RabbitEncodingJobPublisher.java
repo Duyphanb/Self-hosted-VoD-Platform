@@ -1,6 +1,7 @@
 package com.vodplatform.encoding.messaging;
 
 import com.vodplatform.encoding.config.EncodingQueueProperties;
+import com.vodplatform.shared.web.RequestIds;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
@@ -8,7 +9,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.AmqpConnectException;
@@ -31,7 +31,6 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
  */
 public final class RabbitEncodingJobPublisher implements EncodingJobPublisher {
     private static final Logger log = LoggerFactory.getLogger(RabbitEncodingJobPublisher.class);
-    private static final Pattern REQUEST_ID = Pattern.compile("[A-Za-z0-9._-]{1,64}");
     private final RabbitTemplate template;
     private final EncodingJobMessageCodec codec;
     private final EncodingQueueProperties properties;
@@ -50,7 +49,7 @@ public final class RabbitEncodingJobPublisher implements EncodingJobPublisher {
     public PublishOutcome publish(EncodingJobMessage message, Optional<String> requestId) {
         Objects.requireNonNull(message, "message");
         String safeRequestId = Objects.requireNonNull(requestId, "requestId")
-                .filter(value -> REQUEST_ID.matcher(value).matches()).orElse(null);
+                .flatMap(RequestIds::sanitize).orElse(null);
         PublishOutcome outcome;
         String exceptionClass = "none";
         try {

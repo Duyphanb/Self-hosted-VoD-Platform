@@ -7,13 +7,22 @@ import org.springframework.http.HttpStatus;
 
 import java.util.List;
 
-/** Typed upload validation failure; contains no rejected input. */
+/** Typed upload validation failure on field {@code file}; contains no rejected input. */
 public final class UploadValidationException extends ApiException {
+
+    public static final String EMPTY = "must not be empty";
+
+    public static final String EXACTLY_ONE_PART = "must be the only part";
+
     public UploadValidationException() {
+        this(EMPTY);
+    }
+
+    public UploadValidationException(String fieldMessage) {
         super(
                 HttpStatus.BAD_REQUEST,
                 "VALIDATION_ERROR",
                 "Request validation failed",
-                List.of(new ApiFieldError("file", "must not be empty")));
+                List.of(new ApiFieldError("file", fieldMessage)));
     }
 }

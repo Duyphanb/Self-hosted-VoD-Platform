@@ -1,5 +1,9 @@
 server:
   port: ${SERVER_PORT:8080}
+  tomcat:
+    # Idle budget between body reads, aligned with Nginx's 60s client-body/send/proxy-send
+    # defaults (INFRASTRUCTURE upload transport). Not a total deadline for a large upload.
+    connection-timeout: 60s
 
 spring:
   servlet:
