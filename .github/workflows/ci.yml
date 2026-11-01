@@ -286,14 +286,17 @@ jobs:
           ENCODING_TEST_POSTGRES_USER: vod
           ENCODING_TEST_POSTGRES_PASSWORD: vod
           ENCODING_TEST_POSTGRES_REQUIRED: "true"
-        run: mvn -B -ntp -pl encoding -am -Dtest=VideoAssetPostgresTest -Dsurefire.failIfNoSpecifiedTests=false test
+        run: mvn -B -ntp -pl common -am -Dtest=VideoAssetPostgresTest,UploadPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test
 
       - name: Require executed PostgreSQL test evidence
         run: |
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
-          report = ET.parse('backend/encoding/target/surefire-reports/TEST-com.vodplatform.encoding.persistence.VideoAssetPostgresTest.xml').getroot()
-          assert int(report.attrib['tests']) > 0, 'PostgreSQL suite must execute tests'
-          for key in ('skipped', 'failures', 'errors'):
-              assert int(report.attrib[key]) == 0, f'PostgreSQL suite has {key}'
+          paths = ['backend/encoding/target/surefire-reports/TEST-com.vodplatform.encoding.persistence.VideoAssetPostgresTest.xml',
+                   'backend/common/target/surefire-reports/TEST-com.vodplatform.common.UploadPostgresTests.xml']
+          for path in paths:
+              report = ET.parse(path).getroot()
+              assert int(report.attrib['tests']) > 0, 'PostgreSQL suite must execute tests'
+              for key in ('skipped', 'failures', 'errors'):
+                  assert int(report.attrib[key]) == 0, f'PostgreSQL suite has {key}'
           PY
