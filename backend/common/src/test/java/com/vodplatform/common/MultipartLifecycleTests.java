@@ -386,7 +386,8 @@ class MultipartLifecycleTests {
     }
 
     @Test
-    void malformedChunkedBodyIsAClientErrorNotStorage() throws Exception {
+    void malformedChunkedBodyIsAContractClientErrorNotStorage() throws Exception {
+        String response;
         try (var socket = new Socket("127.0.0.1", port)) {
             socket.setSoTimeout(5000);
             socket.getOutputStream()
@@ -394,6 +395,7 @@ class MultipartLifecycleTests {
                             ("POST "
                                             + UPLOAD
                                             + " HTTP/1.1\r\nHost: localhost\r\n"
+                                            + "X-Request-ID: upload.chunk_1\r\n"
                                             + "Authorization: "
                                             + bearer("ROLE_ADMIN")
                                             + "\r\nContent-Type: "
@@ -405,11 +407,26 @@ class MultipartLifecycleTests {
                                             + "\r\nzz\r\n")
                                     .getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
-            String response =
-                    new String(socket.getInputStream().readAllBytes(), StandardCharsets.US_ASCII);
-            assertThat(response.lines().findFirst())
-                    .hasValueSatisfying(status -> assertThat(status).startsWith("HTTP/1.1 400"));
+            response = new String(socket.getInputStream().readAllBytes(), StandardCharsets.US_ASCII);
         }
+        // Tomcat answers the read failure itself (sendError(400), then the error page); the
+        // correlated error attributes keep the operation's ApiError and requestId there.
+        assertThat(response.lines().findFirst())
+                .hasValueSatisfying(status -> assertThat(status).startsWith("HTTP/1.1 400"));
+        String json = response.substring(response.indexOf('{'), response.lastIndexOf('}') + 1);
+        assertThat(
+                        ApiContract.get()
+                                .violations(
+                                        "POST",
+                                        UPLOAD,
+                                        400,
+                                        "application/json",
+                                        json.getBytes(StandardCharsets.UTF_8)))
+                .isEmpty();
+        JsonNode error = mapper.readTree(json);
+        assertThat(error.get("code").asString()).isEqualTo("MALFORMED_REQUEST");
+        assertThat(error.get("requestId").asString()).isEqualTo("upload.chunk_1");
+        assertThat(error.has("path")).isFalse();
         verifyNoInteractions(storage);
         assertEmpty();
     }
