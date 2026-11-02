@@ -57,8 +57,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * HTTP-level race on the disposable vod_upload_test PostgreSQL database (same guard as
  * {@link UploadPostgresTests}): two parallel uploads for one movie both pass the advisory pre-check
- * and store raw media; the V5 index admits one pair. The winner gets 202, the loser a contract 409
- * with its requestId, and only the loser's raw key is deleted. Storage and the broker are mocked.
+ * and store raw media; the per-movie lock and in-lock recheck then admit one pair (the V5 index
+ * translation itself is covered by {@link UploadPostgresTests}). The winner gets 202, the loser a
+ * contract 409 with its requestId, and only the loser's raw key is deleted. Storage and the broker
+ * are mocked.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,

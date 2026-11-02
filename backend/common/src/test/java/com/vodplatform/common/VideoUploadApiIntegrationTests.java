@@ -258,6 +258,7 @@ class VideoUploadApiIntegrationTests {
                 upload(movie("DRAFT"), "video/mp4", null)
                         .andExpect(status().isInternalServerError())
                         .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                        .andExpect(jsonPath("$.requestId").isString())
                         .andReturn()
                         .getResponse()
                         .getContentAsString();

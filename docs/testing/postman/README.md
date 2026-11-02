@@ -21,7 +21,7 @@ If `NGINX_HTTP_PORT` uses a host port other than `80`, change `baseUrl` in the i
 
 ## Run in Postman
 
-1. Import both JSON files.
+1. Import the collection you want to run and the environment file.
 2. Select **VoD Platform - Local** as the active environment.
 3. Run the complete **VoD Platform - Sprint 2 Auth** collection in its numbered order.
 4. Confirm that every request and test passes.
@@ -113,12 +113,14 @@ CI runs this collection in the full-stack step, after the Sprint 3 catalog colle
 
 - `testPassword` is a synthetic local-only value, not a real credential.
 - The collection generates a new synthetic email on every ordered run.
-- Synthetic users remain in the local PostgreSQL volume after a run.
+- Synthetic users remain in the local PostgreSQL volume after a run. The Sprint 3 collection leaves its catalog fixtures, and the Sprint 4 upload collection leaves two seeded movies, an in-flight QUEUED asset/job pair and a raw object; run them only against a disposable project.
 - Access and refresh token variables start empty and are marked as secrets.
 - Do not export or commit an environment after it has captured live tokens.
 - Do not point this collection at a shared or production deployment without an explicit test-data and cleanup plan.
 
 ## Contract Notes
+
+The notes below concern the Sprint 2 auth collection.
 
 The frozen OpenAPI contract lists logout as unauthenticated with an optional body and documents `204`, `400` and `401`. Sprint 2 Issue 2.4 and the current implementation are more specific: logout is public and idempotently returns `204` whether the submitted token is active, revoked, unknown, or omitted. This collection verifies the implemented Sprint 2 behavior without changing the frozen architecture documents.
 
@@ -126,4 +128,4 @@ The `ApiError.code` checks are implementation regression evidence. The frozen sc
 
 The contract now also declares the validation `400` responses (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) that login, refresh and logout already returned through the existing request-validation layer (Issue #120). The runtime behavior did not change. The backend full-context tests validate these responses against `API-CONTRACT.yaml`; this collection does not exercise them.
 
-No test-only RBAC probe is included. Production admin business endpoints belong to later sprints, and frontend route guards are not a backend authorization boundary.
+The Sprint 2 collection includes no test-only RBAC probe; the admin catalog and upload authorization checks live in the Sprint 3 and Sprint 4 collections. Frontend route guards are not a backend authorization boundary.

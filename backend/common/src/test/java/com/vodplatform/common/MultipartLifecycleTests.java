@@ -85,8 +85,8 @@ import java.util.stream.Stream;
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
             "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
-            "spring.servlet.multipart.max-file-size=1KB",
-            "spring.servlet.multipart.max-request-size=1KB"
+            "spring.servlet.multipart.max-file-size=8KB",
+            "spring.servlet.multipart.max-request-size=8KB"
         })
 @Import(MultipartLifecycleTests.Endpoint.class)
 class MultipartLifecycleTests {
@@ -301,7 +301,7 @@ class MultipartLifecycleTests {
         var error =
                 contractError(
                         UPLOAD,
-                        upload(UPLOAD, "upload.too_large_1", body(2000)),
+                        upload(UPLOAD, "upload.too_large_1", body(9000)),
                         413,
                         "PAYLOAD_TOO_LARGE");
         assertThat(error.get("requestId").asString()).isEqualTo("upload.too_large_1");
@@ -347,6 +347,70 @@ class MultipartLifecycleTests {
                         400,
                         "MALFORMED_REQUEST");
         assertThat(error.get("requestId").asString()).isEqualTo("upload.malformed_1");
+        assertEmpty();
+    }
+
+    @Test
+    void tooManyPartsIsPayloadTooLargeBeforeAnythingIsStored() throws Exception {
+        StringBuilder parts = new StringBuilder();
+        for (int i = 0; i < 51; i++) {
+            parts.append("--audit\r\nContent-Disposition: form-data; name=\"p")
+                    .append(i)
+                    .append("\"\r\n\r\nv\r\n");
+        }
+        parts.append("--audit--\r\n");
+        var error =
+                contractError(
+                        UPLOAD,
+                        upload(UPLOAD, "upload.parts_1", parts.toString()),
+                        413,
+                        "PAYLOAD_TOO_LARGE");
+        assertThat(error.get("requestId").asString()).isEqualTo("upload.parts_1");
+        verifyNoInteractions(storage);
+        assertEmpty();
+    }
+
+    @Test
+    void longNonAsciiFileNameIsAccepted() throws Exception {
+        String name = "Phim tài liệu Đất Rừng Phương Nam ".repeat(12) + ".mp4";
+        String encoded =
+                java.net.URLEncoder.encode(name, StandardCharsets.UTF_8).replace("+", "%20");
+        String payload =
+                "--audit\r\nContent-Disposition: form-data; name=\"file\"; filename*=UTF-8''"
+                        + encoded
+                        + "\r\nContent-Type: video/mp4\r\n\r\n0000ftypxxxx\r\n--audit--\r\n";
+        // Over Boot's 512B part-header default, under the configured 4KB.
+        assertThat(encoded.length()).isGreaterThan(1024);
+        assertThat(upload(UPLOAD, null, payload).statusCode()).isEqualTo(202);
+        assertEmpty();
+    }
+
+    @Test
+    void malformedChunkedBodyIsAClientErrorNotStorage() throws Exception {
+        try (var socket = new Socket("127.0.0.1", port)) {
+            socket.setSoTimeout(5000);
+            socket.getOutputStream()
+                    .write(
+                            ("POST "
+                                            + UPLOAD
+                                            + " HTTP/1.1\r\nHost: localhost\r\n"
+                                            + "Authorization: "
+                                            + bearer("ROLE_ADMIN")
+                                            + "\r\nContent-Type: "
+                                            + CONTENT_TYPE
+                                            + "\r\nTransfer-Encoding: chunked\r\n\r\n"
+                                            + Integer.toHexString(PREFIX.length())
+                                            + "\r\n"
+                                            + PREFIX
+                                            + "\r\nzz\r\n")
+                                    .getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            String response =
+                    new String(socket.getInputStream().readAllBytes(), StandardCharsets.US_ASCII);
+            assertThat(response.lines().findFirst())
+                    .hasValueSatisfying(status -> assertThat(status).startsWith("HTTP/1.1 400"));
+        }
+        verifyNoInteractions(storage);
         assertEmpty();
     }
 

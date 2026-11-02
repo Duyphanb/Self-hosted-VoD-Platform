@@ -4,6 +4,9 @@ server:
     # Idle budget between body reads, aligned with Nginx's 60s client-body/send/proxy-send
     # defaults (INFRASTRUCTURE upload transport). Not a total deadline for a large upload.
     connection-timeout: 60s
+    # Part headers carry the browser's file name; Boot's 512B default turns a long (for example
+    # Vietnamese or CJK) file name into a misleading 413. The part count stays at Boot's 50.
+    max-part-header-size: 4KB
 
 spring:
   servlet:

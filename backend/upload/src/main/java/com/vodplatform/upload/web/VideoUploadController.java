@@ -74,8 +74,9 @@ public class VideoUploadController {
 
     /**
      * The contract declares exactly one {@code file} part. A missing file is the service's empty
-     * file error; any additional part (another file, a text field or an unnamed part) is rejected
-     * here, before anything is stored.
+     * file error; any additional named part (another file or a text field) is rejected here, before
+     * anything is stored. Tomcat already discards parts without a form-data name while parsing, so
+     * they are neither counted nor stored.
      */
     private static void requireOnlyFilePart(HttpServletRequest request, MultipartFile file)
             throws IOException, ServletException {

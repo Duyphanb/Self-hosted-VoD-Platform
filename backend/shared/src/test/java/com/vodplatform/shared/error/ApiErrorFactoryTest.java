@@ -73,6 +73,27 @@ class ApiErrorFactoryTest {
     }
 
     @Test
+    void unexpectedFailureNamesTheCauseClassInTheSingleEvent() {
+        var request = new MockHttpServletRequest();
+        RequestIds.resolve(request);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+
+        factory.response(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "INTERNAL_ERROR",
+                "x",
+                List.of(),
+                new IllegalStateException("secret detail"));
+
+        assertThat(logs.list).hasSize(1);
+        assertThat(logs.list.get(0).getLevel()).isEqualTo(Level.WARN);
+        assertThat(logs.list.get(0).getFormattedMessage())
+                .endsWith("code=INTERNAL_ERROR requestId=" + RequestIds.existing(request).orElseThrow()
+                        + " exceptionClass=IllegalStateException")
+                .doesNotContain("secret");
+    }
+
+    @Test
     void anExplicitIdIsUsedWithoutARequestContext() {
         ApiError error = factory.create(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "x", List.of(), "abc");
 

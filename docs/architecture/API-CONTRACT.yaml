@@ -537,6 +537,10 @@ paths:
         File and total multipart request limits both use MAX_UPLOAD_SIZE_MB
         (default 2048 MiB); the request ceiling includes multipart overhead.
         Invalid MIME/signature family returns 400 UNSUPPORTED_VIDEO_TYPE.
+        The body has exactly one part, named file: a missing file or any
+        additional named part returns 400 VALIDATION_ERROR (field file); a
+        malformed multipart body returns 400 MALFORMED_REQUEST; more parts than
+        the server's part-count limit return 413 PAYLOAD_TOO_LARGE.
         Early rejections may appear as a connection error in browsers.
         Backend failures return ApiError with requestId: 503 UPLOAD_STORAGE_UNAVAILABLE
         (raw storage or spool I/O) and 500 UPLOAD_DATABASE_ERROR mean the upload
@@ -557,6 +561,7 @@ paths:
             schema:
               type: object
               required: [file]
+              additionalProperties: false
               properties:
                 file:
                   type: string

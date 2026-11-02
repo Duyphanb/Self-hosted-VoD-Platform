@@ -4,15 +4,14 @@ import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.exception.UploadDatabaseException;
 import com.vodplatform.shared.error.ApiError;
 import com.vodplatform.shared.error.ApiErrorFactory;
-import com.vodplatform.shared.web.RequestIds;
 import com.vodplatform.upload.exception.UploadInternalException;
 import com.vodplatform.upload.exception.UploadStorageException;
 
 import org.apache.catalina.connector.ClientAbortException;
+import org.apache.coyote.BadRequestException;
 import org.apache.tomcat.util.http.fileupload.FileUploadException;
+import org.apache.tomcat.util.http.fileupload.InvalidFileNameException;
 import org.apache.tomcat.util.http.fileupload.MultipartStream;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -48,8 +47,6 @@ import java.util.List;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class UploadExceptionHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(UploadExceptionHandler.class);
-
     private final ApiErrorFactory errors;
 
     public UploadExceptionHandler(ApiErrorFactory errors) {
@@ -74,20 +71,14 @@ public class UploadExceptionHandler {
                             "MALFORMED_REQUEST",
                             "Malformed multipart request",
                             List.of());
-            case SERVER_IO -> {
-                logFailure("spool", exception);
-                yield storageUnavailable();
-            }
-            case UNKNOWN -> {
-                logFailure("parse", exception);
-                yield internalError();
-            }
+            case SERVER_IO -> storageUnavailable(exception);
+            case UNKNOWN -> internalError(exception);
         };
     }
 
     @ExceptionHandler(UploadStorageException.class)
     ResponseEntity<ApiError> storage() {
-        return storageUnavailable();
+        return storageUnavailable(null);
     }
 
     @ExceptionHandler(UploadDatabaseException.class)
@@ -110,32 +101,26 @@ public class UploadExceptionHandler {
 
     @ExceptionHandler(UploadInternalException.class)
     ResponseEntity<ApiError> internal(UploadInternalException exception) {
-        logFailure("unexpected", exception.getCause());
-        return internalError();
+        return internalError(exception.getCause());
     }
 
-    private ResponseEntity<ApiError> storageUnavailable() {
+    /** {@code cause} is named (class only) in the single rejection log event when present. */
+    private ResponseEntity<ApiError> storageUnavailable(Throwable cause) {
         return errors.response(
                 HttpStatus.SERVICE_UNAVAILABLE,
                 "UPLOAD_STORAGE_UNAVAILABLE",
                 "Upload storage is temporarily unavailable; it was not accepted",
-                List.of());
+                List.of(),
+                cause);
     }
 
-    private ResponseEntity<ApiError> internalError() {
+    private ResponseEntity<ApiError> internalError(Throwable cause) {
         return errors.response(
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
                 "Unexpected server error; the upload result is unknown",
-                List.of());
-    }
-
-    private static void logFailure(String stage, Throwable cause) {
-        log.warn(
-                "upload failure stage={} exceptionClass={} requestId={}",
-                stage,
-                cause == null ? "none" : cause.getClass().getSimpleName(),
-                RequestIds.current().orElse(null));
+                List.of(),
+                cause);
     }
 
     enum ParseFailure {
@@ -146,16 +131,22 @@ public class UploadExceptionHandler {
 
     /**
      * Classifies a multipart parse failure by the types in its cause chain, never by message. A
-     * client abort, a malformed stream or any other file-upload protocol error is the client's
-     * fault; a plain I/O failure underneath (spool directory, disk full, permissions) is the
-     * server's. This relies on Tomcat's multipart implementation, the project's servlet container.
+     * client abort, a malformed stream or chunk, an invalid part header or file name, or any other
+     * file-upload protocol error is the client's fault; a plain I/O failure underneath (spool
+     * directory, disk full, permissions) is the server's. This relies on Tomcat's multipart
+     * implementation, the project's servlet container. A read-time protocol error is also answered
+     * by the container ({@code sendError(400)}), so its body may be the container's, not an
+     * {@code ApiError}.
      */
     static ParseFailure classify(MultipartException exception) {
         boolean protocolError = false;
         for (Throwable cause = exception.getCause(); cause != null; cause = cause.getCause()) {
             if (cause instanceof ClientAbortException
                     || cause instanceof EOFException
-                    || cause instanceof MultipartStream.MalformedStreamException) {
+                    || cause instanceof BadRequestException
+                    || cause instanceof MultipartStream.MalformedStreamException
+                    || cause instanceof InvalidFileNameException
+                    || cause instanceof IllegalArgumentException) {
                 return ParseFailure.CLIENT;
             }
             if (cause instanceof FileUploadException) {
