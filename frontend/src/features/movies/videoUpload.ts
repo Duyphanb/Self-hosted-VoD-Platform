@@ -67,7 +67,7 @@ export function classifyUploadFailure(error: unknown, options: { userCancelled?:
   if (error instanceof UploadTransportError) {
     if (error.bodySent) return unknown();
     if (error.kind === 'abort' && options.userCancelled) {
-      return failure('cancelled', 'Upload cancelled before the body was fully sent. This does not confirm that server work was rolled back.');
+      return failure('cancelled', 'Upload cancelled before the file was fully sent.');
     }
     return failure('incomplete', 'File too large or connection lost');
   }

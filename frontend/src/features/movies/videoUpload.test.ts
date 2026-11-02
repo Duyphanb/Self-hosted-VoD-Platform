@@ -35,7 +35,7 @@ describe('upload file pre-checks', () => {
     expect(checkVideoFile(file('movie.mkv', 'video/quicktime'))).toEqual({ valid: true, declaredType: 'video/quicktime' });
   });
 
-  it.each(['movie', 'movie.avi', 'movie.mp4.exe', 'movie.', 'movie.__proto__'])('rejects a missing/unsupported extension: %s', (name) => {
+  it.each(['movie', 'mp4', 'WEBM', 'movie.avi', 'movie.mp4.exe', 'movie.', 'movie.__proto__'])('rejects a missing/unsupported extension: %s', (name) => {
     expect(checkVideoFile(file(name))).toMatchObject({ valid: false });
   });
 

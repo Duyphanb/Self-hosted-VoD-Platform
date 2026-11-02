@@ -111,7 +111,8 @@ export function useVideoUpload(movieId: string) {
           onBodySent: () => {
             if (!mounted.current) return;
             // Keep focus in the status region when Cancel is removed.
-            statusRef.current?.focus();
+            const focused = document.activeElement;
+            if (!focused || focused === document.body || focused.id === 'cancel-video-upload') statusRef.current?.focus();
             phase.current = 'saving';
             dispatch({ type: 'phase', phase: 'saving' });
           }

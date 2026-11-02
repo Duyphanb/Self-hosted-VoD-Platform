@@ -198,7 +198,8 @@ describe('AdminMovieUploadPage through the data router', () => {
     renderUpload(); await start();
     fireEvent.click(screen.getByText('Cancel upload', { selector: 'button' }));
     const panel = await outcome('Upload cancelled before');
-    expect(panel).toHaveTextContent('does not confirm that server work was rolled back');
+    expect(panel).toHaveTextContent('Upload cancelled before the file was fully sent.');
+    expect(panel.textContent?.match(/rolled back/g)?.length).toBe(1);
     guidance(panel);
     expect(FakeXhr.instances[0].abortCount).toBe(1);
     expect(FakeXhr.instances.length).toBe(1);
@@ -332,6 +333,7 @@ describe('AdminMovieUploadPage through the data router', () => {
     expect(within(dialog).queryByText('Cancel upload and leave')).not.toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Upload status' })).toHaveFocus();
     await act(async () => { check.resolve(json(detail())); await check.promise; });
     await waitFor(() => expect(FakeXhr.instances.length).toBe(1));
     act(() => FakeXhr.instances[0].finishBody(100));
@@ -349,9 +351,33 @@ describe('AdminMovieUploadPage through the data router', () => {
     await outcome('Upload accepted. Video asset status: QUEUED.');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(uploadPath);
+    expect([...router.state.blockers.values()].every((entry) => entry.state === 'unblocked')).toBe(true);
+  });
+
+  it('a rejected response resets blocked navigation before a manual retry', async () => {
+    const { router } = renderUpload(); await start();
+    fireEvent.click(screen.getByText('Back to movies'));
+    await screen.findByRole('dialog');
+    respondError(503, 'UPLOAD_STORAGE_UNAVAILABLE');
+    await outcome('not accepted');
+    expect([...router.state.blockers.values()].every((entry) => entry.state === 'unblocked')).toBe(true);
+    fireEvent.click(uploadButton());
+    await waitFor(() => expect(FakeXhr.instances.length).toBe(2));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('keeps keyboard focus elsewhere when sending finishes', async () => {
+    renderUpload(); await start();
+    const back = screen.getByText('Back to movies'); back.focus();
+    act(() => FakeXhr.instances[0].finishBody(100));
+    expect(back).toHaveFocus();
   });
 
   it('sending to saving removes Cancel upload and leave from an open modal without losing focus', async () => {
+    const focus = HTMLElement.prototype.focus;
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options) {
+      if (!this.closest('[inert]')) focus.call(this, options);
+    });
     renderUpload(); await start();
     fireEvent.click(screen.getByText('Back to movies'));
     const dialog = await screen.findByRole('dialog');
@@ -360,6 +386,9 @@ describe('AdminMovieUploadPage through the data router', () => {
     expect(within(dialog).queryByText('Cancel upload and leave')).not.toBeInTheDocument();
     expect(within(dialog).getByText('Stay on page')).toHaveFocus();
     expect(screen.getByText('Saving to storage…')).toBeInTheDocument();
+    expect(fireEvent.mouseDown(dialog.parentElement!)).toBe(false);
+    fireEvent.click(within(dialog).getByText('Stay on page'));
+    expect(screen.getByRole('status', { name: 'Upload status' })).toHaveFocus();
   });
 
   it('an explicit Cancel upload and leave aborts the sender and follows the blocked link', async () => {
@@ -426,6 +455,7 @@ async function outcome(message: string) {
   return panel;
 }
 function guidance(panel: HTMLElement) {
+  expect(panel).toHaveTextContent('A deliberate re-upload is safe: existing video assets are never changed.');
   expect(panel).toHaveTextContent('If the previous upload is still being processed');
   expect(panel).toHaveTextContent('409'); expect(panel).toHaveTextContent('If it has finished');
   expect(panel).toHaveTextContent('newer asset with extra storage cost');

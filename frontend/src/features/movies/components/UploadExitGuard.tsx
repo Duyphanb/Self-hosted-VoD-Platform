@@ -37,7 +37,9 @@ function UploadExitDialog({ sending, onStay, onLeave, returnFocus }: {
     // The focused leave button can disappear when sending finishes.
     if (!sending) stayRef.current?.focus();
   }, [sending]);
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6" onMouseDown={(event) => {
+    if (event.target === event.currentTarget) event.preventDefault();
+  }}>
     <div aria-describedby="leave-upload-description" aria-labelledby="leave-upload-heading" aria-modal="true"
       className="max-w-md rounded-lg border border-slate-700 bg-slate-900 p-6" ref={dialogRef} role="dialog" tabIndex={-1}>
       <h2 id="leave-upload-heading">Upload in progress</h2>

@@ -56,7 +56,7 @@ function MovieUploadForm({ movieId, title, returnTo }: { movieId: string; title:
       {!file ? <p>No file selected.</p> : null}
       <div className="flex gap-3">
         <button className={primaryButtonClass} disabled={!canUpload} type="submit">Upload</button>
-        {phase === 'sending' ? <button className={secondaryButtonClass} onClick={cancel} type="button">Cancel upload</button> : null}
+        {phase === 'sending' ? <button id="cancel-video-upload" className={secondaryButtonClass} onClick={cancel} type="button">Cancel upload</button> : null}
       </div>
       <div aria-label="Upload status" aria-live="polite" ref={statusRef} role="status" tabIndex={-1}>
         {phase === 'checking' ? 'Checking movie…' : phase === 'saving' ? 'Saving to storage…'
@@ -73,6 +73,7 @@ function MovieUploadForm({ movieId, title, returnTo }: { movieId: string; title:
       {outcome.serverMessage ? <p className="mt-2">{outcome.serverMessage}</p> : null}
       {outcome.requestId ? <p className="mt-2">Request ID: <span className="font-mono">{outcome.requestId}</span></p> : null}
       {guidance ? <div className="mt-3">
+        <p>A deliberate re-upload is safe: existing video assets are never changed.</p>
         <p>No automatic re-upload is performed. Check the result before deliberately selecting Upload again.</p>
         <p>If the previous upload is still being processed, a re-upload returns 409 because an upload is already in progress.</p>
         <p>If it has finished, a re-upload creates a newer asset with extra storage cost. Manual purge is planned.</p>
