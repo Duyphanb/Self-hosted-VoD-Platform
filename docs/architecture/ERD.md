@@ -22,6 +22,7 @@ Out of scope for this ERD:
 - Timestamps use `timestamptz`.
 - Schema changes are managed through Flyway only.
 - Existing committed migrations must not be edited.
+- CI enforces this: it fails a change that edits, renames or deletes a committed migration, validates Flyway migration naming, and compares the migrated schema with `deploy/tests/schema-snapshot.sql` on a digest-pinned PostgreSQL image. A pull request that adds a migration regenerates the snapshot with `python3 deploy/tests/schema-snapshot.py --update` (Docker required) and commits it.
 - API responses use DTOs, not JPA entities.
 
 ## Status Values
