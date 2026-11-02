@@ -103,12 +103,7 @@ migrate
 [ "$(sql "SELECT data_type,is_nullable,column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'encoding_jobs' AND column_name = 'published_at';")" = 'timestamp with time zone|YES|' ]
 [ "$(sql "SELECT count(*) FROM encoding_jobs WHERE status = 'QUEUED' AND published_at IS NULL;")" = 2 ]
 [ "$(sql "SELECT indisunique AND indpred IS NOT NULL FROM pg_index WHERE indexrelid = 'ux_video_assets_movie_in_flight'::regclass;")" = t ]
-[ "$(sql "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> 'flyway_schema_history';")" = 15 ]
-[ "$(sql "SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname ~ '^(ux|ix)_';")" = 32 ]
-[ "$(sql "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'public' AND t.relname <> 'flyway_schema_history';")" = 53 ]
-[ "$(sql "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'public' AND c.contype = 'f';")" = 17 ]
-[ "$(sql "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = 'public' AND c.contype = 'c';")" = 9 ]
-printf '%s\n' 'PASS: repaired fixture migrates; pre-existing QUEUED jobs remain unpublished; schema counts 15/32/53/17/9'
+printf '%s\n' 'PASS: repaired fixture migrates; pre-existing QUEUED jobs remain unpublished'
 
 expect_in_flight_failure "INSERT INTO video_assets (id,movie_id,raw_bucket,raw_object_key,status,created_at,updated_at) VALUES ('30000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002','fixture','losing-queued','QUEUED',now(),now());"
 expect_in_flight_failure "INSERT INTO video_assets (id,movie_id,raw_bucket,raw_object_key,status,created_at,updated_at) VALUES ('30000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002','fixture','losing-processing','PROCESSING',now(),now());"

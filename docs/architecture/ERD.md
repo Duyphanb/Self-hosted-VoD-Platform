@@ -265,7 +265,7 @@ Indexes:
 - `ix_encoding_jobs_status` on `status`
 - unique `ux_encoding_jobs_asset_attempt` on (`video_asset_id`, `attempt`)
 
-Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specification-d11-d16-d17-d24): nullable `published_at` and the one-in-flight asset index only. Existing QUEUED rows remain NULL for relay. Detect duplicate in-flight movies and stop for explicit repair; do not silently change data. CI schema counts become 32 named `ux`/`ix` indexes, with 15 tables, 53 constraints, 17 FKs and 9 CHECKs unchanged. No migration is added by this docs change.
+Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specification-d11-d16-d17-d24): nullable `published_at` and the one-in-flight asset index only. Existing QUEUED rows remain NULL for relay. Detect duplicate in-flight movies and stop for explicit repair; do not silently change data. At V5 the schema has 32 named `ux`/`ix` indexes, with 15 tables, 53 constraints, 17 FKs and 9 CHECKs unchanged. CI now compares the whole migrated schema with the committed snapshot (#118) instead of these counts. No migration is added by this docs change.
 
 ### `playback_progress`
 

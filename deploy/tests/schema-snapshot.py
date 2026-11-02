@@ -11,6 +11,7 @@ import argparse
 import difflib
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -20,18 +21,53 @@ FLYWAY_IMAGE = "flyway/flyway:12.10.0"
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = ROOT / "backend" / "common" / "src" / "main" / "resources" / "db" / "migration"
 SNAPSHOT = Path(__file__).with_name("schema-snapshot.sql")
-# Lines that vary with the pg_dump release or session, not with the schema.
-VOLATILE_PREFIXES = ("--", "SET ", "SELECT pg_catalog.set_config(", "\\restrict", "\\unrestrict")
+# pg_dump lines that vary with its release or session, not with the schema.
+VOLATILE_LINE = re.compile(r"--.*|SET \w+ = .*;|SELECT pg_catalog\.set_config\(.*\);|\\(un)?restrict \w+")
+DOLLAR_TAG = re.compile(r"\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$")
+
+
+def quote_state(line, state):
+    """Return the quoting state after line: None, an open quote ("'", "E'" or '"'), or a dollar-quote tag."""
+    i = 0
+    while i < len(line):
+        char = line[i]
+        if state is None:
+            if line.startswith("--", i):
+                return None
+            if char in "'\"":
+                escaped = char == "'" and i > 0 and line[i - 1] in "Ee" and (i == 1 or not line[i - 2].isalnum())
+                state = "E'" if escaped else char
+            elif char == "$" and not (i > 0 and (line[i - 1].isalnum() or line[i - 1] == "_")):
+                tag = DOLLAR_TAG.match(line, i)
+                if tag:
+                    state = tag.group()
+                    i = tag.end() - 1
+        elif state.startswith("$"):
+            if line.startswith(state, i):
+                i += len(state) - 1
+                state = None
+        elif state == "E'" and char == "\\":
+            i += 1
+        elif char == state[-1]:
+            if line.startswith(char * 2, i):
+                i += 1
+            else:
+                state = None
+        i += 1
+    return state
 
 
 def normalize(dump):
+    """Drop volatile pg_dump lines and spacing, never touching text inside literals, identifiers or bodies."""
     lines = []
-    for line in dump.replace("\r\n", "\n").split("\n"):
-        line = line.rstrip()
-        if line.startswith(VOLATILE_PREFIXES):
-            continue
-        if not line and (not lines or not lines[-1]):
-            continue
+    state = None
+    for line in dump.split("\n"):
+        outside = state is None
+        state = quote_state(line, state)
+        if outside and state is None:
+            line = line.rstrip()
+            if VOLATILE_LINE.fullmatch(line) or (not line and (not lines or not lines[-1])):
+                continue
         lines.append(line)
     while lines and not lines[-1]:
         lines.pop()
@@ -39,12 +75,13 @@ def normalize(dump):
 
 
 def docker(*args, **kwargs):
-    return subprocess.run(["docker", *args], check=True, capture_output=True, text=True, **kwargs)
+    # Decode as UTF-8 everywhere; the default locale encoding differs on Windows.
+    return subprocess.run(["docker", *args], check=True, capture_output=True, encoding="utf-8", **kwargs)
 
 
 def dump(container, user, database):
-    return docker("exec", container, "pg_dump", "-U", user, "-d", database, "--schema-only", "--no-owner",
-                  "--no-privileges", "--exclude-table=public.flyway_schema_history").stdout
+    return docker("exec", container, "pg_dump", "-U", user, "-d", database, "--encoding=UTF8", "--schema-only",
+                  "--no-owner", "--no-privileges", "--exclude-table=public.flyway_schema_history").stdout
 
 
 def migrated_dump():
@@ -87,7 +124,7 @@ def main(argv=None):
         SNAPSHOT.write_text(actual, encoding="utf-8", newline="\n")
         print(f"Wrote {SNAPSHOT.relative_to(ROOT).as_posix()}.")
         return 0
-    expected = SNAPSHOT.read_text(encoding="utf-8") if SNAPSHOT.exists() else ""
+    expected = SNAPSHOT.read_bytes().decode("utf-8") if SNAPSHOT.exists() else ""
     if actual == expected:
         print("The migrated schema matches the committed snapshot.")
         return 0

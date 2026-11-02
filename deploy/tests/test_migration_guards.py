@@ -80,17 +80,33 @@ class MigrationImmutabilityTests(unittest.TestCase):
 class SchemaSnapshotTests(unittest.TestCase):
 
     def test_normalize_drops_release_and_session_lines(self):
-        dump = ("--\r\n-- PostgreSQL database dump\r\n--\r\n\r\n\\restrict abc123\r\n"
-                "SET statement_timeout = 0;\r\nSELECT pg_catalog.set_config('search_path', '', false);\r\n\r\n\r\n"
-                "CREATE TABLE public.a (\r\n    id integer NOT NULL   \r\n);\r\n\r\n\r\n"
-                "COMMENT ON TABLE public.a IS 'kept';\r\n\r\n\\unrestrict abc123\r\n\r\n")
+        dump = ("--\n-- PostgreSQL database dump\n--\n\n\\restrict abc123\n"
+                "SET statement_timeout = 0;\nSELECT pg_catalog.set_config('search_path', '', false);\n\n\n"
+                "CREATE TABLE public.a (\n    id integer NOT NULL   \n);\n\n\n"
+                "COMMENT ON TABLE public.a IS 'kept';\n\n\\unrestrict abc123\n\n")
         self.assertEqual(SNAPSHOT.normalize(dump),
                          "CREATE TABLE public.a (\n    id integer NOT NULL\n);\n\nCOMMENT ON TABLE public.a IS 'kept';\n")
 
-    def test_committed_snapshot_is_normalized_and_covers_the_erd_tables(self):
-        text = SNAPSHOT.SNAPSHOT.read_text(encoding="utf-8")
+    def test_normalize_keeps_text_inside_literals_identifiers_and_bodies(self):
+        bodies = [
+            "    note text DEFAULT 'first\nSET alpha = 1;\n-- not a comment  \n\n\nlast'::text\n",
+            "    note text DEFAULT E'it\\'s\nSET alpha = 1;\nlast'::text\n",
+            "    \"odd\n-- name\" integer\n",
+            "CREATE FUNCTION public.f() RETURNS void AS $fn$\nSET search_path = public;\n-- step  \n\n\n$fn$;\n",
+            "CREATE FUNCTION public.g() RETURNS text AS $$\nSELECT 'x';\n-- kept\n$$;\n",
+        ]
+        for body in bodies:
+            with self.subTest(body=body):
+                changed = body.replace("alpha", "beta").replace("step", "stop").replace("name", "nome")
+                changed = changed.replace("kept", "kopt")
+                self.assertIn(body.rstrip("\n"), SNAPSHOT.normalize("SET a = 1;\n" + body))
+                self.assertNotEqual(SNAPSHOT.normalize(body), SNAPSHOT.normalize(changed))
+        self.assertEqual(SNAPSHOT.normalize("SELECT 'a''b';  \n-- dropped\nSELECT 1;\n"), "SELECT 'a''b';\nSELECT 1;\n")
+
+    def test_committed_snapshot_is_normalized_utf8_without_flyway_history(self):
+        text = SNAPSHOT.SNAPSHOT.read_bytes().decode("utf-8")
         self.assertEqual(SNAPSHOT.normalize(text), text)
-        self.assertEqual(text.count("CREATE TABLE "), 15)
+        self.assertIn("CREATE TABLE public.", text)
         self.assertNotIn("flyway_schema_history", text)
 
     def test_ci_and_compose_pin_the_image_and_validate_migration_naming(self):
