@@ -514,7 +514,7 @@ Create admin pages for movie listing, create, edit, archive, and restore. Includ
 - [x] Postman collection includes movie endpoints
 - [x] No JPA entities exposed in API responses
 
-Verified against `main` at `7e9668e` on 2026-10-28; see the [Sprint 3 closeout evidence](../testing/SPRINT-3-CLOSEOUT.md) for the mapping of each item to its issue, tests, Newman requests, the manual UI pass and the limits. Upload, encoding and playback were out of scope for that closeout. #14 is now merged at `24873be`; [ADR-010](../architecture/adr/ADR-010.md) records the owner-approved 2026-10-29 Sprint 4 design package. The following criteria are planned implementation, not completed work.
+Verified against `main` at `7e9668e` on 2026-10-28; see the [Sprint 3 closeout evidence](../testing/SPRINT-3-CLOSEOUT.md) for the mapping of each item to its issue, tests, Newman requests, the manual UI pass and the limits. Upload, encoding and playback were out of scope for that closeout. #14 is now merged at `24873be`; [ADR-010](../architecture/adr/ADR-010.md) records the owner-approved 2026-10-29 Sprint 4 design package. The Sprint 4 criteria below were delivered and verified in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md).
 
 ---
 
@@ -528,6 +528,8 @@ Verified against `main` at `7e9668e` on 2026-10-28; see the [Sprint 3 closeout e
 **Design authority:** [ADR-010](../architecture/adr/ADR-010.md), API-CONTRACT, ERD, SECURITY and INFRASTRUCTURE. Create the implementation issues with these criteria after the docs merge. Order: 4.1; 4.3 (V5); 4.2; 4.4/4.5; 4.6 with #52; 4.7; the synthetic non-VPS 2 GB rehearsal (the genuine VPS measurement is #180, before public deployment). PostgreSQL race evidence uses #119 or an isolated Compose smoke, not H2. Do not introduce Testcontainers as an assumed existing dependency.
 
 ### Issue 4.1: Backend MinIO Client Configuration
+
+**GitHub:** [#169](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/169), delivered by [PR #176](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/176)
 
 **Description:**  
 Configure a MinIO-compatible Silo client with environment credentials. Select/document minio-java or AWS SDK v2 in this issue; stream known-length uploads and reads. Keep bucket creation/privacy in the existing init path and provide scoped backend/worker service credentials.
@@ -546,6 +548,8 @@ Configure a MinIO-compatible Silo client with environment credentials. Select/do
 
 ### Issue 4.2: Backend RabbitMQ Publisher Configuration
 
+**GitHub:** [#170](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/170), delivered by [PR #178](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/178)
+
 **Description:**  
 Configure RabbitMQ and the ADR-010 topology from `RABBITMQ_ENCODING_QUEUE`. Publish only versioned IDs-only messages, with persistent delivery, correlated confirms and mandatory returns.
 
@@ -562,6 +566,8 @@ Configure RabbitMQ and the ADR-010 topology from `RABBITMQ_ENCODING_QUEUE`. Publ
 ---
 
 ### Issue 4.3: Backend Video Asset Entity and Repository
+
+**GitHub:** [#171](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/171), delivered by [PR #177](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/177)
 
 **Description:**  
 Map `video_assets` and `encoding_jobs` including nullable `published_at`. Add V5 from the [ADR-010 specification](../architecture/adr/ADR-010.md#v5-migration-specification-d11-d16-d17-d24); never edit V1-V4. Repository supports newest/current queries and the per-movie transaction serialization needed by upload/retry.
@@ -581,6 +587,8 @@ Map `video_assets` and `encoding_jobs` including nullable `published_at`. Add V5
 ---
 
 ### Issue 4.4: Backend Upload Service - Validation and Storage
+
+**GitHub:** [#172](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/172), delivered by [PR #179](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/179)
 
 **Description:**  
 Validate the spooled multipart file, stream raw to Silo with known length, then coordinate with 4.5 to commit a new QUEUED asset/job pair. Generate the asset ID before PUT; never upsert a video asset. Configure/create the dedicated temp spool before the connector starts.
@@ -603,6 +611,8 @@ Validate the spooled multipart file, stream raw to Silo with known length, then 
 
 ### Issue 4.5: Backend Encoding Job Service - Queue Publishing
 
+**GitHub:** [#173](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/173), delivered by [PR #179](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/179)
+
 **Description:**  
 Commit a new asset and attempt-1 job as QUEUED in one transaction, then eagerly publish. Use the job's nullable published_at as outbox state and a single-backend scheduled relay; a local DB transaction does not atomically commit RabbitMQ.
 
@@ -619,6 +629,8 @@ Commit a new asset and attempt-1 job as QUEUED in one transaction, then eagerly 
 ---
 
 ### Issue 4.6: Backend Admin Upload Endpoint
+
+**GitHub:** [#174](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/174), delivered by [PR #181](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/181) and [PR #182](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/182)
 
 **Description:**  
 Implement `POST /api/v1/admin/movies/{movieId}/video` endpoint for admin video upload. Require `ROLE_ADMIN`. Accept multipart file. Call upload service and encoding job service. Return 202 Accepted with video asset status.
@@ -643,6 +655,8 @@ Implement `POST /api/v1/admin/movies/{movieId}/video` endpoint for admin video u
 
 ### Issue 4.7: Frontend Admin Upload UI
 
+**GitHub:** [#175](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/175), delivered by [PR #183](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/183)
+
 **Description:**  
 Create protected admin upload UI and shared `ApiClient.upload()` on XMLHttpRequest. Distinguish body transfer, storage-saving wait, committed acceptance and recoverable errors without automatic body replay.
 
@@ -664,19 +678,21 @@ Create protected admin upload UI and shared `ApiClient.upload()` on XMLHttpReque
 
 ### Sprint 4 Definition of Done
 
-- [ ] Admin can upload video files through API and UI
-- [ ] Upload validates declared MIME/signature family and size from config
-- [ ] Raw video is stored in MinIO `vod-raw` bucket
-- [ ] New asset and attempt-1 job commit together as QUEUED; UPLOADED is reserved; V5 and schema-count changes verified on PostgreSQL
-- [ ] Version-1 IDs-only persistent RabbitMQ message, topology, confirms/returns and unpublished-job relay verified; broker outage keeps 202 QUEUED
-- [ ] Conditional writes prevent late publish/status regression; parallel uploads prove one-in-flight index/409 and raw compensation
-- [ ] Upload endpoint enforces `ROLE_ADMIN`
-- [ ] XHR progress, saving after 100%, send-only Cancel, pre-checks, no 401 replay and explicit ambiguous-error recovery verified
-- [ ] Unit and integration tests cover upload and queue publish
-- [ ] Postman/Newman collection covers upload 202/400/401/403/404/409/413; edge smoke covers ApiError 413/502/503/504, route limits and unchanged HLS/health
-- [ ] `.env.example` documents size/MIME/temp, confirm/relay settings and edge/SPA consistency rule; backend spool/abort/startup cleanup verified
-- [ ] Synthetic 2,000,000,000 B transport/storage rehearsal on a GitHub-hosted runner finishes without 504, labelled non-VPS evidence; it closes Sprint 4. The genuine VPS run (client time over WAN, post-100% saving wait, temp-disk peak, docker stats memory, actual VPS disk size/data root) and concurrent-upload headroom are tracked by #180 before public deployment, **to be measured in #180**. Demo target remains 500 MB-1 GB. If saving approaches 600s or disk is insufficient, #180 proposes a separate ADR
-- [ ] This sprint proves upload/storage/queue only; upload -> transcode -> HLS playback remains #125
+- [x] Admin can upload video files through API and UI
+- [x] Upload validates declared MIME/signature family and size from config
+- [x] Raw video is stored in MinIO `vod-raw` bucket
+- [x] New asset and attempt-1 job commit together as QUEUED; UPLOADED is reserved; V5 and schema-count changes verified on PostgreSQL
+- [x] Version-1 IDs-only persistent RabbitMQ message, topology, confirms/returns and unpublished-job relay verified; broker outage keeps 202 QUEUED
+- [x] Conditional writes prevent late publish/status regression; parallel uploads prove one-in-flight index/409 and raw compensation
+- [x] Upload endpoint enforces `ROLE_ADMIN`
+- [x] XHR progress, saving after 100%, send-only Cancel, pre-checks, no 401 replay and explicit ambiguous-error recovery verified
+- [x] Unit and integration tests cover upload and queue publish
+- [x] Postman/Newman collection covers upload 202/400/401/403/404/409/413; edge smoke covers ApiError 413/502/503/504, route limits and unchanged HLS/health
+- [x] `.env.example` documents size/MIME/temp, confirm/relay settings and edge/SPA consistency rule; backend spool/abort/startup cleanup verified
+- [x] Synthetic 2,000,000,000 B transport/storage rehearsal on a GitHub-hosted runner finishes without 504, labelled non-VPS evidence; it closes Sprint 4. The genuine VPS run (client time over WAN, post-100% saving wait, temp-disk peak, docker stats memory, actual VPS disk size/data root) and concurrent-upload headroom are tracked by #180 before public deployment, **to be measured in #180**. Demo target remains 500 MB-1 GB. If saving approaches 600s or disk is insufficient, #180 proposes a separate ADR
+- [x] This sprint proves upload/storage/queue only; upload -> transcode -> HLS playback remains #125
+
+Verified against `main` at `e164c39` on 2026-11-02; see the [Sprint 4 closeout evidence](../testing/SPRINT-4-CLOSEOUT.md) for the mapping of each item to its issue, tests, Newman requests, the edge smoke, the synthetic rehearsal, the manual UI pass and the limits. The VPS measurements remain **to be measured in #180** before public deployment, and upload -> transcode -> HLS playback remains #125.
 
 ---
 
