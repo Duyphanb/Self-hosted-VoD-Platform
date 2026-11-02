@@ -81,6 +81,11 @@ reject_published_default \
   "${JWT_SECRET:-}" \
   "change-me-use-a-long-random-secret"
 reject_unpublished_edge "${NGINX_HTTP_PORT:-}"
+# Nginx is deliberately a frozen literal, not an env-templated config. Static
+# tests compare this value with Nginx, Spring, Compose and the SPA defaults.
+edge_upload_limit_mb=2048
+[ "${MAX_UPLOAD_SIZE_MB-$edge_upload_limit_mb}" = "$edge_upload_limit_mb" ] \
+  || fail "MAX_UPLOAD_SIZE_MB must equal the frozen Nginx upload limit ($edge_upload_limit_mb MiB)"
 [ "${MINIO_BROWSER:-off}" = "off" ] || fail "MINIO_BROWSER must be off"
 
 # Application identities must be independent from root and from each other.
