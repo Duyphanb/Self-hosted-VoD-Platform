@@ -2,7 +2,7 @@
 
 Audit date: 2026-11-02. Implementation baseline: `e164c39` on `main`, after [PR #183](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/183).
 
-Sprint 4 Upload is closed. All thirteen DoD items pass on the merged implementation, within the boundaries stated at the end. Each item maps to the backlog issues below. This is verification evidence, not a replacement for the frozen contracts ([ADR-010](../architecture/adr/ADR-010.md) and the documents it amends).
+Sprint 4 Upload has its Definition of Done verified: all thirteen DoD items pass on the merged implementation, within the boundaries stated at the end. Under the project plan, the sprint is complete once its milestone has no open issues; the non-blocking issues still in the milestone (#118, #119, #121, #167) await the owner's decision to move them. Each item maps to the backlog issues below. This is verification evidence, not a replacement for the frozen contracts ([ADR-010](../architecture/adr/ADR-010.md) and the documents it amends).
 
 Sprint 4 proves upload, raw storage and queue handoff only. It does not establish encoding, HLS playback, VPS capacity or public-production readiness.
 
