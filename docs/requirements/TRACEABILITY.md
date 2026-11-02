@@ -2,7 +2,7 @@
 
 ## Status
 
-Updated 2026-10-29 for [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), and Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; this design update supplies no runtime media evidence.
+Updated 2026-11-02 for the Sprint 4 closeout; the design follows [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md), and Sprint 4 (F-008 and F-009) in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; Sprint 4 supplies no encoding, playback or VPS evidence.
 
 ## Feature Traceability
 
@@ -15,8 +15,8 @@ Updated 2026-10-29 for [ADR-010](../architecture/adr/ADR-010.md). Rows for deliv
 | F-005 | Movie browsing | US-005 | backend, frontend | Movie list service tests; pagination and visibility API tests; catalog PostgreSQL runtime smoke; catalog Newman collection; list page UI tests. Verified: [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md) |
 | F-006 | Movie detail | US-006 | backend, frontend | Movie detail API tests; not-found and non-published 404 API tests; catalog PostgreSQL runtime smoke; catalog Newman collection; detail page UI test. Verified: [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md) |
 | F-007 | Movie metadata management | US-007 | backend, frontend | Movie, genre, and people service unit tests; admin authorization tests; catalog PostgreSQL runtime smoke; catalog Newman collection (admin CRUD); admin form tests. Related video asset metadata is delivered with F-008 and F-020. Verified: [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md) |
-| F-008 | Admin video upload | US-008 | backend, frontend, MinIO | Upload validation tests; MinIO integration test or manual evidence; admin upload flow test |
-| F-009 | Queue publishing | US-008 | backend, RabbitMQ | Queue publisher unit test; API-to-queue integration evidence |
+| F-008 | Admin video upload | US-008 | backend, frontend, MinIO | Upload validation tests; MinIO integration test or manual evidence; admin upload flow test. Verified: [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md) |
+| F-009 | Queue publishing | US-008 | backend, RabbitMQ | Queue publisher unit test; API-to-queue integration evidence. Verified: [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md) |
 | F-010 | Encoding worker | US-009 | worker, RabbitMQ, MinIO | Worker command construction tests; job status transition tests; failed-job test |
 | F-011 | FFprobe metadata extraction | US-009 | worker | FFprobe parser unit tests; sample media manual verification |
 | F-012 | FFmpeg HLS transcoding | US-009, US-010 | worker, MinIO | HLS output smoke test; generated playlist and segments verification |
@@ -55,7 +55,7 @@ Updated 2026-10-29 for [ADR-010](../architecture/adr/ADR-010.md). Rows for deliv
 
 ## Sprint 4 design-to-test plan
 
-All rows below are **planned**, not passed tests. Copy them into implementation issues; #125 requires actual upload -> transcode -> HLS browser playback.
+The Sprint 4 (4.x) parts of these rows are verified in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md); the parts owned by Sprint 5, 6 and 9, Phase 5, #54, #74, #123, #124 and #180 remain **planned**, not passed tests. #125 requires actual upload -> transcode -> HLS browser playback.
 
 | Decisions / feature | Planned evidence and owner |
 |---|---|
