@@ -15,6 +15,7 @@ import com.vodplatform.auth.persistence.UserStatus;
 import com.vodplatform.auth.service.RefreshTokenService;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -175,6 +176,21 @@ class RefreshTokenIntegrationTests {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void oversizedRefreshTokenFailsRequestValidationWithoutRevokingTokens() throws Exception {
+        String refreshToken = loginAndReadRefreshToken();
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of("refreshToken", refreshToken.repeat(3)))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of("refreshToken", refreshToken))))
+                .andExpect(status().isOk());
     }
 
     private String loginAndReadRefreshToken() throws Exception {

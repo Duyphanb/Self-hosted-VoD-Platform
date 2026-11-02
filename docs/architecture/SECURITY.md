@@ -22,6 +22,7 @@ MVP uses bearer JWT access tokens plus persisted refresh tokens.
 - `POST /api/v1/auth/refresh` rotates the refresh token: the old token is revoked and a new token is issued.
 - `POST /api/v1/auth/logout` revokes the submitted refresh token when present; the frontend also clears local auth state.
 - Passwords are hashed with BCrypt.
+- Login passwords share the registration maximum of 72 characters, and refresh and logout tokens are at most 128 characters. Longer values return 400 `VALIDATION_ERROR` before any lookup or hashing. New hashes pre-hash the full UTF-8 password with SHA-256, so a password longer than 72 bytes is never truncated by BCrypt.
 - Login failures return a generic authentication error.
 - Email identities are case-insensitive through PostgreSQL `lower(email)` for both lookup and uniqueness. Preserve stored spelling and do not collapse dots or plus tags. Existing identity collisions block migration rather than merging accounts; see [ADR-008](adr/ADR-008.md).
 

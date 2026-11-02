@@ -1159,6 +1159,8 @@ components:
           description: Case-insensitive identity using database lower(email); original spelling retained, dots and plus tags remain significant.
         password:
           type: string
+          maxLength: 72
+          description: Same maximum as registration. A longer value returns 400 VALIDATION_ERROR before any credential check.
 
     RefreshRequest:
       description: JSON-body refresh token request.
@@ -1166,8 +1168,9 @@ components:
       required: [refreshToken]
       properties:
         refreshToken:
-          description: Opaque refresh token.
+          description: Opaque refresh token. A longer value returns 400 VALIDATION_ERROR before any token lookup.
           type: string
+          maxLength: 128
 
     AuthResponse:
       description: JSON-body authentication result.
