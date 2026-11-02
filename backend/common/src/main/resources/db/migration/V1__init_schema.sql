@@ -164,3 +164,4 @@ CREATE INDEX ix_playback_progress_user_last_played ON playback_progress (user_id
 CREATE INDEX ix_watchlist_items_user_created ON watchlist_items (user_id, created_at);
 CREATE INDEX ix_watch_history_user_last_watched ON watch_history (user_id, last_watched_at);
 CREATE INDEX ix_ratings_movie_id ON ratings (movie_id);
+-- throwaway edit to prove the CI guard (#118); never merge
