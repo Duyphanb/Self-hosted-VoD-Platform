@@ -26,6 +26,9 @@ export function validateLoginForm(request: LoginRequest): AuthFieldErrors<LoginF
   validateEmail(request.email, errors);
   if (request.password.trim().length === 0) {
     errors.password = 'Password is required.';
+  } else if (request.password.length > PASSWORD_MAX_LENGTH) {
+    // Same UTF-16 bound as registration and the backend, so no registrable password is rejected.
+    errors.password = `Password must be ${PASSWORD_MAX_LENGTH} characters or fewer.`;
   }
   return errors;
 }

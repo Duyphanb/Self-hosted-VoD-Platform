@@ -54,6 +54,14 @@ describe('auth form validation', () => {
     expect(validateLoginForm({ email: `${'a'.repeat(65)}@${maximumDomain}`, password: 'valid' })).toEqual({
       email: 'Email must be 320 characters or fewer.'
     });
+    for (const password of ['x', 'x'.repeat(72), '密'.repeat(72), '😀'.repeat(36)]) {
+      expect(validateLoginForm({ email: 'a@b.co', password })).toEqual({});
+    }
+    for (const password of ['x'.repeat(73), '😀'.repeat(37)]) {
+      expect(validateLoginForm({ email: 'a@b.co', password })).toEqual({
+        password: 'Password must be 72 characters or fewer.'
+      });
+    }
   });
 
   it.each([

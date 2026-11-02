@@ -83,7 +83,8 @@ class LoginIntegrationTests {
 
     @Test
     void legacyTruncationCannotAuthenticateOrReplaceTheStoredPassword() throws Exception {
-        String password = "a".repeat(72);
+        // 24 characters but 72 UTF-8 bytes, so the suffixed attempt stays within the 72-character login bound.
+        String password = "密".repeat(24);
         String legacyHash = new BCryptPasswordEncoder().encode(password);
         UserEntity user = userRepository.findByEmail("viewer@example.com").orElseThrow();
         user.updatePasswordHash(legacyHash);
@@ -186,6 +187,25 @@ class LoginIntegrationTests {
                 .andExpect(jsonPath("$.user.email").value("unicode@example.com"))
                 .andExpect(jsonPath("$.accessToken").isString())
                 .andExpect(jsonPath("$.refreshToken").isString());
+
+        // The password is 216 UTF-8 bytes. A change after byte 72 still fails, so no byte is truncated.
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "email", "unicode@example.com",
+                                "password", "密".repeat(71) + "異"
+                        ))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+        // One character over the registration maximum is a validation error, not a credential check.
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsBytes(Map.of(
+                                "email", "unicode@example.com",
+                                "password", password + "密"
+                        ))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
     @Test
