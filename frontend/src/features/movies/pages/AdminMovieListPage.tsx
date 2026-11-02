@@ -96,6 +96,7 @@ export function AdminMovieListPage() {
                   <div className="flex flex-wrap items-center gap-3">
                     <Link aria-label={`View ${movie.title}`} className="text-sky-300 underline" to={`/movies/${movie.id}`}>View</Link>
                     <Link aria-label={`Edit ${movie.title}`} className="text-sky-300 underline" state={{ returnTo }} to={`/admin/movies/${movie.id}/edit`}>Edit</Link>
+                    <Link aria-label={`Upload video for ${movie.title}`} className="text-sky-300 underline" state={{ returnTo }} to={`/admin/movies/${movie.id}/video`}>Upload video</Link>
                     {movie.status !== 'ARCHIVED' ? (
                       <button
                         aria-label={`Archive ${movie.title}`}

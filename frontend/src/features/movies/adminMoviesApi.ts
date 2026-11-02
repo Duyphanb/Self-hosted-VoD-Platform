@@ -1,9 +1,11 @@
-import type { ApiClient } from '../../lib/api/client';
+import type { ApiClient, UploadOptions } from '../../lib/api/client';
 import type { PageMeta } from '../../lib/api/types';
 import { isCanonicalUuid } from '../../lib/uuid';
 import {
   decodeMovieDetail, decodeMoviePage, InvalidMovieResponseError,
-  type CreditRole, type MaturityRating, type MovieDetail, type MoviePage, type MovieSort, type MovieStatus
+  UNKNOWN_ENUM_VALUE, VIDEO_ASSET_STATUSES,
+  type CreditRole, type MaturityRating, type MovieDetail, type MoviePage, type MovieSort, type MovieStatus,
+  type UnknownEnumValue, type VideoAssetStatus
 } from './moviesApi';
 
 export interface AdminMovieListQuery {
@@ -27,6 +29,43 @@ export interface UpsertMovieRequest {
   genres: string[];
   people: { personId: string; role: CreditRole }[];
   status: MovieStatus;
+}
+
+export interface VideoAssetStatusResponse {
+  videoAssetId: string;
+  status: VideoAssetStatus | UnknownEnumValue;
+  message?: string;
+}
+
+export class UnexpectedUploadResponseError extends Error {
+  readonly bodySent = true;
+
+  constructor() {
+    super('The upload returned an unexpected response status');
+    this.name = 'UnexpectedUploadResponseError';
+  }
+}
+
+export async function uploadMovieVideo(
+  client: ApiClient, movieId: string, file: File, declaredType: string, options?: UploadOptions
+): Promise<{ response: VideoAssetStatusResponse | null }> {
+  const canonicalId = movieId.toLowerCase();
+  if (!isCanonicalUuid(canonicalId)) throw new Error('A valid movie ID is required');
+  const body = new FormData();
+  // Only fill a missing browser MIME declaration. Preserve the original file name.
+  if (file.type === '') body.append('file', file.slice(0, file.size, declaredType), file.name);
+  else body.append('file', file, file.name);
+  const result = await client.upload(`/admin/movies/${canonicalId}/video`, body, options);
+  if (result.status !== 202) throw new UnexpectedUploadResponseError();
+  return { response: decodeVideoAssetStatusResponse(result.payload) };
+}
+
+export function decodeVideoAssetStatusResponse(value: unknown): VideoAssetStatusResponse | null {
+  if (!isRecord(value) || !isCanonicalUuid(value.videoAssetId) || typeof value.status !== 'string'
+    || (value.message !== undefined && typeof value.message !== 'string')) return null;
+  const status = VIDEO_ASSET_STATUSES.find((candidate) => candidate === value.status) ?? UNKNOWN_ENUM_VALUE;
+  return { videoAssetId: value.videoAssetId, status,
+    ...(value.message === undefined ? {} : { message: value.message }) };
 }
 
 export async function listAdminMovies(client: ApiClient, query: AdminMovieListQuery, signal?: AbortSignal): Promise<MoviePage> {

@@ -37,7 +37,7 @@ export interface MovieSummary {
   genres: string[];
   averageRating: number | null;
   status: MovieStatus | UnknownEnumValue;
-  /** Null while the movie has no video asset, which is always the case until upload exists. */
+  /** Playback availability; READY can remain while a replacement upload is processed. Null when no asset exists. */
   videoStatus: VideoAssetStatus | UnknownEnumValue | null;
 }
 

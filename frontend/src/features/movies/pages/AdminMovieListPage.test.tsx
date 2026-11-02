@@ -40,6 +40,17 @@ describe('AdminMovieListPage', () => {
     expect(new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost').pathname).toBe('/api/v1/admin/movies');
   });
 
+  it.each(['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const)('offers Upload video for %s and preserves the list return location', async (status) => {
+    fetchMock.mockResolvedValue(moviePage([movie(1, { status })]));
+    const returnTo = `/admin/movies?status=${status}&sort=title&page=2`;
+    renderList({ path: returnTo });
+    const link = await screen.findByRole('link', { name: 'Upload video for Movie 1' });
+    expect(link).toHaveAttribute('href', `/admin/movies/${movie(1).id}/video`);
+    fireEvent.click(link);
+    expect(await screen.findByText('Other destination')).toBeInTheDocument();
+    expect(screen.getByTestId('location-state')).toHaveTextContent(JSON.stringify({ returnTo }));
+  });
+
   it('restores status/sort/page and resets the page when status changes', async () => {
     fetchMock.mockImplementation(async () => moviePage([movie(1)], { page: 2, totalPages: 4, totalElements: 65 }));
     renderList({ path: '/admin/movies?status=ARCHIVED&sort=title&page=3' });
