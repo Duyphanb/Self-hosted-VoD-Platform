@@ -25,6 +25,10 @@ for the static route, inheritance and limit-equality checks. With Docker availab
 `vod-auth-audit-*` network and containers. No application JVM or existing Compose volumes
 are used. It checks Nginx syntax, Content-Length/chunked streaming, route body limits,
 edge JSON errors, unchanged backend error bodies, and HLS/health routing.
+Scratch files use the system temporary directory and are removed on exit. For a
+Docker Desktop bind mount, set `VOD_SMOKE_TMP` to an existing host directory that
+Docker can access (for example a temporary directory on D: on Windows). Only the
+smoke's generated child directory is removed; the supplied parent is retained.
 
 `sh deploy/tests/production-config-smoke.sh` checks the production preflight separately,
 including rejection of an upload limit that differs from the frozen 2048 MiB edge limit.

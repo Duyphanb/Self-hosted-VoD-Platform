@@ -26,21 +26,33 @@ cannot demonstrate worst-case physical disk use for real media. It passes the
 API's signature-family check and fits below the 2048 MiB multipart request limit.
 The script registers an account, grants the documented first-administrator role,
 seeds a DRAFT movie, and streams multipart through Nginx. It requires 202, the
-persisted QUEUED asset/job pair and an exact 2,000,000,000-byte private raw object.
+persisted QUEUED asset/job pair and an exact 2,000,000,000-byte raw object in the
+`vod-raw` bucket. Bucket privacy is proven by `storage-runtime-smoke.py` in CI,
+not by this rehearsal: its `--verify-only` invocation checks provenance/config,
+and the root-authenticated object-size check does not establish privacy.
 
 The Step Summary and JSON/Markdown artifact contain:
 
 - client send time, total client time, and the wait from the final multipart byte
   handed to the client TCP stack until the complete response is read;
-- observed spool logical/allocated peaks and per-container memory peaks from
-  `docker stats`;
+- observed spool logical/allocated peaks, per-container `docker stats` MemUsage
+  peaks, and separate cgroup v2 `memory.stat` `anon`/`file` observed peaks;
 - timestamped samples, minimum disk free space, and disk use before/after build,
   stack startup and upload, including the Docker data root;
 - logical versus allocated fixture size, commit, result, and cleanup result.
 
-Polling is approximately 1–2 seconds and may miss shorter peaks. This is a
-client-side saving-wait measurement, not proof of the time at which the last byte
-arrives at Tomcat. A zero/missing spool observation or incomplete measurement
+MemUsage includes active page cache, is bounded by the container memory limit,
+and is neither JVM heap nor process RSS. Spool writes and reads can therefore
+drive it toward the limit without corresponding JVM heap growth. The separate
+`anon` and `file` counters describe cgroup anonymous memory and file cache;
+their independent observed peaks need not occur in the same sample. If cgroup
+v2 `memory.stat` is unavailable (for example on cgroup v1), the report explicitly
+marks these counters unavailable rather than inventing zero values. Malformed
+available counters or failed probes still fail the measurement.
+
+Polling may miss shorter peaks; reading each container's cgroup counters also
+adds sampling overhead. Saving wait is a client-side measurement; it does not
+establish when the final body byte reaches Tomcat. A zero/missing spool observation or incomplete measurement
 fails the run instead of claiming evidence. Docker/kernel metadata are measured
 on the runner; encoding, ARM throughput, WAN transfer and VPS capacity are outside
 this evidence.

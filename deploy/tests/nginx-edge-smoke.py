@@ -10,6 +10,7 @@ from datetime import datetime
 import hashlib
 import http.client
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -216,13 +217,11 @@ def main():
               "            location = /api/v1/__smoke_503__ { return 503; }\n"
               "            location = /api/v1/__smoke_refused__ { proxy_pass http://backend:8082; }\n")
     test_config = test_config.replace(marker, marker + probes)
-    scratch = ROOT / ".lo_174b"
-    scratch.mkdir(exist_ok=True)
     network_created = False
     created_containers = []
     syntax_attempts = []
     primary_failure = False
-    with tempfile.TemporaryDirectory(prefix=project + "-", dir=scratch) as directory:
+    with tempfile.TemporaryDirectory(prefix=project + "-", dir=os.environ.get("VOD_SMOKE_TMP") or None) as directory:
         config = Path(directory) / "nginx.conf"
         config.write_text(test_config, encoding="utf-8", newline="\n")
         try:

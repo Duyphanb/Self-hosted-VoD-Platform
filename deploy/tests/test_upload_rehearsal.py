@@ -23,9 +23,7 @@ class UploadRehearsalTests(unittest.TestCase):
             REHEARSAL.memory_bytes("unknown")
 
     def test_sparse_fixture_has_exact_logical_size_and_signature(self):
-        temporary_root = REHEARSAL.ROOT / ".lo_174b"
-        temporary_root.mkdir(exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="rehearsal-unit-", dir=temporary_root) as directory:
+        with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "fixture.mp4"
             result = REHEARSAL.make_fixture(path, 128 * 1024)
             self.assertEqual(result["logical_bytes"], 128 * 1024)
@@ -113,9 +111,7 @@ class UploadRehearsalTests(unittest.TestCase):
         self.assertIn("--cleanup-only", workflow)
 
     def test_saving_wait_starts_after_the_last_multipart_byte(self):
-        temporary_root = REHEARSAL.ROOT / ".lo_174b"
-        temporary_root.mkdir(exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="rehearsal-unit-", dir=temporary_root) as directory:
+        with tempfile.TemporaryDirectory() as directory:
             fixture = Path(directory) / "fixture.mp4"
             REHEARSAL.make_fixture(fixture, 128)
             asset = uuid.uuid4()

@@ -120,6 +120,34 @@ def memory_bytes(value):
     return int(float(match.group(1)) * units[match.group(2)])
 
 
+def parse_memory_stat(source):
+    """Read cgroup-v2 byte counters, rejecting incomplete or malformed probes."""
+    counters = {}
+    for line in source.splitlines():
+        match = re.fullmatch(r"\s*([A-Za-z0-9_]+)\s+([0-9]+)\s*", line)
+        if match is None or match.group(1) in counters:
+            raise RehearsalError("Malformed cgroup memory.stat sample")
+        counters[match.group(1)] = int(match.group(2))
+    if not {"anon", "file"}.issubset(counters):
+        raise RehearsalError("Incomplete cgroup memory.stat sample")
+    return {"anon_bytes": counters["anon"], "file_bytes": counters["file"]}
+
+
+def container_memory_stat(container):
+    # Exit 42 is emitted only for a genuinely absent file in a searchable cgroup
+    # directory. Docker/exec failures, unreadable files and bad data stay fatal.
+    probe = ('if [ -d /sys/fs/cgroup ] && [ -x /sys/fs/cgroup ] '
+             '&& [ ! -e /sys/fs/cgroup/memory.stat ]; then exit 42; fi; '
+             'cat /sys/fs/cgroup/memory.stat')
+    result = command(["docker", "exec", container, "sh", "-c", probe], timeout=15, check=False)
+    if result.returncode == 42:
+        return {"status": "unavailable", "reason": "cgroup v1 or memory.stat is not exposed",
+                "anon_bytes": None, "file_bytes": None}
+    if result.returncode:
+        raise RehearsalError("Cannot read container cgroup memory.stat")
+    return {"status": "available", **parse_memory_stat(result.stdout)}
+
+
 def disk_usage_bytes(path):
     try:
         result = shutil.disk_usage(path)
@@ -172,6 +200,8 @@ class Sampler:
                 memory[service] = memory_bytes(row["MemUsage"])
         if set(memory) != set(self.ids):
             raise RehearsalError("Incomplete docker stats sample")
+        memory_stat = {service: container_memory_stat(container)
+                       for service, container in self.ids.items()}
         spool = command(["docker", "exec", self.backend, "sh", "-c",
                          'find "$TEMP_UPLOAD_DIR" -ignore_readdir_race -maxdepth 1 -type f '
                          '-name "upload_*.tmp" -printf "%s %b\\n"'], timeout=15)
@@ -181,6 +211,7 @@ class Sampler:
             logical += size
             allocated += blocks * 512
         sample = {"at": datetime.now(timezone.utc).isoformat(), "container_memory_bytes": memory,
+                  "container_memory_stat": memory_stat,
                   "spool_logical_bytes": logical, "spool_allocated_bytes": allocated,
                   "disk": disk_snapshot(self.directory, self.docker_root)}
         self.samples.append(sample)
@@ -206,9 +237,23 @@ class Sampler:
             raise RehearsalError("Measurement samples missing or incomplete")
         memory = {service: max(sample["container_memory_bytes"][service] for sample in self.samples)
                   for service in self.ids}
+        memory_stat = {}
+        for service in self.ids:
+            observed = [sample["container_memory_stat"][service] for sample in self.samples]
+            if len({sample["status"] for sample in observed}) != 1:
+                raise RehearsalError("Cgroup memory.stat availability changed during measurement")
+            if observed[0]["status"] == "unavailable":
+                memory_stat[service] = observed[0]
+            else:
+                memory_stat[service] = {"status": "available",
+                                        "anon_bytes": max(sample["anon_bytes"] for sample in observed),
+                                        "file_bytes": max(sample["file_bytes"] for sample in observed)}
         return {"sample_count": len(self.samples), "sampling_failures": self.failures,
-                "sampling_note": "Observed peaks; docker stats --no-stream plus spool/disk poll, approximately 1–2s, may miss shorter peaks",
+                "sampling_note": ("Observed peaks from sequential docker stats --no-stream, memory.stat and spool/disk polls; "
+                                  "may miss shorter peaks. MemUsage includes active page cache, is bounded by the container "
+                                  "memory limit, and is neither JVM heap nor process RSS."),
                 "container_memory_observed_peak_bytes": memory,
+                "container_memory_stat_observed_peaks": memory_stat,
                 "spool_logical_observed_peak_bytes": max(row["spool_logical_bytes"] for row in self.samples),
                 "spool_allocated_observed_peak_bytes": max(row["spool_allocated_bytes"] for row in self.samples),
                 "minimum_disk_free_bytes": {part: min(row["disk"][part]["free_bytes"] for row in self.samples)
