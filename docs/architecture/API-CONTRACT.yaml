@@ -1259,7 +1259,7 @@ components:
             the newest asset by created_at, id; null when no asset exists. A pending
             or failed replacement preserves READY while the old current is playable.
             UPLOADED is reserved; new uploads commit directly as QUEUED. Values
-            match VideoAssetStatus. Null until video upload is implemented.
+            match VideoAssetStatus.
           type: string
           nullable: true
           enum: [UPLOADED, QUEUED, PROCESSING, READY, FAILED, null]

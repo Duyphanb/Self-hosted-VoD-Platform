@@ -59,7 +59,7 @@ All rows below are **planned**, not passed tests. Copy them into implementation 
 
 | Decisions / feature | Planned evidence and owner |
 |---|---|
-| D1-D5, F-008 | 4.4/4.6: header auth before multipart parse/no temp, known-length spool/store, edge/backend oversize, cancel cleanup, deterministic slow/unavailable upstream; 4.7: XHR pre-check/progress/saving/no replay/status 0/504; synthetic non-VPS 2 GB runner rehearsal; #180: genuine 2 GB VPS metrics and concurrent-upload headroom/limit_conn decision before public deployment |
+| D1-D5, F-008 | 4.4/4.6: header auth before multipart parse/no temp, known-length spool/store, edge/backend oversize, cancel cleanup, deterministic slow/unavailable upstream; 4.7: XHR pre-check/progress/saving/no replay, status 0 by body-sent phase, code-based not-accepted 503 UPLOAD_STORAGE_UNAVAILABLE / 500 UPLOAD_DATABASE_ERROR versus unknown post-send network errors and other 5xx, even while videoStatus stays READY; synthetic non-VPS 2 GB runner rehearsal; #180: genuine 2 GB VPS metrics and concurrent-upload headroom/limit_conn decision before public deployment |
 | D6-D9, F-011/F-012 | #54 patched-binary/user evidence; #123 negative media fixtures; #124 target CPU measurement; 5.4/5.5/5.7/5.8 command restrictions, metadata caps, process-tree kill, disk check and container hardening |
 | D11-D15/D17, F-008/F-013/F-020 | 4.3/4.6 PostgreSQL partial index/concurrent 409 compensation; catalog READY fallback/tie ordering; 6.1/6.2 current-only playback/HLS/visibility-first 404; 9.2/9.3 newest-only retry/double retry/upload race |
 | D16/D19, F-009 | 4.2/4.5 golden fixture, confirms/returns, commit-before-publish, relay grace/crash/publish failure and fast-worker no-regression |

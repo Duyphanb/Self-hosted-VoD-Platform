@@ -11,6 +11,6 @@ export function createAppRoutes(extraContent?: ReactNode): RouteObject[] {
   return [{ path: '*', element: <AppProviders>{extraContent}<AppRoutes /></AppProviders> }];
 }
 
-export function createAppBrowserRouter() {
+export function createAppBrowserRouter(): ReturnType<typeof createBrowserRouter> {
   return createBrowserRouter(createAppRoutes(), { future: APP_ROUTER_FUTURE });
 }

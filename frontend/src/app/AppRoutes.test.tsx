@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthResponse, UserProfile } from '../lib/api/types';
+import { FakeXhr } from '../test/fakeXhr';
 import { AuthProvider } from '../features/auth/AuthContext';
 import { createAuthSession, writeAuthSession } from '../features/auth/authStorage';
 import { AppRoutes } from './AppRoutes';
@@ -21,6 +22,8 @@ describe('AppRoutes guard wiring', () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
+    FakeXhr.instances = [];
+    vi.stubGlobal('XMLHttpRequest', FakeXhr);
   });
 
   afterEach(() => {
@@ -41,19 +44,21 @@ describe('AppRoutes guard wiring', () => {
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
   });
 
-  const adminMovieRoutes = ['/admin/movies', '/admin/movies/new', '/admin/movies/6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21/edit'];
+  const adminMovieRoutes = ['/admin/movies', '/admin/movies/new', '/admin/movies/6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21/edit', '/admin/movies/6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21/video'];
   it.each(adminMovieRoutes)('rejects a regular user on the production route %s before any request', async (path) => {
     persistUser(regularUser);
     renderProductionRoutes(path);
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.length).toBe(0);
+    expect(FakeXhr.instances.length).toBe(0);
   });
 
   it.each(adminMovieRoutes)('sends a guest from the production route %s to sign in before any request', async (path) => {
     renderProductionRoutes(path);
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.length).toBe(0);
     expect(screen.getByTestId('current-location')).toHaveTextContent('/login');
+    expect(FakeXhr.instances.length).toBe(0);
   });
 
   it('renders /admin for ROLE_ADMIN', async () => {

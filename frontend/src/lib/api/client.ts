@@ -19,6 +19,24 @@ export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   json?: unknown;
 }
 
+export interface UploadOptions {
+  signal?: AbortSignal;
+  onProgress?: (loaded: number, total: number | null) => void;
+  onBodySent?: () => void;
+}
+
+export interface UploadResponse {
+  status: number;
+  payload: unknown;
+}
+
+export class UploadTransportError extends Error {
+  constructor(readonly kind: 'network' | 'abort' | 'timeout', readonly bodySent: boolean) {
+    super(`Upload ${kind}`);
+    this.name = 'UploadTransportError';
+  }
+}
+
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly apiError: ApiError | null;
@@ -36,6 +54,14 @@ export class AuthenticationSupersededError extends Error {
   constructor() {
     super('Authentication changed while the operation was in progress');
     this.name = 'AuthenticationSupersededError';
+  }
+}
+
+/** Preserve the transport's body-completion fact when an upload loses its session. */
+export class UploadAuthenticationSupersededError extends AuthenticationSupersededError {
+  constructor(readonly bodySent: boolean) {
+    super();
+    this.name = 'UploadAuthenticationSupersededError';
   }
 }
 
@@ -115,6 +141,90 @@ export class ApiClient {
       this.assertCurrentIdentity(initialAuthentication);
     }
     return payload;
+  }
+
+  /** A single, non-replayable body transfer. Only the preceding GET may refresh authentication. */
+  upload(path: string, body: FormData, options: UploadOptions = {}): Promise<UploadResponse> {
+    const authentication = this.authController.getAuthenticationSnapshot();
+    if (!authentication?.accessToken) return Promise.reject(new UploadAuthenticationSupersededError(false));
+    if (options.signal?.aborted) return Promise.reject(new UploadTransportError('abort', false));
+
+    return new Promise((resolve, reject) => {
+      let xhr: XMLHttpRequest;
+      try {
+        xhr = new XMLHttpRequest();
+      } catch {
+        reject(new UploadTransportError('network', false));
+        return;
+      }
+      let bodySent = false;
+      let settled = false;
+
+      const cleanup = () => {
+        options.signal?.removeEventListener('abort', abort);
+        xhr.upload.removeEventListener('progress', progress);
+        xhr.upload.removeEventListener('load', markBodySent);
+        xhr.removeEventListener('load', load);
+        xhr.removeEventListener('error', networkError);
+        xhr.removeEventListener('timeout', timeout);
+        xhr.removeEventListener('abort', aborted);
+      };
+      const settle = (result: UploadResponse | Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        try {
+          this.assertCurrentIdentity(authentication);
+        } catch {
+          reject(new UploadAuthenticationSupersededError(bodySent));
+          return;
+        }
+        if (result instanceof Error) reject(result);
+        else resolve(result);
+      };
+      const markBodySent = () => {
+        if (bodySent || settled) return;
+        bodySent = true;
+        options.onBodySent?.();
+      };
+      const progress = (event: ProgressEvent) => {
+        if (settled) return;
+        // Establish transport completion before notifying a callback that could cancel.
+        if (event.lengthComputable && event.total > 0 && event.loaded >= event.total) markBodySent();
+        if (settled) return;
+        options.onProgress?.(event.loaded, event.lengthComputable ? event.total : null);
+      };
+      const load = () => {
+        const status = xhr.status;
+        const payload = parsePayload(xhr.responseText);
+        settle(status >= 200 && status < 300
+          ? { status, payload }
+          : status === 0 ? new UploadTransportError('network', bodySent) : new ApiRequestError(status, payload));
+      };
+      const networkError = () => settle(new UploadTransportError('network', bodySent));
+      const timeout = () => settle(new UploadTransportError('timeout', bodySent));
+      const aborted = () => settle(new UploadTransportError('abort', bodySent));
+      const abort = () => xhr.abort();
+
+      xhr.upload.addEventListener('progress', progress);
+      xhr.upload.addEventListener('load', markBodySent);
+      xhr.addEventListener('load', load);
+      xhr.addEventListener('error', networkError);
+      xhr.addEventListener('timeout', timeout);
+      xhr.addEventListener('abort', aborted);
+      options.signal?.addEventListener('abort', abort);
+      try {
+        xhr.open('POST', this.url(path));
+        xhr.timeout = 0;
+        xhr.withCredentials = false;
+        xhr.setRequestHeader('Authorization', `Bearer ${authentication.accessToken}`);
+        this.assertCurrentIdentity(authentication);
+        xhr.send(body);
+      } catch (error) {
+        settle(error instanceof AuthenticationSupersededError
+          ? new UploadAuthenticationSupersededError(bodySent) : new UploadTransportError('network', bodySent));
+      }
+    });
   }
 
   private send(
@@ -202,7 +312,10 @@ async function responsePayload<T>(response: Response): Promise<T> {
 }
 
 async function readPayload(response: Response): Promise<unknown> {
-  const text = await response.text();
+  return parsePayload(await response.text());
+}
+
+function parsePayload(text: string): unknown {
   if (!text) {
     return null;
   }
