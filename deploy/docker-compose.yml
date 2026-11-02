@@ -75,6 +75,7 @@ services:
       FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       FLYWAY_CONNECT_RETRIES: "60"
       FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
     command:
       - migrate
     volumes:
