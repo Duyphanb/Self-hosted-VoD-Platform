@@ -1,2 +1,3 @@
 deploy/tests/*.sh text eol=lf
 deploy/minio-init.sh text eol=lf
+deploy/tests/schema-snapshot.sql text eol=lf
