@@ -20,6 +20,8 @@ node_modules/
 target/
 build/
 dist/
+__pycache__/
+*.pyc
 
 # IDE and OS files
 .idea/

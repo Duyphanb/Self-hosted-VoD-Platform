@@ -38,7 +38,7 @@ Updated 2026-10-29 for [ADR-010](../architecture/adr/ADR-010.md). Rows for deliv
 |---|---|---|
 | NFR-001 | F-021 | Docker Compose smoke test |
 | NFR-002 | F-021, F-022 | VPS resource observation during demo smoke test |
-| NFR-003 | F-008 | `.env.example` size/MIME allowlist configuration and backend rejection outside those limits; declared MIME/signature family, equal MiB ceilings including multipart overhead, route-limit JSON errors and real 2 GB prod-overlay timings/temp/memory (Issues 4.4/4.6/4.7) |
+| NFR-003 | F-008 | `.env.example` size/MIME allowlist configuration and backend rejection outside those limits; declared MIME/signature family, equal MiB ceilings including multipart overhead, route-limit JSON errors and a synthetic non-VPS 2 GB runner rehearsal (Issues 4.4/4.6/4.7); genuine 2 GB VPS timings/temp/memory/disk and concurrent-upload headroom (#180, before public deployment) |
 | NFR-004 | F-010 | One non-overlapping worker, prefetch/concurrency 1, startup recovery, caps/deadlines and long-job/second-queued-job test (5.1/5.3/5.7/#124) |
 | NFR-005 | F-012, F-013 | Browser playback smoke test |
 | NFR-006 | F-014, F-015 | Redis-to-PostgreSQL flush test |
@@ -50,7 +50,7 @@ Updated 2026-10-29 for [ADR-010](../architecture/adr/ADR-010.md). Rows for deliv
 | NFR-012 | All features | Documentation review before milestone completion |
 | NFR-013 | All MVP features | This traceability matrix plus test artifacts |
 | NFR-014 | F-021, F-022 | Compose service-name verification |
-| NFR-015 | Backend API features | Contract ApiError tests, edge 413/502/503/504 JSON/status/requestId and SPA unknown-result/no-auto-resubmit handling even while videoStatus stays READY |
+| NFR-015 | Backend API features | Contract ApiError tests, edge 413/502/503/504 JSON/status/requestId, backend upload 503 `UPLOAD_STORAGE_UNAVAILABLE` and 500 `UPLOAD_DATABASE_ERROR`/`UPLOAD_OUTCOME_UNKNOWN`/`INTERNAL_ERROR` with requestId, and SPA not-accepted versus unknown-result/no-auto-resubmit handling even while videoStatus stays READY |
 | NFR-016 | Frontend features | UI state tests or manual checklist |
 
 ## Sprint 4 design-to-test plan
@@ -59,7 +59,7 @@ All rows below are **planned**, not passed tests. Copy them into implementation 
 
 | Decisions / feature | Planned evidence and owner |
 |---|---|
-| D1-D5, F-008 | 4.4/4.6: header auth before multipart parse/no temp, known-length spool/store, edge/backend oversize, cancel cleanup, deterministic slow/unavailable upstream; 4.7: XHR pre-check/progress/saving/no replay/status 0/504; manual genuine 2 GB prod-overlay metrics |
+| D1-D5, F-008 | 4.4/4.6: header auth before multipart parse/no temp, known-length spool/store, edge/backend oversize, cancel cleanup, deterministic slow/unavailable upstream; 4.7: XHR pre-check/progress/saving/no replay/status 0/504; synthetic non-VPS 2 GB runner rehearsal; #180: genuine 2 GB VPS metrics and concurrent-upload headroom/limit_conn decision before public deployment |
 | D6-D9, F-011/F-012 | #54 patched-binary/user evidence; #123 negative media fixtures; #124 target CPU measurement; 5.4/5.5/5.7/5.8 command restrictions, metadata caps, process-tree kill, disk check and container hardening |
 | D11-D15/D17, F-008/F-013/F-020 | 4.3/4.6 PostgreSQL partial index/concurrent 409 compensation; catalog READY fallback/tie ordering; 6.1/6.2 current-only playback/HLS/visibility-first 404; 9.2/9.3 newest-only retry/double retry/upload race |
 | D16/D19, F-009 | 4.2/4.5 golden fixture, confirms/returns, commit-before-publish, relay grace/crash/publish failure and fast-worker no-regression |

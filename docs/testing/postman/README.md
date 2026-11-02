@@ -1,11 +1,13 @@
 # Postman Collections
 
-This folder contains the executable Sprint 2 authentication subset:
+This folder contains the executable sprint collections and their shared environment:
 
-- `vod-platform-sprint-2-auth.postman_collection.json`
+- `vod-platform-sprint-2-auth.postman_collection.json` (described first below)
+- `vod-platform-sprint-3-catalog.postman_collection.json`
+- `vod-platform-sprint-4-upload.postman_collection.json`
 - `vod-platform-local.postman_environment.json`
 
-It verifies registration, login, refresh-token rotation and rejection, authenticated profile access, and logout. It is intentionally not the comprehensive all-MVP collection owned by backlog Issue 10.3.
+The Sprint 2 collection verifies registration, login, refresh-token rotation and rejection, authenticated profile access, and logout. It is intentionally not the comprehensive all-MVP collection owned by backlog Issue 10.3.
 
 ## Prerequisites
 
@@ -19,7 +21,7 @@ If `NGINX_HTTP_PORT` uses a host port other than `80`, change `baseUrl` in the i
 
 ## Run in Postman
 
-1. Import both JSON files.
+1. Import the collection you want to run and the environment file.
 2. Select **VoD Platform - Local** as the active environment.
 3. Run the complete **VoD Platform - Sprint 2 Auth** collection in its numbered order.
 4. Confirm that every request and test passes.
@@ -70,16 +72,55 @@ npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-3-catalog.po
 
 Every run creates its own genre, person and movies with a unique suffix, so it tolerates existing catalog data. Use a fresh admin email per run: the helper accepts an existing account but cannot change its password.
 
+## Sprint 4 Upload Collection
+
+`vod-platform-sprint-4-upload.postman_collection.json` (**VoD Platform - Sprint 4 Upload**) checks the admin upload endpoint `POST /api/v1/admin/movies/{movieId}/video` through Nginx in 10 numbered requests:
+
+1. signs in as the administrator;
+2. registers a regular user;
+3. signs in as that user;
+4. rejects an anonymous upload with `401 UNAUTHORIZED` (authorization runs before the multipart body is parsed);
+5. rejects the regular user's upload with `403 FORBIDDEN`, also before parsing;
+6. rejects a text file with `400 UNSUPPORTED_VIDEO_TYPE`;
+7. rejects an upload for a missing movie with `404 MOVIE_NOT_FOUND`;
+8. rejects an upload for a movie with a seeded in-flight asset with `409 VIDEO_UPLOAD_IN_PROGRESS`;
+9. rejects an oversized file with the backend `413 PAYLOAD_TOO_LARGE` ApiError, passed through the edge;
+10. accepts a valid upload with `202` and status `QUEUED`.
+
+Every error body must carry a safe `requestId` (`[A-Za-z0-9._-]{1,64}`) and no storage internals; the `202` body carries no `requestId` and no internal keys.
+
+Prerequisites:
+
+- An administrator promoted with the documented first-administrator SQL, as for the Sprint 3 collection (`deploy/tests/newman-catalog-admin.py` does both steps).
+- `deploy/tests/newman-upload-fixtures.py --project <disposable project> --base-url <loopback URL> --fixtures-dir <directory>` generates `valid.mp4`, `note.txt` and a 1.5 MiB `oversize.mp4` in that directory, seeds two DRAFT movies in the project's PostgreSQL container and prints `uploadMovieId=...` and `inFlightMovieId=...`. The in-flight movie gets a QUEUED asset/job pair already marked published, so the 409 does not depend on worker timing. The helper refuses the default `vod-platform` project and non-loopback URLs. Run it before every collection run: after request 10 the upload movie has an in-flight asset, so a rerun with the same `uploadMovieId` gets `409`.
+- The backend must run with `MAX_UPLOAD_SIZE_MB=1`, as the CI full-stack step does; otherwise the 1.5 MiB file is accepted and request 9 fails.
+
+Run Newman with `--working-dir` pointing at the generated files, because the collection's form-data files are relative names:
+
+```bash
+npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-4-upload.postman_collection.json \
+  -e docs/testing/postman/vod-platform-local.postman_environment.json \
+  --working-dir "$UPLOAD_FIXTURES_DIR" --env-var baseUrl=http://127.0.0.1:18087 \
+  --env-var "adminEmail=$NEWMAN_ADMIN_EMAIL" --env-var "adminPassword=$NEWMAN_ADMIN_PASSWORD" \
+  --env-var "uploadMovieId=$UPLOAD_MOVIE_ID" --env-var "inFlightMovieId=$IN_FLIGHT_MOVIE_ID" --silent
+```
+
+The Postman app needs absolute file paths for form-data files: reselect the generated files in requests 04-10 before running the collection there.
+
+CI runs this collection in the full-stack step, after the Sprint 3 catalog collection, against the same disposable Compose project and administrator. `MAX_UPLOAD_SIZE_MB=1` is set for that step only, the fixtures are generated under `$RUNNER_TEMP`, the two movie IDs are passed with `--env-var`, and `--silent` keeps only the exit status. The accepted upload streams to the project's private raw bucket, which is removed with the project's volumes on exit.
+
 ## Test Data and Secret Safety
 
 - `testPassword` is a synthetic local-only value, not a real credential.
 - The collection generates a new synthetic email on every ordered run.
-- Synthetic users remain in the local PostgreSQL volume after a run.
+- Synthetic users remain in the local PostgreSQL volume after a run. The Sprint 3 collection leaves its catalog fixtures, and the Sprint 4 upload collection leaves two seeded movies, an in-flight QUEUED asset/job pair and a raw object; run them only against a disposable project.
 - Access and refresh token variables start empty and are marked as secrets.
 - Do not export or commit an environment after it has captured live tokens.
 - Do not point this collection at a shared or production deployment without an explicit test-data and cleanup plan.
 
 ## Contract Notes
+
+The notes below concern the Sprint 2 auth collection.
 
 The frozen OpenAPI contract lists logout as unauthenticated with an optional body and documents `204`, `400` and `401`. Sprint 2 Issue 2.4 and the current implementation are more specific: logout is public and idempotently returns `204` whether the submitted token is active, revoked, unknown, or omitted. This collection verifies the implemented Sprint 2 behavior without changing the frozen architecture documents.
 
@@ -87,4 +128,4 @@ The `ApiError.code` checks are implementation regression evidence. The frozen sc
 
 The contract now also declares the validation `400` responses (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) that login, refresh and logout already returned through the existing request-validation layer (Issue #120). The runtime behavior did not change. The backend full-context tests validate these responses against `API-CONTRACT.yaml`; this collection does not exercise them.
 
-No test-only RBAC probe is included. Production admin business endpoints belong to later sprints, and frontend route guards are not a backend authorization boundary.
+The Sprint 2 collection includes no test-only RBAC probe; the admin catalog and upload authorization checks live in the Sprint 3 and Sprint 4 collections. Frontend route guards are not a backend authorization boundary.

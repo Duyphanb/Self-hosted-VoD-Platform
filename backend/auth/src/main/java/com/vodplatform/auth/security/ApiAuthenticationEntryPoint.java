@@ -1,11 +1,11 @@
 package com.vodplatform.auth.security;
 
-import com.vodplatform.shared.error.ApiError;
+import com.vodplatform.shared.error.ApiErrorFactory;
+import com.vodplatform.shared.web.RequestIds;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -15,6 +15,10 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
+/**
+ * Writes the 401 {@code ApiError}. A correlated request (the upload operation) also carries its
+ * {@code requestId}; other routes keep the uncorrelated body.
+ */
 @Component
 public class ApiAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
@@ -22,11 +26,11 @@ public class ApiAuthenticationEntryPoint implements AuthenticationEntryPoint {
     private static final String ERROR_MESSAGE = "Authentication required or invalid token";
 
     private final ObjectMapper objectMapper;
-    private final Clock clock;
+    private final ApiErrorFactory apiErrorFactory;
 
-    public ApiAuthenticationEntryPoint(ObjectMapper objectMapper, Clock clock) {
+    public ApiAuthenticationEntryPoint(ObjectMapper objectMapper, ApiErrorFactory apiErrorFactory) {
         this.objectMapper = objectMapper;
-        this.clock = clock;
+        this.apiErrorFactory = apiErrorFactory;
     }
 
     @Override
@@ -41,12 +45,12 @@ public class ApiAuthenticationEntryPoint implements AuthenticationEntryPoint {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(
                 response.getOutputStream(),
-                new ApiError(
-                        clock.instant(),
-                        HttpStatus.UNAUTHORIZED.value(),
+                apiErrorFactory.create(
+                        HttpStatus.UNAUTHORIZED,
                         ERROR_CODE,
                         ERROR_MESSAGE,
-                        List.of()
+                        List.of(),
+                        RequestIds.existing(request).orElse(null)
                 )
         );
     }

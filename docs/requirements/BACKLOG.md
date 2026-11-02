@@ -525,7 +525,7 @@ Verified against `main` at `7e9668e` on 2026-10-28; see the [Sprint 3 closeout e
 **Related Stories:** US-008  
 **Related NFRs:** NFR-003, NFR-008, NFR-009, NFR-015
 
-**Design authority:** [ADR-010](../architecture/adr/ADR-010.md), API-CONTRACT, ERD, SECURITY and INFRASTRUCTURE. Create the implementation issues with these criteria after the docs merge. Order: 4.1; 4.3 (V5); 4.2; 4.4/4.5; 4.6 with #52; 4.7; measured prod-overlay upload. PostgreSQL race evidence uses #119 or an isolated Compose smoke, not H2. Do not introduce Testcontainers as an assumed existing dependency.
+**Design authority:** [ADR-010](../architecture/adr/ADR-010.md), API-CONTRACT, ERD, SECURITY and INFRASTRUCTURE. Create the implementation issues with these criteria after the docs merge. Order: 4.1; 4.3 (V5); 4.2; 4.4/4.5; 4.6 with #52; 4.7; the synthetic non-VPS 2 GB rehearsal (the genuine VPS measurement is #180, before public deployment). PostgreSQL race evidence uses #119 or an isolated Compose smoke, not H2. Do not introduce Testcontainers as an assumed existing dependency.
 
 ### Issue 4.1: Backend MinIO Client Configuration
 
@@ -591,7 +591,7 @@ Validate the spooled multipart file, stream raw to Silo with known length, then 
 - Set Spring file/request limits to `${MAX_UPLOAD_SIZE_MB:2048}MB`, spool `${TEMP_UPLOAD_DIR:/tmp/vod-uploads}`, threshold 0B. Validate directory and sweep only stale regular Tomcat `upload_*.tmp` files non-recursively before connector start, no symlink traversal/general temp sweep/ApplicationRunner
 - Stream `getInputStream()` with `getSize()` to private `vod-raw` at `{movieId}/{videoAssetId}.{ext}`, never `getBytes()`; release request temp files on completion/abort
 - Advisory in-flight pre-check before PUT saves storage writes; authoritative V5 partial index maps concurrent loser to 409 `VIDEO_UPLOAD_IN_PROGRESS`
-- Measure temp-disk headroom for concurrent uploads to different movies (each may spool up to the configured ceiling): values to be measured in Issue 4.4/4.6 on the target VPS. If insufficient, document a measured fallback proposal such as upload-location Nginx limit_conn 1; adopt no limit without measurement and a recorded decision
+- Temp-disk headroom for concurrent uploads to different movies (each may spool up to the configured ceiling) is measured on the target VPS in #180, which blocks public deployment; until then it is not measured and no limit_conn is set. If insufficient, #180 documents a measured fallback proposal such as upload-location Nginx limit_conn 1; adopt no limit without measurement and a recorded decision
 - Raw PUT precedes the new asset/job transaction; if it does not commit (including 409 loser), best-effort delete only this request's raw key, WARN with IDs on cleanup failure. Read back uncertain commits by generated asset/job IDs; retain raw while outcome is unknown. Never delete raw on a post-commit publish failure
 - Assign asset `created_at` only inside that insert transaction, after PUT and per-movie serialization. Test overlapping PUTs: X starts first, Y commits and reaches READY before X's PUT ends, then X inserts; X must rank newest, Y stays current until X reaches READY, then X becomes current
 - Return the committed acceptance DTO (QUEUED), with no internal keys/credentials; UPLOADED stays reserved
@@ -628,14 +628,14 @@ Implement `POST /api/v1/admin/movies/{movieId}/video` endpoint for admin video u
 - Accepts multipart file
 - Validates movie exists
 - Calls upload service and encoding job service
-- Returns 202 after raw storage and DB commit, even if broker publication is pending; validation 400, missing movie 404, anonymous 401, non-admin 403, in-flight 409 `VIDEO_UPLOAD_IN_PROGRESS`
+- Returns 202 after raw storage and DB commit, even if broker publication is pending; validation 400, missing movie 404, anonymous 401, non-admin 403, in-flight 409 `VIDEO_UPLOAD_IN_PROGRESS`, 503 `UPLOAD_STORAGE_UNAVAILABLE` / 500 `UPLOAD_DATABASE_ERROR` / 500 `UPLOAD_OUTCOME_UNKNOWN` / 500 `INTERNAL_ERROR`, each ApiError with requestId
 - Backend-direct oversize raises `MaxUploadSizeExceededException` -> 413 `PAYLOAD_TOO_LARGE` ApiError; multipart request ceiling includes overhead
 - Actual HTTP multipart tests prove 401/403 before parse and no upload temp files (including invalid body/missing movie); PostgreSQL parallel uploads produce one accepted transaction and one mapped 409 with compensating delete
 - PostgreSQL overlap test pauses X's PUT while Y commits/reaches READY, then lets X finish PUT and insert; assert asset created_at is assigned after serialization, newest/current follow insert order rather than request start, and no timestamp was captured at pre-PUT ID generation
 - Implement #52/#116 Nginx change only with/after this route: global 1m, nested upload-only regex with own URI-less proxy_pass, 2048m, buffering off, read timeout 600s, inherited headers/HTTP1.1, 60s body/send idle defaults, edge ApiError 413/502/503/504 and proxy_intercept_errors off per INFRASTRUCTURE
 - Smoke/preflight asserts edge literal and SPA constant equal MAX_UPLOAD_SIZE_MB; changing that value without coordinated limits fails closed; document the consistency rule in `.env.example`
 - #52 runtime tests: >1 MiB ordinary/auth body rejected; valid 2 MiB upload accepted by a custom stub with client_max_body_size 0; oversized upload edge 413 JSON; deterministic unavailable/slow stub 502/504 JSON with status/requestId; HLS/health unchanged. A short test timeout may accelerate 504 but verify production 600s
-- Test cancelled sending releases temp files; record a real 2 GB (2,000,000,000 B) prod-overlay upload with no 504 and measurements listed in Sprint 4 DoD. Upload endpoints/storage/broker use only isolated test resources
+- Test cancelled sending releases temp files; record a synthetic 2,000,000,000 B transport/storage rehearsal with no 504 in a `workflow_dispatch` job on a GitHub-hosted runner, labelled non-VPS evidence (it does not prove encoding, ARM throughput or VPS disk headroom). The genuine 2 GB run on the target VPS and its measurements move to #180, which blocks public deployment. Upload endpoints/storage/broker use only isolated test resources
 
 **Dependencies:** Issues 4.4, 4.5, Issue 2.6
 
@@ -653,9 +653,9 @@ Create protected admin upload UI and shared `ApiClient.upload()` on XMLHttpReque
 - videoStatus may stay READY during replacement; it is availability, not a complete in-flight pre-check. Server 409 remains authoritative
 - XHR percent progress; Cancel only during body transfer. At 100%, “Saving to storage…” with Cancel hidden/disabled
 - Success message shows video asset status (QUEUED)
-- Map 400/413 clearly, 409 as upload already in progress, 401 as session expired (never automatically resend body), status 0 as file too large or connection lost. After a network error once the body was fully sent, or 502/503/504, show “Upload result unknown”; never infer outcome from MovieDetail.videoStatus, which may stay READY throughout a replacement
+- Map 400/413 clearly, 409 as upload already in progress, 401 as session expired (never automatically resend body), status 0 as file too large or connection lost. Once the body was fully sent, show “Upload result unknown” for any 5xx or network error, unless the ApiError `code` is `UPLOAD_STORAGE_UNAVAILABLE` (503) or `UPLOAD_DATABASE_ERROR` (500): then show that the upload was not accepted (no committed asset/job pair) and allow manual retry. Edge 502/503/504, `UPLOAD_OUTCOME_UNKNOWN`, `INTERNAL_ERROR` and unmapped 500s stay unknown; never infer outcome from MovieDetail.videoStatus, which may stay READY throughout a replacement
 - Explain deliberate re-upload is safe: while the first asset is UPLOADED/QUEUED/PROCESSING the server returns 409 VIDEO_UPLOAD_IN_PROGRESS; if it already finished, re-upload creates a newer asset with extra storage cost, reclaimable by the manual purge runbook, without corrupting existing assets. Never auto-resubmit, including after ambiguous disconnect/cancel; #168 supplies a direct newest-asset view later, with no new endpoint in this issue
-- Tests cover pre-check failure, empty MIME fallback, own-request disable, progress/saving switch, cancel availability and no automatic body replay; lost replacement-upload response while videoStatus stays READY, unknown-result messaging for post-send network error/502/503/504, deliberate re-upload 409 while in-flight, and a new asset/extra-storage notice after completion
+- Tests cover pre-check failure, empty MIME fallback, own-request disable, progress/saving switch, cancel availability and no automatic body replay; lost replacement-upload response while videoStatus stays READY, unknown-result messaging for post-send network error and edge 502/503/504, code-based not-accepted 503/500 (`UPLOAD_STORAGE_UNAVAILABLE`, `UPLOAD_DATABASE_ERROR`) versus unknown 500 (`UPLOAD_OUTCOME_UNKNOWN`, `INTERNAL_ERROR`, unmapped), deliberate re-upload 409 while in-flight, and a new asset/extra-storage notice after completion
 - Admin upload page is protected with `ROLE_ADMIN` guard
 
 **Dependencies:** Issue 4.6, Issue 2.10
@@ -675,7 +675,7 @@ Create protected admin upload UI and shared `ApiClient.upload()` on XMLHttpReque
 - [ ] Unit and integration tests cover upload and queue publish
 - [ ] Postman/Newman collection covers upload 202/400/401/403/404/409/413; edge smoke covers ApiError 413/502/503/504, route limits and unchanged HLS/health
 - [ ] `.env.example` documents size/MIME/temp, confirm/relay settings and edge/SPA consistency rule; backend spool/abort/startup cleanup verified
-- [ ] Real 2 GB prod-overlay upload finishes without 504; record client time, post-100% saving wait, temp-disk peak, docker stats memory and actual VPS disk size, **to be measured in Issue 4.6/4.7**. Demo target remains 500 MB-1 GB. If saving approaches 600s or disk is insufficient, propose a separate ADR
+- [ ] Synthetic 2,000,000,000 B transport/storage rehearsal on a GitHub-hosted runner finishes without 504, labelled non-VPS evidence; it closes Sprint 4. The genuine VPS run (client time over WAN, post-100% saving wait, temp-disk peak, docker stats memory, actual VPS disk size/data root) and concurrent-upload headroom are tracked by #180 before public deployment, **to be measured in #180**. Demo target remains 500 MB-1 GB. If saving approaches 600s or disk is insufficient, #180 proposes a separate ADR
 - [ ] This sprint proves upload/storage/queue only; upload -> transcode -> HLS playback remains #125
 
 ---

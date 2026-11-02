@@ -537,9 +537,20 @@ paths:
         File and total multipart request limits both use MAX_UPLOAD_SIZE_MB
         (default 2048 MiB); the request ceiling includes multipart overhead.
         Invalid MIME/signature family returns 400 UNSUPPORTED_VIDEO_TYPE.
-        Early rejections may appear as a connection error in browsers; after an
-        ambiguous post-send network error or 502/503/504, show an unknown result;
-        MovieDetail.videoStatus cannot establish whether a replacement landed.
+        The body has exactly one part, named file: a missing file or any
+        additional named part returns 400 VALIDATION_ERROR (field file); a
+        malformed multipart body returns 400 MALFORMED_REQUEST; more parts than
+        the server's part-count limit return 413 PAYLOAD_TOO_LARGE.
+        Early rejections may appear as a connection error in browsers.
+        Backend failures return ApiError with requestId: 503 UPLOAD_STORAGE_UNAVAILABLE
+        (raw storage or spool I/O) and 500 UPLOAD_DATABASE_ERROR mean the upload
+        was not accepted (no committed asset/job pair; manual retry allowed);
+        500 UPLOAD_OUTCOME_UNKNOWN means the commit could not be confirmed and the
+        raw object is retained. Once the body was fully sent, treat any other 5xx
+        (including INTERNAL_ERROR and edge 502/503/504) or a network error as an
+        unknown result; MovieDetail.videoStatus cannot establish whether a
+        replacement landed. Multipart bodies sent to any other operation are
+        rejected with 400 MALFORMED_REQUEST before authentication.
         Never automatically resubmit. A deliberate re-upload returns 409 while
         in-flight, or creates a newer asset with extra storage cost if the first
         finished. A direct newest-asset view follows in #168; no new endpoint here.
@@ -550,6 +561,7 @@ paths:
             schema:
               type: object
               required: [file]
+              additionalProperties: false
               properties:
                 file:
                   type: string
@@ -577,10 +589,29 @@ paths:
                 $ref: "#/components/schemas/ApiError"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          description: >
+            UPLOAD_DATABASE_ERROR - database failure before commit or a known
+            rollback; the upload was not accepted. UPLOAD_OUTCOME_UNKNOWN - the
+            commit could not be confirmed; the raw object is retained; never
+            resubmit automatically. INTERNAL_ERROR - any other failure; the result
+            is unknown.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "502":
           $ref: "#/components/responses/UpstreamUnavailable"
         "503":
-          $ref: "#/components/responses/UpstreamUnavailable"
+          description: >
+            UPLOAD_STORAGE_UNAVAILABLE from the backend - raw storage or spool I/O
+            failed before commit; the upload was not accepted; manual retry allowed.
+            UPSTREAM_UNAVAILABLE from the edge - no backend was reachable; once the
+            body was sent the result is unknown.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
         "504":
           $ref: "#/components/responses/UpstreamTimeout"
 
@@ -1080,8 +1111,9 @@ components:
             MALFORMED_REQUEST, UNAUTHORIZED, FORBIDDEN, MOVIE_NOT_FOUND,
             GENRE_NOT_FOUND, PERSON_NOT_FOUND, MOVIE_SLUG_CONFLICT, GENRE_CONFLICT,
             PAYLOAD_TOO_LARGE, UNSUPPORTED_VIDEO_TYPE, VIDEO_UPLOAD_IN_PROGRESS,
-            VIDEO_NOT_READY, VIDEO_ASSET_NOT_RETRYABLE, UPSTREAM_UNAVAILABLE and
-            UPSTREAM_TIMEOUT. The list is not exhaustive.
+            UPLOAD_STORAGE_UNAVAILABLE, UPLOAD_DATABASE_ERROR, UPLOAD_OUTCOME_UNKNOWN,
+            INTERNAL_ERROR, VIDEO_NOT_READY, VIDEO_ASSET_NOT_RETRYABLE,
+            UPSTREAM_UNAVAILABLE and UPSTREAM_TIMEOUT. The list is not exhaustive.
         message:
           type: string
         requestId:

@@ -4,6 +4,7 @@ import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.messaging.EncodingJobMessage;
 import com.vodplatform.encoding.service.EncodingJobService;
 import com.vodplatform.shared.storage.ObjectStorage;
+import com.vodplatform.shared.web.RequestIds;
 import com.vodplatform.upload.exception.UnsupportedVideoTypeException;
 import com.vodplatform.upload.exception.UploadStorageException;
 import com.vodplatform.upload.exception.UploadTooLargeException;
@@ -22,19 +23,17 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * Stores raw media before committing the asset/job pair. Callers must have no ambient transaction.
  * Validation and movie conflicts use typed ApiExceptions. Storage, database and unresolved commit
- * failures remain unmapped service exceptions until the endpoint contract is implemented in #174.
- * An unresolved commit retains raw media; a known failed write is compensated best effort.
+ * failures are typed service exceptions that the upload endpoint maps to 503/500 (see
+ * {@code UploadExceptionHandler}). An unresolved commit retains raw media; a known failed write is
+ * compensated best effort.
  */
 @Service
 public class VideoUploadService {
     private static final Logger log = LoggerFactory.getLogger(VideoUploadService.class);
-
-    private static final Pattern REQUEST_ID = Pattern.compile("[A-Za-z0-9._-]{1,64}");
 
     private final ObjectStorage storage;
 
@@ -60,8 +59,7 @@ public class VideoUploadService {
         EncodingJobService.requireNoTransaction();
         Objects.requireNonNull(movieId, "movieId");
         Optional<String> safeRequestId =
-                Objects.requireNonNull(requestId, "requestId")
-                        .filter(value -> REQUEST_ID.matcher(value).matches());
+                Objects.requireNonNull(requestId, "requestId").flatMap(RequestIds::sanitize);
         if (file == null || file.isEmpty() || file.getSize() <= 0) {
             throw new UploadValidationException();
         }
