@@ -1,4 +1,4 @@
-"""Validate storage credential preflight locally, without Compose or services."""
+"""Validate production credential and upload-limit preflight without services."""
 import os
 from pathlib import Path
 import shutil
@@ -22,7 +22,7 @@ class StorageCredentialPreflightTests(unittest.TestCase):
                            MINIO_BACKEND_ACCESS_KEY="fixture-backend", MINIO_BACKEND_SECRET_KEY="fixture-backend-secret",
                            MINIO_WORKER_ACCESS_KEY="fixture-worker", MINIO_WORKER_SECRET_KEY="fixture-worker-secret",
                            JWT_SECRET="fixture-jwt-secret-longer-than-thirty-two-bytes", NGINX_HTTP_PORT="80",
-                           MINIO_BROWSER="off", LC_ALL="C")
+                           MINIO_BROWSER="off", MAX_UPLOAD_SIZE_MB="2048", LC_ALL="C")
         if name:
             environment[name] = value
         result = subprocess.run([SHELL, str(REPOSITORY / "deploy/tests/production-config-check.sh")],
@@ -65,6 +65,14 @@ class StorageCredentialPreflightTests(unittest.TestCase):
     def test_valid_minimum_access_key_and_baseline_pass(self):
         self.assertEqual(self.execute().returncode, 0)
         self.assertEqual(self.execute("MINIO_BACKEND_ACCESS_KEY", "abc").returncode, 0)
+
+    def test_upload_limit_fails_closed_unless_it_equals_the_edge_literal(self):
+        for value in ("1024", "4096", "", "2048MB", "02048", " 2048"):
+            with self.subTest(value=value):
+                result = self.execute("MAX_UPLOAD_SIZE_MB", value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("MAX_UPLOAD_SIZE_MB must equal the frozen Nginx upload limit", result.stderr)
+        self.assertEqual(self.execute("MAX_UPLOAD_SIZE_MB", "2048").returncode, 0)
 
 
 if __name__ == "__main__":

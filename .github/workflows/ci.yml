@@ -108,6 +108,9 @@ jobs:
       - name: Verify Nginx SPA and reserved route boundaries
         run: sh deploy/tests/nginx-routing-smoke.sh vod-frontend-skeleton
 
+      - name: Verify upload edge limits, streaming and error responses
+        run: python3 deploy/tests/nginx-edge-smoke.py --project "${COMPOSE_PROJECT_NAME}-edge"
+
       - name: Build compose application images
         run: docker compose -f deploy/docker-compose.yml build backend worker frontend
 

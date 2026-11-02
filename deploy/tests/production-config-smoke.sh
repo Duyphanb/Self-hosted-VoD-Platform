@@ -33,6 +33,7 @@ set_synthetic_values() {
   minio_worker_secret_key_value="ci-worker-secret-$worker_secret_token"
   jwt_secret_value="ci-jwt-signing-secret-$jwt_secret_token"
   nginx_http_port_value="80"
+  max_upload_size_mb_value="2048"
 }
 
 set_published_defaults() {
@@ -48,6 +49,7 @@ set_published_defaults() {
   minio_worker_secret_key_value="change-me-worker-only"
   jwt_secret_value="change-me-use-a-long-random-secret"
   nginx_http_port_value="127.0.0.1:80"
+  max_upload_size_mb_value="2048"
 }
 
 value_for() {
@@ -64,6 +66,7 @@ value_for() {
     MINIO_WORKER_SECRET_KEY) printf '%s' "$minio_worker_secret_key_value" ;;
     JWT_SECRET) printf '%s' "$jwt_secret_value" ;;
     NGINX_HTTP_PORT) printf '%s' "$nginx_http_port_value" ;;
+    MAX_UPLOAD_SIZE_MB) printf '%s' "$max_upload_size_mb_value" ;;
     *) printf '%s\n' "Unknown test variable: $1" >&2; exit 1 ;;
   esac
 }
@@ -85,7 +88,8 @@ write_env_file() {
     MINIO_WORKER_SECRET_KEY \
     MINIO_SECRET_KEY \
     JWT_SECRET \
-    NGINX_HTTP_PORT
+    NGINX_HTTP_PORT \
+    MAX_UPLOAD_SIZE_MB
   do
     [ "$credential_name" = "$omitted_variable" ] && continue
     if [ "$credential_name" = "$empty_variable" ]; then
@@ -109,6 +113,7 @@ run_check() {
   MINIO_WORKER_SECRET_KEY="$minio_worker_secret_key_value" \
   JWT_SECRET="$jwt_secret_value" \
   NGINX_HTTP_PORT="$nginx_http_port_value" \
+  MAX_UPLOAD_SIZE_MB="$max_upload_size_mb_value" \
     sh "$check_script"
 }
 
@@ -125,6 +130,7 @@ run_production_compose() {
   MINIO_WORKER_SECRET_KEY="$minio_worker_secret_key_value" \
   JWT_SECRET="$jwt_secret_value" \
   NGINX_HTTP_PORT="$nginx_http_port_value" \
+  MAX_UPLOAD_SIZE_MB="$max_upload_size_mb_value" \
   CORS_ALLOWED_ORIGINS= \
     docker compose \
       -p "$compose_project" \
@@ -147,6 +153,7 @@ run_production_compose_from_file() {
     -u MINIO_WORKER_SECRET_KEY \
     -u JWT_SECRET \
     -u NGINX_HTTP_PORT \
+    -u MAX_UPLOAD_SIZE_MB \
     -u CORS_ALLOWED_ORIGINS \
     docker compose \
       --env-file "$env_file" \
@@ -348,6 +355,20 @@ done
 printf '%s\n' "Production edge publication checks passed"
 
 set_synthetic_values
+max_upload_size_mb_value="1024"
+if run_check > "$log_file" 2>&1; then
+  printf '%s\n' "Production preflight accepted an upload limit different from Nginx" >&2
+  exit 1
+fi
+assert_log_contains "MAX_UPLOAD_SIZE_MB must equal the frozen Nginx upload limit"
+if run_production_compose run --rm --no-deps production-config-check > "$log_file" 2>&1; then
+  printf '%s\n' "Production Compose preflight accepted an upload limit different from Nginx" >&2
+  exit 1
+fi
+assert_log_contains "MAX_UPLOAD_SIZE_MB must equal the frozen Nginx upload limit"
+printf '%s\n' "Production upload-limit equality rejection checks passed"
+
+set_synthetic_values
 if MINIO_BROWSER=on run_check > "$log_file" 2>&1; then
   printf '%s\n' "Production console was accepted" >&2
   exit 1
@@ -459,6 +480,7 @@ expected = {
         "MINIO_WORKER_SECRET_KEY": values["MINIO_WORKER_SECRET_KEY"],
         "JWT_SECRET": values["JWT_SECRET"],
         "NGINX_HTTP_PORT": "80",
+        "MAX_UPLOAD_SIZE_MB": "2048",
     },
     "postgres": {"POSTGRES_USER": values["POSTGRES_USER"], "POSTGRES_PASSWORD": values["POSTGRES_PASSWORD"]},
     "rabbitmq": {"RABBITMQ_DEFAULT_USER": values["RABBITMQ_USERNAME"], "RABBITMQ_DEFAULT_PASS": values["RABBITMQ_PASSWORD"]},
@@ -469,6 +491,7 @@ expected = {
         "SPRING_DATASOURCE_USERNAME": values["POSTGRES_USER"],
         "SPRING_DATASOURCE_PASSWORD": values["POSTGRES_PASSWORD"],
         "SPRING_JPA_HIBERNATE_DDL_AUTO": "validate",
+        "MAX_UPLOAD_SIZE_MB": "2048",
         "JWT_SECRET": values["JWT_SECRET"],
         "CORS_ALLOWED_ORIGINS": "",
         "RABBITMQ_USERNAME": values["RABBITMQ_USERNAME"],
