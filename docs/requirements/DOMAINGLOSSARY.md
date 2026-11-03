@@ -16,7 +16,7 @@ Use these terms consistently across code, documentation, API contracts, and UI l
 | Genre | A category assigned to movies for browsing, filtering, and search. |
 | HLS | HTTP Live Streaming, the MVP playback format based on `.m3u8` playlists and segment files. |
 | HLS Artifact | A generated playlist or media segment produced by FFmpeg and stored in MinIO. |
-| Master Playlist | The main `.m3u8` playlist returned for playback. For MVP it may point to one quality level. |
+| Master Playlist | The `.m3u8` playlist returned for playback, stored as `master.m3u8` for one encoding attempt. In the MVP it is a single VOD media playlist (one quality, no multivariant playlist) with relative `segments/` URIs. |
 | MinIO | S3-compatible object storage used for raw video files, HLS artifacts, thumbnails, and optional subtitles. |
 | Movie | The catalog entity users browse, search, watch, rate, and add to a watchlist. |
 | Movie Metadata | Descriptive movie data such as title, description, year, genre, actor, director, rating summary, and video availability. |

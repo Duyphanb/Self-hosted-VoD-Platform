@@ -15,6 +15,45 @@
 id_rsa
 id_rsa.*
 
+# Media (#122, R-002): test media is generated at test time (#123); never commit third-party media.
+# Do not add *.ts or *.mts: they are TypeScript sources in frontend/. Globs are case-sensitive on
+# Linux, so #123 adds a CI guard that checks committed files for media content.
+*.mp4
+*.m4v
+*.mov
+*.mkv
+*.webm
+*.avi
+*.wmv
+*.flv
+*.mpg
+*.mpeg
+*.m2ts
+*.3gp
+*.ogv
+*.y4m
+*.m3u8
+*.m3u
+*.m4s
+*.mp3
+*.m4a
+*.aac
+*.ac3
+*.wav
+*.flac
+*.opus
+*.ogg
+*.h264
+*.264
+*.hevc
+*.265
+*.ivf
+*.nut
+*.mxf
+*.vob
+**/segments/seg_[0-9][0-9][0-9][0-9][0-9].ts
+!/worker/*/src/test/resources/media-fixtures/**
+
 # Dependencies and build outputs
 node_modules/
 target/

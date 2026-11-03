@@ -303,7 +303,7 @@ Restore backend/relay and the one worker, then edge only after health/status/que
 
 ## Media Purge and Orphan Audit
 
-The frozen retention rule is [ADR-010](../architecture/adr/ADR-010.md#hls-objects-and-cleanup-d22-d23). This procedure is planned for Sprint 10/Phase 5 and must be exercised on isolated fixtures before use. It does not authorize production deletion. Keep DB rows as history, label superseded rows in admin views and treat their old keys as possibly absent. Do not alter a historical READY row solely to make it retryable.
+The frozen retention rule is [ADR-010](../architecture/adr/ADR-010.md#hls-objects-and-cleanup-d22-d23). This procedure is exercised in Issue 10.6 (Sprint 10/Phase 5) and must be exercised on isolated fixtures before use. It does not authorize production deletion. Keep DB rows as history, label superseded rows in admin views and treat their old keys as possibly absent. Do not alter a historical READY row solely to make it retryable.
 
 For an authorized purge, stop uploads/retries, the backend relay and worker, and quiesce playback during the final review/delete window. This prevents a newer asset/retry from changing candidate classification between selection and deletion. Take a recoverable DB/object backup, confirm the actual private bucket names, and review this read-only PostgreSQL candidate query:
 

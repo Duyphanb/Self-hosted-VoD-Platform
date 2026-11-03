@@ -109,7 +109,7 @@ Required failure fields:
 
 Failure messages shown in UI must be safe summaries. Stack traces stay in server logs only.
 
-Issue #107 finalizes the safe-code mapping; reserve `PROBE_FAILED`, `PROBE_TIMEOUT`, `ENCODE_TIMEOUT`, `MEDIA_LIMIT_EXCEEDED`, `INSUFFICIENT_DISK` and `WORKER_INTERRUPTED` for the approved safeguards. A DB outage at claim/finish keeps retrying in-process with capped backoff delays regardless of outage duration; it is never a media FAILED or DLQ reason. QUEUED age alone is not evidence of a stuck job. `published_at NULL` on QUEUED means relay pending; queued/started/finished times and publication outcomes support diagnosis. Do not log uncapped FFmpeg output, tokens, storage credentials or sensitive request bodies.
+Sprint 5 fixes the worker failure-code enum ([ADR-010 D28](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28)): `PROBE_FAILED`, `PROBE_TIMEOUT`, `UNSUPPORTED_MEDIA`, `MEDIA_LIMIT_EXCEEDED`, `ENCODE_FAILED`, `ENCODE_TIMEOUT`, `INSUFFICIENT_DISK`, `STORAGE_ERROR`, `WORKER_INTERRUPTED` and `INTERNAL_ERROR`. #107 adopts it and owns the safe messages, redaction and length cap. A DB outage at claim/finish keeps retrying in-process with capped backoff delays regardless of outage duration; it is never a media FAILED or DLQ reason. QUEUED age alone is not evidence of a stuck job. `published_at NULL` on QUEUED means relay pending; queued/started/finished times and publication outcomes support diagnosis. Do not log uncapped FFmpeg output, tokens, storage credentials or sensitive request bodies.
 
 ## Correlation
 

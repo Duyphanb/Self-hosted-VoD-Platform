@@ -15,7 +15,7 @@ Nginx is the only public edge in both local Compose and VPS runtime.
 | `nginx` | Nginx | Frontend static serving, API proxy, HLS proxy, HTTPS on VPS | Yes |
 | `frontend` | React build artifact | Browser UI built by Vite and served by Nginx | No direct container exposure |
 | `backend` | Java 21 Spring Boot | Core API, auth, upload, HLS proxy, progress, admin APIs | Internal behind Nginx |
-| `worker` | Java 21 Spring Boot with FFmpeg/FFprobe in `PATH` | Video processing | Internal only |
+| `worker` | Java 21 Spring Boot with FFmpeg/FFprobe from Debian trixie packages ([ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28)) | Video processing | Internal only |
 | `postgres` | PostgreSQL | Source-of-truth database | Internal only |
 | `redis` | Redis | Cache and playback-progress buffer | Internal only |
 | `rabbitmq` | RabbitMQ | Encoding job queue | Internal only |
@@ -73,7 +73,7 @@ Required named volumes:
 
 Redis persistence is not required for MVP because Redis is a cache/progress buffer. Durable playback progress belongs in PostgreSQL.
 
-Issue 5.8 adds and documents a disk-backed writable volume/mount for `WORKER_TEMP_DIR` under the worker's read-only root. It must not use tmpfs; the raw-size free-disk check guards capacity for the raw copy plus generated HLS. Keep this separate from backend `TEMP_UPLOAD_DIR`, which stays in the container layer. The volume/mount wiring is future Sprint 5 work, not added by this docs change.
+Issue 5.8 adds and documents a disk-backed writable volume/mount for `WORKER_TEMP_DIR` under the worker's read-only root. It must not use tmpfs; the two-step free-disk check and watchdog of ADR-010 D27 guard capacity for the raw copy plus generated HLS, with a reserve that also protects the co-located PostgreSQL and Silo data. Keep this separate from backend `TEMP_UPLOAD_DIR`, which stays in the container layer. The volume/mount wiring is future Sprint 5 work, not added by this docs change.
 
 ## MinIO Buckets
 
@@ -85,7 +85,7 @@ PGSTY Silo provides this contract under the existing `minio` service name; see t
 | `vod-hls` | HLS playlists and `.ts` segments | Private, read by backend HLS proxy |
 | `vod-thumbnails` | Future poster/thumbnail objects | Private, deferred until thumbnail feature |
 
-Key layout: raw `{movieId}/{videoAssetId}.{ext}`; HLS `video-assets/{videoAssetId}/attempt-{n}/master.m3u8` and `.../segments/*.ts`. Backend derives the private attempt prefix from the READY asset's stored master key; public HLS paths are unchanged. Retention/compensation follows [ADR-010](adr/ADR-010.md#hls-objects-and-cleanup-d22-d23); manual purge/orphan audit follows the [runbook](../deployment/README.md#media-purge-and-orphan-audit). Buckets remain private.
+Key layout: raw `{movieId}/{videoAssetId}.{ext}`; HLS `video-assets/{videoAssetId}/attempt-{n}/master.m3u8` and `.../segments/*.ts`. Backend derives the private attempt prefix from the READY asset's stored master key; public HLS paths are unchanged. In media keys, `{videoAssetId}` is the lowercase canonical UUID text, `{n}` is `encoding_jobs.attempt` in decimal without padding, and an attempt prefix is `video-assets/{videoAssetId}/attempt-{n}/`, including the final `/`. `master.m3u8` is a single VOD media playlist with MPEG-TS segments (ADR-010 D27). Retention/compensation follows [ADR-010](adr/ADR-010.md#hls-objects-and-cleanup-d22-d23); manual purge/orphan audit follows the [runbook](../deployment/README.md#media-purge-and-orphan-audit). Buckets remain private.
 
 ## Environment Configuration
 
@@ -102,7 +102,8 @@ Required configuration groups:
 - `RABBITMQ_*`
 - `MINIO_*`
 - upload size, MIME allowlist and `TEMP_UPLOAD_DIR`
-- `FFMPEG_PATH`, `FFPROBE_PATH`, `WORKER_TEMP_DIR`, `WORKER_CONCURRENCY` and `WORKER_PREFETCH`
+- `FFMPEG_PATH`, `FFPROBE_PATH`, `WORKER_TEMP_DIR`, `WORKER_CONCURRENCY`, `WORKER_PREFETCH`, `HLS_SEGMENT_SECONDS`, `HLS_TARGET_HEIGHT`, `HLS_VIDEO_MAXRATE_KBPS` and `WORKER_FFMPEG_THREADS`
+- the worker media safeguards `WORKER_FFPROBE_TIMEOUT_SECONDS`, `WORKER_FFMPEG_TIMEOUT_*`, `WORKER_MAX_*`, `WORKER_OUTPUT_BUDGET_KBPS` and `WORKER_DISK_RESERVE_MB`
 - `NGINX_HTTP_PORT`, `NGINX_HTTPS_PORT`, `PUBLIC_DOMAIN`, `LETSENCRYPT_EMAIL`
 
 Frontend public runtime values should point at Nginx paths:
@@ -128,7 +129,7 @@ Resource notation below uses the configured bucket names; default raw/HLS bucket
 
 Only object ARNs are needed for these operations; no bare bucket ARN is present. No ListBucket, GetBucketLocation, bucket creation, anonymous policy, general IAM administration, thumbnail access, backend raw GET, backend HLS write/delete, or worker raw write/delete is granted. The self-service service-account/password actions require the explicit Deny above because Silo otherwise permits them for the caller's own identity. Silo cannot block a regular user's STS AssumeRole through policy; incident revocation must remove the parent user, as the [runbook](../deployment/README.md#incident-response-and-retired-users) describes. The fixed SDK region `us-east-1` avoids bucket-region discovery permissions; path-style access uses `MINIO_ENDPOINT` (default `http://minio:9000`). These policies scope worker output to attempt-shaped paths, not per-job ownership; trusted DB keys and application access checks remain required.
 
-Without listing, worker exact-attempt cleanup is supported by Silo's DeleteObject extension `x-minio-force-delete: true` on `video-assets/{id}/attempt-{n}/`. The trailing `/` is required: deleting `attempt-1/` must retain sibling `attempt-10/`; broader prefixes such as `video-assets/` are denied. This is a Silo extension, not portable AWS S3 behavior. A future AWS S3 adapter would need an explicitly approved prefix-conditioned `s3:ListBucket` permission and list/delete implementation. Issue 5.7 owns the final cleanup mechanism; #169 pins this policy behavior in smoke without adding ListBucket. Root operator purge/audit with listing is a separate [runbook procedure](../deployment/README.md#media-purge-and-orphan-audit).
+Without listing, worker exact-attempt cleanup is supported by Silo's DeleteObject extension `x-minio-force-delete: true` on `video-assets/{id}/attempt-{n}/`. The trailing `/` is required: deleting `attempt-1/` must retain sibling `attempt-10/`; broader prefixes such as `video-assets/` are denied. This is a Silo extension, not portable AWS S3 behavior. A future AWS S3 adapter would need an explicitly approved prefix-conditioned `s3:ListBucket` permission and list/delete implementation. Issue 5.7 implements this mechanism through a dedicated attempt-prefix delete that validates the prefix and sends `x-minio-force-delete: true`, never the generic object delete (which deletes nothing for a prefix). Its tests verify absence through a backend or root reader identity, because the worker cannot read or list HLS and a 204 does not prove deletion. #169 pins this policy behavior in smoke without adding ListBucket. Root operator purge/audit with listing is a separate [runbook procedure](../deployment/README.md#media-purge-and-orphan-audit).
 
 The backend adapter accepts a caller-owned InputStream, known non-negative length and non-null content type; it never reads the whole object into an array and does not close the caller's input. The caller must close a returned GET stream to release HTTP resources. Negative length, null stream and null content type are rejected before I/O. SDK/transport failures become fixed safe IOExceptions with no cause. The SDK redacts signing credentials, but diagnostic messages retain the internal URL, bucket and object key, so the adapter drops those diagnostics.
 
@@ -156,14 +157,33 @@ These are the approved settings to wire into `.env.example`, application configu
 | `ENCODING_RELAY_INTERVAL_SECONDS` | 10; relay ignores jobs younger than twice confirm timeout |
 | `RABBITMQ_ENCODING_QUEUE` | `video-encoding-queue`; direct DLX `<queue>.dlx`, DLQ/routing key `<queue>.dlq` |
 | `WORKER_CONCURRENCY`, `WORKER_PREFETCH` | 1 each; exactly one non-overlapping worker replica |
-| `WORKER_TEMP_DIR` | `/tmp/vod-worker`; disk-backed writable volume, not tmpfs, added/documented in 5.8; raw-size free-disk check; owned `job-*` children swept before listener startup |
-| `WORKER_FFPROBE_TIMEOUT_SECONDS` | Positive bound, to be measured in Issue 5.4/#124 |
-| `WORKER_FFMPEG_TIMEOUT_MIN_SECONDS`, `WORKER_FFMPEG_TIMEOUT_FACTOR` | Deadline `max(min, factor * duration)`; values to be measured in Issue 5.5/5.7/#124 |
-| `WORKER_MAX_DURATION_SECONDS`, `WORKER_MAX_WIDTH`, `WORKER_MAX_HEIGHT`, `WORKER_MAX_STREAMS` | Positive caps to be measured/validated in Issue 5.4/5.7/#124 |
+| `WORKER_TEMP_DIR` | `/tmp/vod-worker`; disk-backed writable volume, not tmpfs, added/documented in 5.8; two-step free-disk check; owned `job-*` children swept before listener startup |
+| `WORKER_FFPROBE_TIMEOUT_SECONDS` | Positive bound, to be measured using #124 |
+| `WORKER_FFMPEG_TIMEOUT_MIN_SECONDS`, `WORKER_FFMPEG_TIMEOUT_FACTOR` | Deadline `max(min, factor * duration)`; values to be measured using #124 |
+| `WORKER_MAX_DURATION_SECONDS`, `WORKER_MAX_WIDTH`, `WORKER_MAX_HEIGHT`, `WORKER_MAX_STREAMS` | 10800, 1920, 1080 and 8 (owner policy, ADR-010 D26). Width and height cap the long and short side in either orientation; no 4K sources |
+| `HLS_SEGMENT_SECONDS` | 6; integer 2-10; drives both `-hls_time` and the forced keyframes |
+| `HLS_TARGET_HEIGHT` | 720; even integer 240-1080; output fits a box of this short side and a long side of 16/9 of it (1280×720, or 720×1280 for portrait), never upscaled |
+| `HLS_VIDEO_MAXRATE_KBPS` | 4000; passed as `-maxrate:v 4000k -bufsize:v 8000k` (the `k` suffix is required; ADR-010 D27) |
+| `WORKER_FFMPEG_THREADS` | 1; integer 1-16; FFmpeg `-threads` and `-filter_threads`; revisit from #124 |
+| `WORKER_OUTPUT_BUDGET_KBPS`, `WORKER_DISK_RESERVE_MB` | 5000 and 5120; the output bytes budgeted per media second and the free-space reserve of the ADR-010 D27 disk checks and watchdog; #124/#180 calibrate them |
 
-Document bounded storage/JDBC waits per operation and the raw-size-based free-disk/output allowance in Issue 5.7. DB outage at claim/finish holds delivery and retries in-process with capped backoff delays, never FAILED or DLQ; it has no retry-exhaustion shutdown path. Worker `stop_grace_period` is 30s. Before the listener starts: sweep owned temp dirs, conditionally fail orphaned PROCESSING job/asset pairs, delete their attempt prefixes, then start consumption. No backend PROCESSING reconciler or QUEUED age timeout. Recovery assumes one backend relay and one non-overlapping worker.
+Media settings have no application defaults: the worker fails startup when one is missing or invalid. The first PR that makes a setting required writes its value into `.env.example` and both Compose files, because CI starts the stack with `--env-file /dev/null`; tests inject explicit test values. The timeouts come from #124, which runs the Issue 5.5 command line in the worker image on arm64 at the product caps with a high-entropy source (ADR-010 D28). Document bounded storage/JDBC waits per operation in Issue 5.7. DB outage at claim/finish holds delivery and retries in-process with capped backoff delays, never FAILED or DLQ; it has no retry-exhaustion shutdown path. Worker `stop_grace_period` is 30s. Before the listener starts: sweep owned temp dirs, conditionally fail orphaned PROCESSING job/asset pairs, delete their attempt prefixes, then start consumption. No backend PROCESSING reconciler or QUEUED age timeout. Recovery assumes one backend relay and one non-overlapping worker.
 
-#74 decides the RabbitMQ version and consumer-timeout sizing before Sprint 5, including how it preserves D20 during DB-outage retries. Use classic durable queues with DLX/DLQ (identical backend/worker declarations), AUTO acknowledgement after terminal persistence, `default-requeue-rejected=false` and prefetch 1. On 4.3+ classic queues no consumer-timeout setting is needed. If staying on 3.13, render `consumer_timeout` from an environment setting into a mounted `conf.d` file in base/prod Compose above the media-processing deadline from #103/#124, with final sizing/DB-outage handling owned by #74, not an application DB-retry budget. Do not assume config environment interpolation or use immutable `x-consumer-timeout`; verify rendering, a long encode with a second queued job and DB-outage handling. This change does not upgrade the broker (#74) or select the FFmpeg base (#54).
+#74 decides the RabbitMQ version and consumer-timeout sizing before Sprint 5, including how it preserves D20 during DB-outage retries. Use classic durable queues with DLX/DLQ (identical backend/worker declarations), AUTO acknowledgement after terminal persistence, `default-requeue-rejected=false` and prefetch 1. On 4.3+ classic queues no consumer-timeout setting is needed. If staying on 3.13, render `consumer_timeout` from an environment setting into a mounted `conf.d` file in base/prod Compose above the media-processing deadline from #103/#124, with final sizing/DB-outage handling owned by #74, not an application DB-retry budget. Do not assume config environment interpolation or use immutable `x-consumer-timeout`; verify rendering, a long encode with a second queued job and DB-outage handling. This change does not upgrade the broker (#74).
+
+### Worker runtime image
+
+[ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28) selects the worker image: `debian:trixie-slim` pinned by digest, Debian `ffmpeg` and `openjdk-21-jre-headless` from trixie and trixie-security, a non-root runtime user, for amd64 and arm64. The base and packages land first: Issue 5.4, together with the #123 harness, switches `worker/Dockerfile` to this base, so the 5.4/5.5 command tests and the #124 arm64 measurement all run the D25 binary. Issue 5.8 then adds the non-root, read-only and volume hardening, the version-floor assertion and the weekly rebuild.
+
+Update procedure:
+1. Watch debian-security-announce for ffmpeg and openjdk-21 advisories.
+2. On an advisory, and weekly, bump the base digest and build with `--pull --no-cache`.
+3. Raise the recorded minimum ffmpeg version when the advisory requires it. CI asserts it with `dpkg --compare-versions` and asserts a non-root `id -u`.
+4. Run the #123 media tests on amd64 and the #124 arm64 job.
+5. Record the `dpkg-query -W` versions in the PR.
+6. Roll back by redeploying the previous image tag.
+
+The weekly rebuild and the version-floor assertion are new CI work for Issue 5.8. Compose `pids_limit` counts threads, so size it for the JVM threads plus the FFmpeg threads.
 
 ## Nginx Responsibilities
 

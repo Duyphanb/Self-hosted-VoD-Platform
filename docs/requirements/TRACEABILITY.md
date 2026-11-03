@@ -18,8 +18,8 @@ Updated 2026-11-02 for the Sprint 4 closeout; the design follows [ADR-010](../ar
 | F-008 | Admin video upload | US-008 | backend, frontend, MinIO | Upload validation tests; MinIO integration test or manual evidence; admin upload flow test. Verified: [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md) |
 | F-009 | Queue publishing | US-008 | backend, RabbitMQ | Queue publisher unit test; API-to-queue integration evidence. Verified: [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md) |
 | F-010 | Encoding worker | US-009 | worker, RabbitMQ, MinIO | Worker command construction tests; job status transition tests; failed-job test |
-| F-011 | FFprobe metadata extraction | US-009 | worker | FFprobe parser unit tests; sample media manual verification |
-| F-012 | FFmpeg HLS transcoding | US-009, US-010 | worker, MinIO | HLS output smoke test; generated playlist and segments verification |
+| F-011 | FFprobe metadata extraction | US-009 | worker | FFprobe parser unit tests; #123 generated-fixture probe tests with the worker image binary |
+| F-012 | FFmpeg HLS transcoding | US-009, US-010 | worker, MinIO | HLS output smoke test; generated playlist and segments verification; #123 generated fixtures through the worker image binary with output validation |
 | F-013 | HLS playback | US-010 | backend, frontend, nginx | Playback API Postman test; browser playback smoke test; HLS MIME check |
 | F-014 | Playback progress and resume | US-011 | backend, frontend, Redis, PostgreSQL | Progress API tests; Redis flush test; resume manual E2E evidence |
 | F-015 | Continue watching | US-011 | backend, frontend | Continue-watching API tests; UI list test |
@@ -39,7 +39,7 @@ Updated 2026-11-02 for the Sprint 4 closeout; the design follows [ADR-010](../ar
 | NFR-001 | F-021 | Docker Compose smoke test |
 | NFR-002 | F-021, F-022 | VPS resource observation during demo smoke test |
 | NFR-003 | F-008 | `.env.example` size/MIME allowlist configuration and backend rejection outside those limits; declared MIME/signature family, equal MiB ceilings including multipart overhead, route-limit JSON errors and a synthetic non-VPS 2 GB runner rehearsal (Issues 4.4/4.6/4.7); genuine 2 GB VPS timings/temp/memory/disk and concurrent-upload headroom (#180, before public deployment) |
-| NFR-004 | F-010 | One non-overlapping worker, prefetch/concurrency 1, startup recovery, caps/deadlines and long-job/second-queued-job test (5.1/5.3/5.7/#124) |
+| NFR-004 | F-010 | One non-overlapping worker, prefetch/concurrency 1, startup recovery, owner product caps checked in 5.4 (ADR-010 D26), deadlines measured in #124, and a long-job/second-queued-job test (5.1/5.3/5.7) |
 | NFR-005 | F-012, F-013 | Browser playback smoke test |
 | NFR-006 | F-014, F-015 | Redis-to-PostgreSQL flush test |
 | NFR-007 | F-001, F-002, F-004, F-020 | Auth and authorization tests |
