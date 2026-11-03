@@ -33,7 +33,8 @@ the Docker host, so it never measures under emulation.
   - Probe-only files of the 10800 s cap: a 10 s black segment repeated by stream copy, as MP4 and Matroska, so
     the probe reads a cap-length index.
   - Opt-in long clip (`--long-clip-seconds`, or the `long_clip_seconds` dispatch input): high-entropy, at the
-    average rate a 2048 MiB upload of that length can have.
+    average rate a 2048 MiB upload of that length can have. It is encoded once, with `--long-clip-threads`
+    (the `long_clip_threads` input, default 1).
 - **Recorded per run.**
   - FFprobe and FFmpeg wall time, measured inside the container, so container start-up is excluded.
   - The output size and its ADR-010 D27 checks; a run whose output fails them fails the measurement.
@@ -70,7 +71,7 @@ It removes only its own project's containers, networks and volumes.
   high-entropy clip at one CPU, so 10800 s would take 12 hours or more. The cap length therefore stays
   opt-in, and the default run extrapolates.
 - **A1 VM (owner):** build the worker image on the VM and run the measurement there. For example:
-  `python3 deploy/tests/worker-encode-measurement.py --image <worker image> --output-dir <dir> --long-clip-seconds 10800 --threads 1`.
+  `python3 deploy/tests/worker-encode-measurement.py --image <worker image> --output-dir <dir> --long-clip-seconds 10800`.
   Run the JVM smoke with a fresh project name. Check free disk first: a cap-length run needs about 11 GB.
 - **Local dry run:** allowed on amd64 to check the scripts. Its numbers are not evidence, and arm64 is never
   emulated locally.

@@ -110,11 +110,14 @@ class ClipTests(unittest.TestCase):
         self.assertEqual(MEASURE.thread_counts("2 1"), [1, 2])
         self.assertEqual(MEASURE.long_seconds("0"), 0)
         self.assertEqual(MEASURE.long_seconds("10800"), 10800)
+        self.assertEqual(MEASURE.long_threads("2"), 2)
         for parser, value in ((MEASURE.clip_seconds, "20"), (MEASURE.clip_seconds, "20 20"),
                               (MEASURE.clip_seconds, "2 10801"), (MEASURE.clip_seconds, "2 x"),
                               (MEASURE.clip_seconds, "2 -1"), (MEASURE.clip_seconds, "2 $(id)"),
                               (MEASURE.thread_counts, "0"), (MEASURE.thread_counts, "17"),
-                              (MEASURE.long_seconds, "10801"), (MEASURE.long_seconds, "60 120")):
+                              (MEASURE.long_seconds, "10801"), (MEASURE.long_seconds, "60 120"),
+                              (MEASURE.long_threads, "1 2"), (MEASURE.long_threads, "0"),
+                              (MEASURE.long_threads, "17")):
             with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
                 parser(value)
 
@@ -331,8 +334,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertGreaterEqual(len(blocks), 6)
         for block in blocks:
             self.assertNotIn("${{", block)
-        for name in ("CLIP_SECONDS", "THREADS", "LONG_CLIP_SECONDS"):
-            self.assertRegex(workflow, rf"\n {{10}}{name}: \$\{{\{{ inputs\.[a-z_]+ \|\| '[0-9 ]+' \}}\}}\n")
+        for name in ("CLIP_SECONDS", "THREADS", "LONG_CLIP_SECONDS", "LONG_CLIP_THREADS"):
+            self.assertRegex(workflow, rf"\n {{10}}{name}: \$\{{\{{ inputs\.{name.lower()} \|\| '[0-9 ]+' \}}\}}\n")
+            option = "--" + name.lower().replace("_", "-")
+            self.assertRegex(workflow, rf'\n {{10}}{option} "\${name}"\n')
         self.assertRegex(workflow, r'--clip-seconds "\$CLIP_SECONDS"')
         ci = (MEASURE.ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertNotIn("ubuntu-24.04-arm", ci)

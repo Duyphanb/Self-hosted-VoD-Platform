@@ -23,6 +23,10 @@ name: arm64 worker
         description: Opt-in high-entropy clip length in seconds, up to the 10800 s cap (0 = none; a cap-length encode can outlast the 6-hour job limit)
         required: false
         default: "0"
+      long_clip_threads:
+        description: The one WORKER_FFMPEG_THREADS value the long clip is encoded with
+        required: false
+        default: "1"
 
 permissions:
   contents: read
@@ -119,6 +123,7 @@ jobs:
           CLIP_SECONDS: ${{ inputs.clip_seconds || '2 20 60' }}
           THREADS: ${{ inputs.threads || '1 2' }}
           LONG_CLIP_SECONDS: ${{ inputs.long_clip_seconds || '0' }}
+          LONG_CLIP_THREADS: ${{ inputs.long_clip_threads || '1' }}
         run: >-
           python3 deploy/tests/worker-encode-measurement.py
           --image vod-worker-arm64
@@ -126,6 +131,7 @@ jobs:
           --clip-seconds "$CLIP_SECONDS"
           --threads "$THREADS"
           --long-clip-seconds "$LONG_CLIP_SECONDS"
+          --long-clip-threads "$LONG_CLIP_THREADS"
 
       - name: Preserve the arm64 evidence (runner evidence, not A1 VPS evidence)
         if: ${{ always() }}

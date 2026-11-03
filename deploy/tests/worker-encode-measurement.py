@@ -178,6 +178,14 @@ def long_seconds(text):
     return value[0]
 
 
+def long_threads(text):
+    """The long clip is encoded once: a cap-length encode takes hours, so one thread setting is measured."""
+    value = thread_counts(text)
+    if len(value) != 1:
+        raise argparse.ArgumentTypeError("one WORKER_FFMPEG_THREADS value for the long clip")
+    return value[0]
+
+
 def worker_limits(overlay_text):
     """The worker's deploy.resources.limits from the production overlay."""
     block = re.search(r"^  worker:\n((?:    .*\n|\n)*)", overlay_text, re.M)
@@ -763,6 +771,8 @@ def main():
     parser.add_argument("--threads", type=thread_counts, default=thread_counts("1 2"))
     parser.add_argument("--long-clip-seconds", type=long_seconds, default=0,
                         help="opt-in high-entropy clip of this length (10800 for the cap); 0 for none")
+    parser.add_argument("--long-clip-threads", type=long_threads, default=1,
+                        help="the one WORKER_FFMPEG_THREADS value the long clip is encoded with (default 1)")
     parser.add_argument("--skip-cap-probe", action="store_true", help="skip the probe of cap-length files")
     parser.add_argument("--keep-work", action="store_true")
     args = parser.parse_args()
@@ -776,7 +786,8 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="vod-encode-measure-", dir=parent)).resolve()
     report = {"label": LABEL, "result": "FAIL", "started_at": datetime.now(timezone.utc).isoformat(),
               "commit": os.environ.get("GITHUB_SHA"), "clip_seconds": args.clip_seconds, "threads": args.threads,
-              "long_clip_seconds": args.long_clip_seconds, "probes": [], "runs": [], "clips": [],
+              "long_clip_seconds": args.long_clip_seconds, "long_clip_threads": args.long_clip_threads,
+              "probes": [], "runs": [], "clips": [],
               "reference_arguments": reference_arguments("/measure/clips/<clip>", "<demuxer>", "/measure/run/hls",
                                                          BOX[0], BOX[1], "<WORKER_FFMPEG_THREADS>"),
               "probe_arguments": probe_arguments("/measure/clips/<clip>", "<demuxer>"),
@@ -820,7 +831,7 @@ def main():
             if clip["kind"] == "cap-probe":
                 clip["path"].unlink()
         for clip in clips:
-            for threads in args.threads:
+            for threads in [args.long_clip_threads] if clip["long"] else args.threads:
                 print(f"Encoding {clip['name']} with WORKER_FFMPEG_THREADS={threads}", flush=True)
                 run = measurement.encode(clip, durations[clip["name"]], threads)
                 report["runs"].append(run)
