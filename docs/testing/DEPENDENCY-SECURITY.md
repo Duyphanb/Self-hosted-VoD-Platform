@@ -76,7 +76,12 @@ These are source/release/maintainer-evidence assessments; the repository did not
 
 ## Media processing prerequisites (#103 / #54)
 
-[ADR-010](../architecture/adr/ADR-010.md#untrusted-media-handling-d6-d10) requires a maintained FFmpeg source before Sprint 5. The owner-approved research reports a local image built from the unchanged worker Dockerfile with jammy `7:4.4.2-0ubuntu0.22.04.1` and uid 0; this is research evidence, not a CI image measurement repeated by this docs task. #54 must verify package security support or a checksum-verified upstream build, record `dpkg -s ffmpeg` where applicable, `ffmpeg -version`, FFprobe command compatibility and runtime uid in the chosen image, and document updates/OS scan limits. Debian-stable packages and a pinned upstream build are candidates, not an image decision in this change. Signature checks, protocol restrictions and capped probing do not replace decoder security fixes. #124 sets measured caps/deadlines; #74 separately settles the broker version and consumer-timeout rule.
+[ADR-010 D25](../architecture/adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28) selects the worker FFmpeg source (owner decision, 2026-11-03). Evidence checked on 2026-11-03:
+
+- The current worker image installs Ubuntu jammy `ffmpeg` `7:4.4.2-0ubuntu0.22.04.1`, from the `universe` component. Its last Security/Updates publication was 2022-06-08 (Launchpad `getPublishedSources` API); later fixes ship only through Ubuntu Pro.
+- Debian publishes `ffmpeg` `7:7.1.5-0+deb13u1` in trixie-security and `7:5.1.9-0+deb12u1` in bookworm-security, both for amd64 and arm64 (qa.debian.org madison).
+
+Issue 5.8 builds the selected image. It records `dpkg-query -W` versions, `ffmpeg -version`, FFprobe command compatibility and the runtime uid, and enforces the recorded minimum ffmpeg version in CI. The built image is not scanned yet: the container OS-package scan stays in #54, which first needs a policy for unfixed and postponed CVEs, because `dependency-security.yml` sets `ignore-unfixed: false`. ADR-010 D25 defines the CVE assessment (reachability, monthly review, 90-day expiry). Signature checks, protocol restrictions and capped probing do not replace decoder security fixes. The owner fixed the product caps in ADR-010 D26, and #124 sets the measured deadlines; #74 separately settles the broker version and consumer-timeout rule.
 
 ## Local Checks
 

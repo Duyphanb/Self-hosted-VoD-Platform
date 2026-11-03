@@ -106,11 +106,13 @@ sequenceDiagram
         Note over Worker,PostgreSQL: Hold delivery, retry readback or conditional claim; no ack or media work yet
     else claim confirmed or matching latest PROCESSING readback owns claim
         Note over Worker,PostgreSQL: Commit claim; no transaction during media work
-        Worker->>MinIO: Check disk from raw size, bounded download into job directory
+        Worker->>MinIO: Check disk from raw size plus reserve, bounded download into job directory
         Worker->>FFprobe: Forced trusted demuxer, file protocol, capped output and deadline
-        FFprobe-->>Worker: Metadata, checked against caps
+        FFprobe-->>Worker: Metadata, checked against caps and stream/duration rules
+        Worker->>Worker: Check disk for the output budget
         Worker->>FFmpeg: Typed arguments, same input restrictions, single-quality HLS and deadline
         FFmpeg-->>Worker: master.m3u8 with relative segments/ URIs
+        Worker->>Worker: Validate playlist (VOD, ENDLIST, segments present, duration vs probe)
         Worker->>Worker: Delete downloaded raw copy
         Worker->>MinIO: Upload under video-assets/assetId/attempt-n/ only
         Worker->>PostgreSQL: One conditional PROCESSING to READY pair transaction, metadata and HLS keys
