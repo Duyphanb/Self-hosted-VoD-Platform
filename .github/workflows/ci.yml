@@ -125,6 +125,9 @@ jobs:
       - name: Verify RabbitMQ publisher on a disposable broker
         run: python3 deploy/tests/rabbitmq-publisher-smoke.py --project "${COMPOSE_PROJECT_NAME}-amqp"
 
+      - name: Verify least-privilege service identities on a disposable stack
+        run: python3 deploy/tests/service-identity-smoke.py --project "${COMPOSE_PROJECT_NAME}-identity"
+
       - name: Verify auth, catalog and upload against PostgreSQL and Nginx
         env:
           GH_TOKEN: ${{ github.token }}
@@ -143,16 +146,27 @@ jobs:
           MINIO_BACKEND_SECRET_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
           MINIO_WORKER_ACCESS_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
           MINIO_WORKER_SECRET_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          # #106: each PostgreSQL, RabbitMQ and Redis identity gets its own generated secret. User
+          # names keep the Compose defaults; the smokes use the bootstrap superuser by that name.
           POSTGRES_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-          SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD"
+          POSTGRES_OWNER_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          POSTGRES_BACKEND_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          POSTGRES_WORKER_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
           RABBITMQ_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          RABBITMQ_BACKEND_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          RABBITMQ_WORKER_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
           export MINIO_BACKEND_ACCESS_KEY MINIO_BACKEND_SECRET_KEY MINIO_WORKER_ACCESS_KEY MINIO_WORKER_SECRET_KEY
-          export JWT_SECRET MINIO_ACCESS_KEY MINIO_SECRET_KEY POSTGRES_PASSWORD SPRING_DATASOURCE_PASSWORD RABBITMQ_PASSWORD
+          export JWT_SECRET MINIO_ACCESS_KEY MINIO_SECRET_KEY REDIS_PASSWORD
+          export POSTGRES_PASSWORD POSTGRES_OWNER_PASSWORD POSTGRES_BACKEND_PASSWORD POSTGRES_WORKER_PASSWORD
+          export RABBITMQ_PASSWORD RABBITMQ_BACKEND_PASSWORD RABBITMQ_WORKER_PASSWORD
           python3 deploy/tests/storage-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME"
           python3 deploy/tests/storage-sdk-smoke.py --project "${COMPOSE_PROJECT_NAME}-sdk"
           # Fresh full stack, including private storage/init and the dedicated worker.
           docker compose --env-file /dev/null -f deploy/docker-compose.yml up -d --wait --wait-timeout 180 --no-build
           python3 -c 'import json, urllib.request; response = urllib.request.urlopen("http://127.0.0.1:18087/actuator/health", timeout=10); assert response.status == 200 and json.load(response)["status"] == "UP", "Backend dependency readiness through Nginx failed"'
+          # The running stack uses only the scoped identities, and the edge reaches only the backend.
+          python3 deploy/tests/service-identity-smoke.py --project "$COMPOSE_PROJECT_NAME" --running-stack
           python3 deploy/tests/auth-runtime-smoke.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087
           # Assertion diagnostics can include response tokens. Keep only the exit status.
           if npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-2-auth.postman_collection.json -e docs/testing/postman/vod-platform-local.postman_environment.json --env-var baseUrl=http://127.0.0.1:18087 --silent; then

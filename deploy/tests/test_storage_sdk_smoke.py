@@ -42,6 +42,14 @@ class SdkSmokeTests(unittest.TestCase):
             SDK.preserve_first_failure(action, cleanup, lambda error: events.append(str(error)))
         self.assertEqual(events, ["StorageRuntimeTests were skipped", "cleanup"])
 
+    def test_published_port_uses_loopback_and_a_disposable_network_beside_the_internal_one(self):
+        overlay = SDK.port_overlay(19000)
+        store = overlay["services"]["minio"]
+        self.assertEqual(store["ports"], ["127.0.0.1:19000:9000"])
+        # An internal network cannot publish ports (#106); the store keeps its data network.
+        self.assertEqual(store["networks"], ["vod_internal", "audit_published"])
+        self.assertEqual(overlay["networks"], {"audit_published": {}})
+
     def test_redacts_all_storage_credentials_including_root_audit_pair(self):
         env = {name: "fixture-" + str(index) for index, name in enumerate((
             "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BACKEND_SECRET_KEY", "MINIO_WORKER_SECRET_KEY",

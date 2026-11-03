@@ -3,6 +3,8 @@ import importlib.util
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 from types import SimpleNamespace
 import tempfile
 import unittest
@@ -101,6 +103,23 @@ class UploadRehearsalTests(unittest.TestCase):
         self.assertNotEqual(environment["JWT_SECRET"], "old-secret")
         self.assertEqual(environment["MAX_UPLOAD_SIZE_MB"], "2048")
         self.assertEqual(environment["NGINX_HTTP_PORT"], "0.0.0.0:18088")
+
+    def test_generated_environment_supplies_and_passes_the_production_preflight(self):
+        overlay = (REHEARSAL.ROOT / "deploy/docker-compose.prod.yml").read_text(encoding="utf-8")
+        required = set(re.findall(r"\$\{([A-Z0-9_]+):\?", overlay))
+        self.assertIn("POSTGRES_WORKER_PASSWORD", required)
+        environment = REHEARSAL.new_environment(18088)
+        self.assertEqual(sorted(required - set(environment)), [])
+        shell = shutil.which("sh") or next((path for path in ("C:/Program Files/Git/bin/sh.exe",)
+                                            if Path(path).exists()), None)
+        if shell is None:
+            self.skipTest("POSIX shell is required for the preflight check")
+        # The overlay hands the check the URL that Flyway and the applications derive.
+        url = "jdbc:postgresql://postgres:5432/vod_platform"
+        result = subprocess.run([shell, str(REHEARSAL.ROOT / "deploy/tests/production-config-check.sh")],
+                                env=dict(environment, FLYWAY_URL=url, SPRING_DATASOURCE_URL=url, LC_ALL="C"),
+                                capture_output=True, text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_workflow_is_dispatch_only_on_main(self):
         workflow = (REHEARSAL.ROOT / ".github/workflows/upload-rehearsal.yml").read_text(encoding="utf-8")
