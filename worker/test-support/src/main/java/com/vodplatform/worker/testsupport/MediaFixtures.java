@@ -79,6 +79,12 @@ public final class MediaFixtures {
                             "-pix_fmt", "yuv420p10le", "-profile:v", "main10",
                             "-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc"),
                     List.of("-c:a", "ac3", "-ac", "6", "-b:a", "384k", "-shortest"));
+            case ROTATED_90_MP4 -> rotate(target, 90);
+            case ROTATED_MINUS_90_MKV -> rotate(target, -90);
+            case ROTATED_180_MP4 -> rotate(target, 180);
+            case ROTATED_45_MP4 -> rotate(target, 45);
+            case ROTATE_TAG_90_MKV -> encode(target, List.of("-i", "file:" + path(MediaFixture.H264_AAC_MP4)),
+                    List.of("-map", "0", "-c", "copy", "-metadata:s:v:0", "rotate=90"));
             case EBML_UNDER_MP4_KEY -> Files.copy(path(MediaFixture.VP9_OPUS_WEBM), target);
             case TEXT_UNDER_MP4_KEY -> Files.writeString(target, "Plain text uploaded under a video key.\n",
                     StandardCharsets.UTF_8);
@@ -94,10 +100,19 @@ public final class MediaFixtures {
             case MPEG2_VIDEO_MKV -> encode(target, inputs("testsrc2=size=640x360:rate=25:duration=3",
                     "sine=frequency=440:sample_rate=48000:duration=3"),
                     List.of("-c:v", "mpeg2video", "-c:a", "aac", "-shortest"));
+            // An allowed video beside an audio stream whose decoder (mp2) is outside the allowlist.
+            case MP2_AUDIO_MKV -> encode(target, inputs("testsrc2=size=320x180:rate=10:duration=2",
+                    "sine=frequency=440:sample_rate=48000:duration=2"), FAST_H264, List.of("-c:a", "mp2", "-shortest"));
             case NINE_STREAMS_MKV, NINE_STREAMS_MP4 -> encode(target, inputs("testsrc2=size=320x180:rate=10:duration=2",
                     "sine=frequency=440:sample_rate=48000:duration=2"), nineStreamMaps(), FAST_H264, List.of("-c:a", "aac"));
             case OVER_CAP_2560X1440_MP4 -> encode(target, inputs("testsrc2=size=2560x1440:rate=5:duration=1"), FAST_H264);
         }
+    }
+
+    /** Copies H264_AAC_MP4 with a Display Matrix; -display_rotation is an input option, so nothing is re-encoded. */
+    private void rotate(Path target, int degrees) {
+        encode(target, List.of("-display_rotation:v:0", String.valueOf(degrees), "-i", "file:" + path(MediaFixture.H264_AAC_MP4)),
+                List.of("-map", "0", "-c", "copy"));
     }
 
     private Path moovAtEndSource() throws IOException {

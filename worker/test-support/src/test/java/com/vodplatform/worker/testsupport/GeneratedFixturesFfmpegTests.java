@@ -8,11 +8,17 @@ import static com.vodplatform.worker.testsupport.MediaFixture.H264_AAC_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.H264_HIGH10_FLAC_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.HEVC_MAIN10_HDR_AC3_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.HLS_PLAYLIST_UNDER_MP4_KEY;
+import static com.vodplatform.worker.testsupport.MediaFixture.MP2_AUDIO_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.MPEG2_VIDEO_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.NINE_STREAMS_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.NINE_STREAMS_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.OVER_CAP_2560X1440_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.PORTRAIT_H264_AAC_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_180_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_45_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_90_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_MINUS_90_MKV;
+import static com.vodplatform.worker.testsupport.MediaFixture.ROTATE_TAG_90_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.SILENT_H264_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.TEXT_UNDER_MP4_KEY;
 import static com.vodplatform.worker.testsupport.MediaFixture.TRUNCATED_FASTSTART_MP4;
@@ -56,6 +62,10 @@ class GeneratedFixturesFfmpegTests {
         assertStreams(PORTRAIT_H264_AAC_MP4, "video h264 Constrained Baseline yuv420p 360x640", "audio aac 2ch");
         assertStreams(SILENT_H264_MP4, "video h264 Constrained Baseline yuv420p 640x360");
         assertStreams(HEVC_MAIN10_HDR_AC3_MKV, "video hevc Main 10 yuv420p10le 640x360", "audio ac3 6ch");
+        for (MediaFixture rotated : List.of(ROTATED_90_MP4, ROTATED_MINUS_90_MKV, ROTATED_180_MP4, ROTATE_TAG_90_MKV)) {
+            // Rotation is metadata only: the coded size stays landscape.
+            assertStreams(rotated, "video h264 High yuv420p 640x360", "audio aac 2ch");
+        }
         for (MediaFixture fixture : MediaFixture.values()) {
             if (!fixture.valid()) continue;
             JsonNode format = probe(fixture).get("format");
@@ -71,6 +81,18 @@ class GeneratedFixturesFfmpegTests {
         assertThat(video.get("color_transfer").asString()).isEqualTo("smpte2084");
         assertThat(video.get("color_primaries").asString()).isEqualTo("bt2020");
         assertThat(video.get("color_space").asString()).isEqualTo("bt2020nc");
+    }
+
+    @Test
+    void rotationFixturesCarryADisplayMatrixOrOnlyTheLegacyTag() {
+        assertThat(displayMatrixRotation(ROTATED_90_MP4)).isEqualTo(90);
+        assertThat(displayMatrixRotation(ROTATED_MINUS_90_MKV)).isEqualTo(-90);
+        // FFprobe reports the angle in [-180, 180]; a 180-degree matrix comes out as -180.
+        assertThat(displayMatrixRotation(ROTATED_180_MP4)).isEqualTo(-180);
+        assertThat(displayMatrixRotation(ROTATED_45_MP4)).isEqualTo(45);
+        JsonNode tagged = probe(ROTATE_TAG_90_MKV).get("streams").get(0);
+        assertThat(tagged.has("side_data_list")).isFalse();
+        assertThat(tagged.get("tags").get("ROTATE").asString()).isEqualTo("90");
     }
 
     @Test
@@ -109,6 +131,7 @@ class GeneratedFixturesFfmpegTests {
         assertThat(summaries(coverArt)).containsExactly("audio aac 2ch", "video png - rgb24 320x320");
         assertThat(coverArt.get("streams").get(1).get("disposition").get("attached_pic").asInt()).isEqualTo(1);
         assertThat(summaries(probe(MPEG2_VIDEO_MKV)).getFirst()).startsWith("video mpeg2video");
+        assertStreams(MP2_AUDIO_MKV, "video h264 Constrained Baseline yuv420p 320x180", "audio mp2 1ch");
         assertThat(probe(NINE_STREAMS_MKV).get("streams")).hasSize(9);
         assertThat(probe(NINE_STREAMS_MP4).get("streams")).hasSize(9);
         assertThat(summaries(probe(OVER_CAP_2560X1440_MP4))).containsExactly("video h264 Constrained Baseline yuv420p 2560x1440");
@@ -116,8 +139,9 @@ class GeneratedFixturesFfmpegTests {
 
     @Test
     void maxStreamsFailsMovButSilentlyDropsMatroskaTracks() {
-        // FFmpeg 7.1 behaviour Issue 5.4 must handle: with -max_streams 8 a nine-track Matroska file probes
-        // successfully with eight streams, so a stream-count check alone cannot see the ninth track.
+        // FFmpeg 7.1 behaviour: with -max_streams 8 a nine-track Matroska file probes successfully with eight
+        // streams, so a stream-count check alone cannot see the ninth track. Issue 5.4 treats the demuxer's
+        // max_streams message as the cap violation (FfprobeServiceFfmpegTests in the probe module).
         MediaTools.Result matroska = tools.probe(fixtures.path(NINE_STREAMS_MKV), NINE_STREAMS_MKV.demuxer(),
                 List.of("-max_streams", "8"));
         MediaTools.Result mov = tools.probe(fixtures.path(NINE_STREAMS_MP4), NINE_STREAMS_MP4.demuxer(),
@@ -131,6 +155,12 @@ class GeneratedFixturesFfmpegTests {
 
     private static JsonNode probe(MediaFixture fixture) {
         return tools.probeJson(fixtures.path(fixture), fixture.demuxer());
+    }
+
+    private static int displayMatrixRotation(MediaFixture fixture) {
+        JsonNode sideData = probe(fixture).get("streams").get(0).get("side_data_list").get(0);
+        assertThat(sideData.get("side_data_type").asString()).as(fixture.name()).isEqualTo("Display Matrix");
+        return sideData.get("rotation").asInt();
     }
 
     private static void assertStreams(MediaFixture fixture, String... expected) {
