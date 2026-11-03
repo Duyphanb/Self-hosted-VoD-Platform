@@ -21,6 +21,7 @@ import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_45_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_90_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.TEXT_UNDER_MP4_KEY;
 import static com.vodplatform.worker.testsupport.MediaFixture.TRUNCATED_MOOV_AT_END_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.VIDEO_WITH_COVER_ART_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.VP9_OPUS_WEBM;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -99,6 +100,12 @@ class FfprobeServiceFfmpegTests {
         assertCode(() -> probe(policy(), AUDIO_ONLY_MP4), UNSUPPORTED_MEDIA, AUDIO_ONLY_MP4);
         // FFprobe already fails here: the PNG cover art needs a decoder outside the D26 allowlist.
         assertCode(() -> probe(policy(), COVER_ART_ONLY_MP4), UNSUPPORTED_MEDIA, COVER_ART_ONLY_MP4);
+    }
+
+    @Test
+    void coverArtBesideARealVideoStillNeedsADecoderOutsideTheAllowlist() {
+        // FFprobe opens a decoder for every stream, so the D26 list rejects the file before cover-art selection applies.
+        assertCode(() -> probe(policy(), VIDEO_WITH_COVER_ART_MP4), UNSUPPORTED_MEDIA, VIDEO_WITH_COVER_ART_MP4);
     }
 
     @Test

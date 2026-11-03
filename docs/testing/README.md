@@ -48,18 +48,22 @@ generates each `MediaFixture` with FFmpeg's lavfi sources into the test's tempor
 | `rotated-90.mp4`, `rotated-minus-90.mkv`, `rotated-180.mp4`, `rotate-tag-90.mkv` | Valid rotated copies of `h264-aac.mp4` (#194): a Display Matrix of 90, -90 or 180 degrees, or only the legacy `ROTATE` tag that the Matroska muxer writes |
 | `ebml-under-mp4-key.mp4`, `text-under-mp4-key.mp4`, `hls-playlist-under-mp4-key.mp4`, `ffconcat-under-mkv-key.mkv` | Content that does not match its key; the forced demuxer refuses it |
 | `truncated-moov-at-end.mp4`, `truncated-faststart.mp4` | Truncation: the first never probes, the second probes but encodes short |
-| `audio-only.mp4`, `cover-art-only.mp4`, `mpeg2-video.mkv`, `mp2-audio.mkv`, `rotated-45.mp4`, `nine-streams.mkv`/`.mp4`, `over-cap-2560x1440.mp4` | Well-formed files ADR-010 D26 rejects (no video, a video or audio decoder outside the allowlist, a rotation that is not a right angle, caps) |
+| `audio-only.mp4`, `cover-art-only.mp4`, `video-with-cover-art.mp4`, `mpeg2-video.mkv`, `mp2-audio.mkv`, `rotated-45.mp4`, `nine-streams.mkv`/`.mp4`, `over-cap-2560x1440.mp4` | Well-formed files ADR-010 D26 rejects (no video, PNG cover art, a video or audio decoder outside the allowlist, a rotation that is not a right angle, caps) |
 
 `FakeMediaTool` in the same module stands in for a media binary in process tests: it runs on the
 test JVM's own `java` for the cross-platform runner tests, or as a POSIX shell script for tests
-that need one executable path such as `FFPROBE_PATH`. Its spawning modes start a child that shares
-the tool's output pipes and record both PIDs, so a test can prove that no process is left behind.
+that need one executable path such as `FFPROBE_PATH`. Its spawning modes start a child and record
+both PIDs, so a test can prove that no process is left behind: the child shares the tool's output
+pipes, and in the exiting modes the tool exits and leaves the child running, with or without its pipes.
 
 The default `mvn -B -ntp verify` in `worker/` excludes the `ffmpeg` JUnit tag and runs the
 unit tests of the playlist reader and the ADR-010 D27 output checks, and those of the probe module:
 the bounded process runner against `FakeMediaTool` (deadline and interrupt kill of the tool and its
-child, closed stdin, the PATH/LANG/HOME environment, concurrent bounded draining), the D26 parsing
-rules on FFprobe JSON, the settings and the command. `sh deploy/tests/worker-ffmpeg-tests.sh`
+child, a child that outlives the tool, closed stdin, the PATH/LANG/HOME environment, concurrent
+bounded draining), the D26 parsing rules on FFprobe JSON, the settings and the command. The runner
+lists the tool's descendants every 100 ms while it runs, so it can kill one that outlives the tool;
+the detached-child test runs on POSIX systems only, because a Windows child inherits the tool's pipes.
+`sh deploy/tests/worker-ffmpeg-tests.sh`
 (Linux, or Git Bash with Docker Desktop) builds the worker image's `ffmpeg-test` stage, runs
 `mvn -Pffmpeg-tests test` inside it so the tests use the runtime image's own ffmpeg/ffprobe, and then
 requires every `*FfmpegTests` class to have run with no skipped test. Name new FFmpeg-tagged
@@ -85,15 +89,15 @@ What the tests pin for FFmpeg 7.1.5 (the ADR-010 D25 binary):
   so SubRip uses `srt`, ASS `ssa`, MP3 `mp3float` and AV1 `libdav1d`. `DecoderAllowlistFfmpegTests`
   probes an encoded sample of each of the 22 families with the production FFprobe command, and again
   without that family's entry, which must fail with "Codec (name) not on whitelist".
-- FFprobe opens a decoder for every stream, cover art included: PNG or MJPEG cover art fails
-  `-codec_whitelist`, so a file with embedded cover art is `UNSUPPORTED_MEDIA` even when it also has a
-  real video stream.
+- FFprobe opens a decoder for every stream, cover art included: the PNG cover art of
+  `video-with-cover-art.mp4` fails `-codec_whitelist` ("Codec (png) not on whitelist"), so a file with
+  embedded cover art is `UNSUPPORTED_MEDIA` even when it also has a real video stream.
 
 The probe module's FFmpeg-tagged `FfprobeServiceFfmpegTests` runs the FFprobe service over this corpus:
 valid families and rotations, key/content mismatch in both directions, moov-at-end truncation,
-disguised playlists, audio-only, cover-art-only, decoders outside the allowlist, a 45-degree
-rotation, the size, duration and stream caps, and a deadline and an interrupt that kill the
-`FakeMediaTool` shell fake and its child.
+disguised playlists, audio-only, cover-art-only, cover art beside a real video, decoders outside the
+allowlist, a 45-degree rotation, the size, duration and stream caps, and a deadline and an interrupt
+that kill the `FakeMediaTool` shell fake and its child.
 
 ## Purpose
 

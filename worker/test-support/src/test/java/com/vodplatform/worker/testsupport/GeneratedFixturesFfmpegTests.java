@@ -23,6 +23,7 @@ import static com.vodplatform.worker.testsupport.MediaFixture.SILENT_H264_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.TEXT_UNDER_MP4_KEY;
 import static com.vodplatform.worker.testsupport.MediaFixture.TRUNCATED_FASTSTART_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.TRUNCATED_MOOV_AT_END_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.VIDEO_WITH_COVER_ART_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.VP9_OPUS_WEBM;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -130,6 +131,10 @@ class GeneratedFixturesFfmpegTests {
         JsonNode coverArt = probe(COVER_ART_ONLY_MP4);
         assertThat(summaries(coverArt)).containsExactly("audio aac 2ch", "video png - rgb24 320x320");
         assertThat(coverArt.get("streams").get(1).get("disposition").get("attached_pic").asInt()).isEqualTo(1);
+        JsonNode videoWithCoverArt = probe(VIDEO_WITH_COVER_ART_MP4);
+        assertThat(summaries(videoWithCoverArt)).containsExactly("video h264 Constrained Baseline yuv420p 320x180",
+                "audio aac 1ch", "video png - rgb24 320x320");
+        assertThat(videoWithCoverArt.get("streams").get(2).get("disposition").get("attached_pic").asInt()).isEqualTo(1);
         assertThat(summaries(probe(MPEG2_VIDEO_MKV)).getFirst()).startsWith("video mpeg2video");
         assertStreams(MP2_AUDIO_MKV, "video h264 Constrained Baseline yuv420p 320x180", "audio mp2 1ch");
         assertThat(probe(NINE_STREAMS_MKV).get("streams")).hasSize(9);

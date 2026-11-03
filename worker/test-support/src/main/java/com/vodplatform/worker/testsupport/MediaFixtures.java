@@ -97,6 +97,11 @@ public final class MediaFixtures {
             case AUDIO_ONLY_MP4 -> encode(target, inputs(TONE), STEREO_AAC);
             case COVER_ART_ONLY_MP4 -> encode(target, List.of("-f", "lavfi", "-i", TONE, "-i", "file:" + cover()),
                     List.of("-map", "0:a", "-map", "1:v", "-c:v", "png", "-disposition:v:0", "attached_pic"), STEREO_AAC);
+            case VIDEO_WITH_COVER_ART_MP4 -> encode(target, List.of("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10:duration=2",
+                    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2", "-i", "file:" + cover()),
+                    List.of("-map", "0:v", "-map", "1:a", "-map", "2:v",
+                            "-c:v:0", "libx264", "-preset", "ultrafast", "-pix_fmt:v:0", "yuv420p",
+                            "-c:v:1", "png", "-disposition:v:1", "attached_pic", "-c:a", "aac"));
             case MPEG2_VIDEO_MKV -> encode(target, inputs("testsrc2=size=640x360:rate=25:duration=3",
                     "sine=frequency=440:sample_rate=48000:duration=3"),
                     List.of("-c:v", "mpeg2video", "-c:a", "aac", "-shortest"));

@@ -32,6 +32,8 @@ public enum MediaFixture {
     // Well-formed files the worker must still reject (ADR-010 D26).
     AUDIO_ONLY_MP4("audio-only.mp4", Kind.INVALID),
     COVER_ART_ONLY_MP4("cover-art-only.mp4", Kind.INVALID),
+    // A real video with PNG cover art: probing opens the png decoder, which the D26 allowlist does not list.
+    VIDEO_WITH_COVER_ART_MP4("video-with-cover-art.mp4", Kind.INVALID),
     MPEG2_VIDEO_MKV("mpeg2-video.mkv", Kind.INVALID),
     MP2_AUDIO_MKV("mp2-audio.mkv", Kind.INVALID),
     ROTATED_45_MP4("rotated-45.mp4", Kind.INVALID),
