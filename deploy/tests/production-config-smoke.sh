@@ -19,6 +19,9 @@ $credential_tokens
 EOF
 unset credential_tokens
 compose_project="vod-auth-audit-config-$run_token"
+# #124 overlay defaults. An empty override lets Compose apply them, as `${NAME:-default}` does.
+backend_java_tool_options_default="-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError"
+worker_java_tool_options_default="-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError"
 
 set_synthetic_values() {
   postgres_user_value="ci_postgres_$run_token"
@@ -34,6 +37,8 @@ set_synthetic_values() {
   jwt_secret_value="ci-jwt-signing-secret-$jwt_secret_token"
   nginx_http_port_value="80"
   max_upload_size_mb_value="2048"
+  backend_java_tool_options_value=""
+  worker_java_tool_options_value=""
 }
 
 set_published_defaults() {
@@ -50,6 +55,8 @@ set_published_defaults() {
   jwt_secret_value="change-me-use-a-long-random-secret"
   nginx_http_port_value="127.0.0.1:80"
   max_upload_size_mb_value="2048"
+  backend_java_tool_options_value=""
+  worker_java_tool_options_value=""
 }
 
 value_for() {
@@ -114,6 +121,8 @@ run_check() {
   JWT_SECRET="$jwt_secret_value" \
   NGINX_HTTP_PORT="$nginx_http_port_value" \
   MAX_UPLOAD_SIZE_MB="$max_upload_size_mb_value" \
+  BACKEND_JAVA_TOOL_OPTIONS="${backend_java_tool_options_value:-$backend_java_tool_options_default}" \
+  WORKER_JAVA_TOOL_OPTIONS="${worker_java_tool_options_value:-$worker_java_tool_options_default}" \
     sh "$check_script"
 }
 
@@ -131,6 +140,8 @@ run_production_compose() {
   JWT_SECRET="$jwt_secret_value" \
   NGINX_HTTP_PORT="$nginx_http_port_value" \
   MAX_UPLOAD_SIZE_MB="$max_upload_size_mb_value" \
+  BACKEND_JAVA_TOOL_OPTIONS="$backend_java_tool_options_value" \
+  WORKER_JAVA_TOOL_OPTIONS="$worker_java_tool_options_value" \
   CORS_ALLOWED_ORIGINS= \
     docker compose \
       -p "$compose_project" \
@@ -154,6 +165,8 @@ run_production_compose_from_file() {
     -u JWT_SECRET \
     -u NGINX_HTTP_PORT \
     -u MAX_UPLOAD_SIZE_MB \
+    -u BACKEND_JAVA_TOOL_OPTIONS \
+    -u WORKER_JAVA_TOOL_OPTIONS \
     -u CORS_ALLOWED_ORIGINS \
     docker compose \
       --env-file "$env_file" \
@@ -453,6 +466,35 @@ do
 done
 printf '%s\n' "Production dependency gate check passed"
 
+# #124: an override reaches both the preflight and the JVM, and the preflight
+# rejects one that drops the OutOfMemoryError exit.
+set_synthetic_values
+worker_java_tool_options_value="-XX:MaxRAMPercentage=25 -XX:+ExitOnOutOfMemoryError"
+run_production_compose config --format json > "$config_json"
+"$python_command" - "$config_json" "$worker_java_tool_options_value" "$backend_java_tool_options_default" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as config_file:
+    services = json.load(config_file)["services"]
+worker_options, backend_options = sys.argv[2], sys.argv[3]
+assert services["worker"]["environment"]["JAVA_TOOL_OPTIONS"] == worker_options
+assert services["production-config-check"]["environment"]["WORKER_JAVA_TOOL_OPTIONS"] == worker_options
+assert services["backend"]["environment"]["JAVA_TOOL_OPTIONS"] == backend_options
+assert services["production-config-check"]["environment"]["BACKEND_JAVA_TOOL_OPTIONS"] == backend_options
+PY
+worker_java_tool_options_value="-XX:MaxRAMPercentage=30"
+: > "$log_file"
+if run_production_compose run --rm --no-deps production-config-check \
+  > "$log_file" 2>&1
+then
+  printf '%s\n' "Production preflight accepted worker JVM options without the OutOfMemoryError exit" >&2
+  exit 1
+fi
+assert_log_contains \
+  "Production configuration rejected: WORKER_JAVA_TOOL_OPTIONS must enable -XX:+ExitOnOutOfMemoryError"
+printf '%s\n' "Production JVM option checks passed"
+
 set_synthetic_values
 run_production_compose config --format json > "$config_json"
 write_env_file
@@ -481,6 +523,8 @@ expected = {
         "JWT_SECRET": values["JWT_SECRET"],
         "NGINX_HTTP_PORT": "80",
         "MAX_UPLOAD_SIZE_MB": "2048",
+        "BACKEND_JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError",
+        "WORKER_JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError",
     },
     "postgres": {"POSTGRES_USER": values["POSTGRES_USER"], "POSTGRES_PASSWORD": values["POSTGRES_PASSWORD"]},
     "rabbitmq": {"RABBITMQ_DEFAULT_USER": values["RABBITMQ_USERNAME"], "RABBITMQ_DEFAULT_PASS": values["RABBITMQ_PASSWORD"]},
@@ -498,6 +542,7 @@ expected = {
         "RABBITMQ_PASSWORD": values["RABBITMQ_PASSWORD"],
         "MINIO_ACCESS_KEY": values["MINIO_BACKEND_ACCESS_KEY"],
         "MINIO_SECRET_KEY": values["MINIO_BACKEND_SECRET_KEY"],
+        "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError",
     },
     "worker": {
         "SPRING_DATASOURCE_USERNAME": values["POSTGRES_USER"],
@@ -506,6 +551,7 @@ expected = {
         "RABBITMQ_PASSWORD": values["RABBITMQ_PASSWORD"],
         "MINIO_ACCESS_KEY": values["MINIO_WORKER_ACCESS_KEY"],
         "MINIO_SECRET_KEY": values["MINIO_WORKER_SECRET_KEY"],
+        "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError",
     },
 }
 

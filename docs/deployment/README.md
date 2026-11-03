@@ -130,6 +130,17 @@ Root storage keys are reserved for bootstrap and explicit operator maintenance, 
 It must also set `NGINX_HTTP_PORT=80`, as described in
 [Edge Port Binding](#edge-port-binding).
 
+The overlay passes JVM options to the backend and worker through `JAVA_TOOL_OPTIONS` (#124):
+`-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError` for the backend and
+`-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError` for the worker. Each heap then follows its container
+memory limit, and an `OutOfMemoryError` ends the JVM, so `restart: unless-stopped` replaces it. Without the
+exit, a JVM that ran out of memory could keep passing the TCP health check. The worker's share is smaller
+because FFmpeg runs inside the same memory limit. `.env.production` may override the defaults with
+`BACKEND_JAVA_TOOL_OPTIONS` and `WORKER_JAVA_TOOL_OPTIONS`. The preflight then rejects a value whose last
+`ExitOnOutOfMemoryError` setting is not `-XX:+ExitOnOutOfMemoryError`, or whose last `-XX:MaxRAMPercentage`
+is not a whole number from 1 to 100. It also rejects quotes and backslashes, because the JVM would parse them
+differently. The values are sized from the [worker encode measurement](../testing/WORKER-ENCODE-MEASUREMENT.md).
+
 The production-only `production-config-check` service rejects the published
 development placeholders and a loopback-bound edge before PostgreSQL,
 RabbitMQ, MinIO, or Nginx can start. It reports only the rejected variable name
@@ -152,6 +163,8 @@ The script uses synthetic test-only values. It verifies that local Compose
 still accepts its development defaults and publishes the edge on loopback only,
 missing production values fail during configuration, published defaults and a
 loopback-bound edge fail the runtime preflight, invalid storage key/secret formats fail with variable names only, and non-default values pass.
+It also checks that the JVM options reach both the preflight and the JVMs, and that the preflight rejects an
+override without the `OutOfMemoryError` exit.
 
 ## Storage Identity Rotation and Revocation
 
