@@ -14,6 +14,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -27,18 +28,20 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * ADR-008 on PostgreSQL (issue #119): the unique index {@code ux_users_email_identity} on
  * {@code lower(email)} decides a case-variant registration that the duplicate pre-check cannot see.
- * Another transaction holds an uncommitted {@code VIEWER@example.com}; the registration of
- * {@code viewer@example.com} passes the pre-check, waits on the index entry and, once the other
- * transaction commits, fails on that index and returns 409 {@code EMAIL_ALREADY_EXISTS}. The
- * exact-spelling constraint {@code ux_users_email} cannot match the two spellings, and an unmapped
- * violation would be a 500. H2 schemas have no expression index, so only PostgreSQL shows this.
+ * Another transaction holds an uncommitted {@code IDENTITY-RACE@example.com}; the registration
+ * of {@code identity-race@example.com} passes the pre-check, waits on the index entry and, once
+ * the other transaction commits, fails on that index and returns 409 {@code EMAIL_ALREADY_EXISTS}.
+ * The exact-spelling constraint {@code ux_users_email} cannot match the two spellings, and an
+ * unmapped violation would be a 500. H2 schemas have no expression index, so only PostgreSQL shows
+ * this.
  */
 @SpringBootTest(properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes")
 @AutoConfigureMockMvc
 class EmailIdentityPostgresTests implements PostgresTestDatabase {
 
-    private static final String HELD_EMAIL = "VIEWER@example.com";
-    private static final String REGISTERED_EMAIL = "viewer@example.com";
+    // Not used by any other test class, so no other fixture shares this identity.
+    private static final String HELD_EMAIL = "IDENTITY-RACE@example.com";
+    private static final String REGISTERED_EMAIL = "identity-race@example.com";
     private static final long TIMEOUT_SECONDS = 30;
 
     @Autowired
@@ -53,6 +56,7 @@ class EmailIdentityPostgresTests implements PostgresTestDatabase {
     @Autowired
     private JdbcTemplate jdbc;
 
+    @BeforeEach
     @AfterEach
     void removeTheAccount() {
         jdbc.update("delete from users where lower(email) = ?", REGISTERED_EMAIL);
