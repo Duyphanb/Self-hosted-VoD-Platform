@@ -32,7 +32,7 @@ Out of scope for MVP:
 Allowed MVP focus:
 
 - one reliable HLS output path
-- optional 720p target if needed for stability
+- one fixed output profile that fits a 1280x720 box without upscaling ([ADR-010 D27](../architecture/adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28))
 - admin-visible encoding status
 
 ## Upload Experience

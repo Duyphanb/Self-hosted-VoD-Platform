@@ -781,6 +781,8 @@ Implement FFprobe service that executes `ffprobe` command to extract duration, w
 
 **Dependencies:** Issue 5.2, #123, #124 measurement record
 
+**Implementation note:** this issue (with #123) switches `worker/Dockerfile` to the ADR-010 D25 base (digest-pinned `debian:trixie-slim`, Debian `ffmpeg` and `openjdk-21-jre-headless`) before its FFprobe tests, so 5.4/5.5 and the #124 measurement run the D25 binary; Issue 5.8 adds the hardening
+
 ---
 
 ### Issue 5.5: Worker FFmpeg HLS Transcoding Service
@@ -854,7 +856,7 @@ Implement main processing orchestrator that coordinates: mark status `PROCESSING
 Create worker Dockerfile with FFmpeg and FFprobe installed. Document required environment variables in `.env.example`: RabbitMQ credentials, MinIO credentials and bucket names, PostgreSQL connection, FFmpeg/FFprobe paths.
 
 **Acceptance Criteria:**
-- Use the ADR-010 D25 source (digest-pinned `debian:trixie-slim`, Debian `ffmpeg` and `openjdk-21-jre-headless`); CI asserts a non-root `id -u` and the recorded minimum ffmpeg version with `dpkg --compare-versions`, logs the installed versions, and adds the weekly rebuild; the #124 arm64 job builds the same Dockerfile; container OS scan limits stay with #54
+- Keep the ADR-010 D25 base introduced in Issue 5.4 (digest-pinned `debian:trixie-slim`, Debian `ffmpeg` and `openjdk-21-jre-headless`); CI asserts a non-root `id -u` and the recorded minimum ffmpeg version with `dpkg --compare-versions`, logs the installed versions, and adds the weekly rebuild; the #124 arm64 job builds the same Dockerfile; container OS scan limits stay with #54
 - Non-root, read_only root, a disk-backed writable volume (not tmpfs) for WORKER_TEMP_DIR guarded by the raw-size free-disk check, cap_drop ALL, no-new-privileges, pids_limit validated in this issue and sized for JVM plus FFmpeg threads (it counts threads); stop_grace_period 30s; test the real mount layout (disk-backed WORKER_TEMP_DIR and a writable java.io.tmpdir), not tmpfs
 - Add the worker temp volume/mount to Compose and document it in INFRASTRUCTURE Persistent Volumes; this does not move the backend TEMP_UPLOAD_DIR out of its container layer
 - Worker image builds successfully

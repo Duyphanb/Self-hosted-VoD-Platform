@@ -173,7 +173,7 @@ Media settings have no application defaults: the worker fails startup when one i
 
 ### Worker runtime image
 
-[ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28) selects the worker image: `debian:trixie-slim` pinned by digest, Debian `ffmpeg` and `openjdk-21-jre-headless` from trixie and trixie-security, a non-root runtime user, for amd64 and arm64. Issue 5.8 implements it.
+[ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28) selects the worker image: `debian:trixie-slim` pinned by digest, Debian `ffmpeg` and `openjdk-21-jre-headless` from trixie and trixie-security, a non-root runtime user, for amd64 and arm64. The base and packages land first: Issue 5.4, together with the #123 harness, switches `worker/Dockerfile` to this base, so the 5.4/5.5 command tests and the #124 arm64 measurement all run the D25 binary. Issue 5.8 then adds the non-root, read-only and volume hardening, the version-floor assertion and the weekly rebuild.
 
 Update procedure:
 1. Watch debian-security-announce for ffmpeg and openjdk-21 advisories.
