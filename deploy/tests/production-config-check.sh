@@ -52,8 +52,10 @@ validate_storage_secret() {
 # #124: each JVM sizes its heap from its container memory limit and exits on
 # OutOfMemoryError, so the restart policy replaces it instead of leaving a JVM
 # that still passes the TCP health check. The overlay supplies the defaults; an
-# override must keep both. The JVM applies options in order, so the last
-# setting of each option decides, as it does here.
+# override must keep both. An absolute heap or RAM size, or disabled container
+# support, would let the heap ignore the memory limit, so those are rejected.
+# The JVM applies options in order, so the last setting of each option decides,
+# as it does here.
 validate_jvm_options() {
   variable_name="$1"
   value="$2"
@@ -69,6 +71,8 @@ validate_jvm_options() {
       -XX:+ExitOnOutOfMemoryError) exit_on_out_of_memory="enabled" ;;
       -XX:-ExitOnOutOfMemoryError) exit_on_out_of_memory="" ;;
       -XX:MaxRAMPercentage=*) max_ram_percentage="${option#-XX:MaxRAMPercentage=}" ;;
+      -Xmx*|-Xms*|-XX:MaxHeapSize=*|-XX:InitialHeapSize=*|-XX:MaxRAM=*|-XX:-UseContainerSupport)
+        fail "$variable_name must size the heap only with -XX:MaxRAMPercentage, without -Xmx, -Xms, -XX:MaxHeapSize, -XX:InitialHeapSize, -XX:MaxRAM or -XX:-UseContainerSupport" ;;
     esac
   done
   set +f
