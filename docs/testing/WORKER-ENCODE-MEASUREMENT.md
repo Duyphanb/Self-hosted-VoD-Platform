@@ -38,12 +38,14 @@ the Docker host, so it never measures under emulation.
   - FFprobe and FFmpeg wall time, measured inside the container, so container start-up is excluded.
   - The output size and its ADR-010 D27 checks; a run whose output fails them fails the measurement.
   - The temp-disk peak: the raw copy plus the HLS directory, polled every 0.5 s.
-  - `docker stats` peaks: CPU %, MemUsage and PIDs.
-  - The cgroup's own `memory.peak`, `pids.peak`, CPU throttling (`cpu.stat`) and OOM events.
+  - `docker stats` peaks: CPU %, MemUsage (the cgroup usage minus inactive file cache) and PIDs.
+  - The cgroup's own `memory.peak`, `pids.peak`, CPU throttling (`cpu.stat`) and OOM events. `memory.peak`
+    includes page cache, such as the HLS segments just written, so it can exceed what FFmpeg needs.
 - **Derived.** A least-squares fit per clip type and thread count gives encode seconds per media second (the
   slope) and the fixed overhead (the intercept). Output bytes are fitted too, because the VBV buffer lets a
   clip's first seconds exceed the maxrate: a 2 s clip's kb/s overstates the steady rate. Values at 10800 s
-  come from these fits and are labelled `PREDICTED` in the artifact.
+  come from these fits and are labelled `PREDICTED` in the artifact. The `Record rows` section of the
+  artifact's `summary.md` gives the rows of the tables below, in their columns and units.
 
 `deploy/tests/jvm-limits-smoke.py` starts the backend and worker with their dependencies under the production
 overlay in a fresh, disposable Compose project with generated credentials. For each JVM it checks:
@@ -72,6 +74,9 @@ It removes only its own project's containers, networks and volumes.
   Run the JVM smoke with a fresh project name. Check free disk first: a cap-length run needs about 11 GB.
 - **Local dry run:** allowed on amd64 to check the scripts. Its numbers are not evidence, and arm64 is never
   emulated locally.
+- **Clean-up:** the measurement removes its containers and work directory, and the JVM smoke its project's
+  containers, networks and volumes. Neither removes images: on a VM or workstation, remove the worker image
+  and the `<project>-backend` and `<project>-worker` images the JVM smoke built.
 
 ## Record
 
@@ -121,12 +126,14 @@ The free space required after probing is then 5120 MiB + max(B, 2B - R): about 1
 | backend, arm64 | `-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError` | 768 MiB | _pending_ | _pending_ | _pending_ | _pending_ |
 | worker, arm64 | `-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError` | 1024 MiB | _pending_ | _pending_ | _pending_ | _pending_ |
 
-A local amd64 run of the JVM smoke (Docker Desktop on 2026-11-03) is not arm64 or VPS evidence. It found:
+Two local amd64 runs of the JVM smoke (Docker Desktop, 2026-11-03 and 2026-11-04) are not arm64 or VPS
+evidence. They found:
 
 - **Backend:** a 500 MiB `MaxHeapSize` (`Runtime.maxMemory()` 483 MiB) instead of the earlier 25% default
-  (about 185 MiB), SerialGC with one CPU, `ExitOnOutOfMemoryError` true, and an idle MemUsage of 307 MiB.
+  (about 185 MiB), SerialGC with one CPU, `ExitOnOutOfMemoryError` true, and an idle MemUsage of 307 to
+  362 MiB.
 - **Worker:** a 308 MiB `MaxHeapSize` (298 MiB), SerialGC, `ExitOnOutOfMemoryError` true, and an idle
-  MemUsage of 145 MiB.
+  MemUsage of 145 to 162 MiB.
 
 ### Silo on arm64
 
@@ -146,7 +153,7 @@ The owner adds the margin; none is chosen here.
 | `WORKER_OUTPUT_BUDGET_KBPS=5000` | Steady output rate and short-clip bursts against B | _pending_ | _pending_ |
 | `WORKER_DISK_RESERVE_MB=5120` | Temp-disk peaks; the VPS disk size comes from #180 | _pending_ | _pending_ |
 | `WORKER_FFMPEG_THREADS` (1 or 2) | Encode speed of 1 against 2 under the 1-CPU limit | _pending_ | _pending_ |
-| Worker memory limit and JVM share | Worker JVM idle memory plus FFmpeg `memory.peak` against 1024 MiB; PIDs for the 5.8 `pids_limit` | _pending_ | _pending_ |
+| Worker memory limit and JVM share | Worker JVM idle memory plus the FFmpeg MemUsage peak against 1024 MiB (`memory.peak` as an upper bound with page cache); PIDs for the 5.8 `pids_limit` | _pending_ | _pending_ |
 | Head-of-line blocking | Predicted cap-length encode duration with one worker at concurrency 1 | n/a | Owner accepts or rejects |
 
 ## Not covered here

@@ -233,7 +233,8 @@ def write_report(output, report):
                      f"{mib(observed.get('main_jvm_rss_bytes'))} |")
     if report.get("failures"):
         lines += [""] + ["- " + failure for failure in report["failures"]]
-    lines += ["", "Idle stack after startup; docker stats MemUsage includes page cache. Not A1 VPS evidence.", ""]
+    lines += ["", "Idle stack after startup; docker stats MemUsage is the cgroup usage minus inactive file cache. "
+                  "Not A1 VPS evidence.", ""]
     summary = "\n".join(lines)
     (output / "summary.md").write_text(summary, encoding="utf-8")
     if os.environ.get("GITHUB_STEP_SUMMARY"):

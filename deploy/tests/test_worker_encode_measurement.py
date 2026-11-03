@@ -268,6 +268,52 @@ class DerivedValuesTests(unittest.TestCase):
         self.assertIn("not A1 VPS evidence", summary)
         self.assertIn("| high-entropy-600s.mp4 | 1 | 600.0 | 1900.00 | 3.167 |", summary)
 
+    def test_record_rows_follow_the_record_tables(self):
+        report = {"probes": [{"clip": "typical-2s.mp4", "demuxer": "mov", "worst_seconds": 0.3, "media_seconds": 2.0},
+                             {"clip": "high-entropy-20s.mp4", "demuxer": "mov", "worst_seconds": 0.2,
+                              "media_seconds": 20.0},
+                             {"clip": "cap-probe.mkv", "demuxer": "matroska", "worst_seconds": 0.9,
+                              "media_seconds": 10800.0}],
+                  "runs": [self.run_record("high-entropy", 1, 2.0, 7.0, 2_000_000),
+                           self.run_record("high-entropy", 1, 20.0, 61.0, 11_000_000),
+                           self.run_record("high-entropy", 1, 600.0, 1900.0, 300_000_000, long=True),
+                           self.run_record("typical", 1, 2.0, 3.0, 500_000)]}
+        report["runs"][1]["docker_stats"] = {"memory_usage_peak_bytes": 300 * 1024**2, "pids_peak": 31,
+                                             "cpu_percent_peak": 104.5}
+        report["runs"][1]["cgroup"] = {"memory.peak": 320 * 1024**2}
+        record = MEASURE.derive(report)["record"]
+        self.assertEqual(record["probes"], [
+            {"target": "generated clips", "demuxer": "mov", "media_seconds": [2.0, 20.0], "worst_seconds": 0.3},
+            {"target": "cap-probe.mkv", "demuxer": "matroska", "media_seconds": [10800.0, 10800.0],
+             "worst_seconds": 0.9}])
+        fitted, long = record["encode"]  # One typical duration gives no fit, so no typical row.
+        self.assertEqual((fitted["kind"], fitted["threads"], fitted["long"]), ("high-entropy", 1, False))
+        self.assertAlmostEqual(fitted["encode_seconds_per_media_second"], 3.0)
+        self.assertAlmostEqual(fitted["fixed_overhead_seconds"], 1.0)
+        self.assertAlmostEqual(fitted["steady_output_kbps"], 4000.0)
+        # Peaks of the fitted short runs only: the long run has its own row.
+        self.assertEqual((fitted["temp_disk_peak_bytes"], fitted["cpu_percent_peak"], fitted["memory_usage_peak_bytes"],
+                          fitted["cgroup_memory_peak_bytes"], fitted["pids_peak"]),
+                         (11_000_001, 104.5, 300 * 1024**2, 320 * 1024**2, 31))
+        self.assertTrue(long["long"])
+        self.assertIsNone(long["fixed_overhead_seconds"])
+        self.assertAlmostEqual(long["encode_seconds_per_media_second"], 1900.0 / 600.0)
+        self.assertEqual(long["temp_disk_peak_bytes"], 300_000_001)
+        (cap,) = record["at_cap"]
+        self.assertTrue(cap["predicted"])
+        self.assertAlmostEqual(cap["encode_seconds"], 1.0 + 3.0 * 10800)
+        self.assertAlmostEqual(cap["temp_disk_peak_bytes"], MEASURE.UPLOAD_CAP_BYTES + 1_000_000 + 500_000 * 10800)
+        summary = MEASURE.render_summary({"result": "PASS", "runs": report["runs"], "probes": report["probes"],
+                                          "derived": MEASURE.derive(report)})
+        for row in ("| generated clips | mov | 2-20 | 0.300 |", "| cap-probe.mkv | matroska | 10800 | 0.900 |",
+                    "| High-entropy | 1 | 3.000 | 1.00 | 4000 | 10.5 MiB | 104 | 300.0 MiB | 320.0 MiB | 31 |",
+                    "| Long high-entropy (600 s) | 1 | 3.167 | n/a | 4000 | 286.1 MiB | 100 | 0.0 MiB | 0.0 MiB | 9 |",
+                    "| High-entropy, 1 | 9.00 h (predicted) | 5150.8 MiB (predicted) | 7198.8 MiB (predicted) |"):
+            self.assertIn(row, summary)
+        template = (MEASURE.ROOT / "docs/testing/WORKER-ENCODE-MEASUREMENT.md").read_text(encoding="utf-8")
+        for header in re.findall(r"^\| (?:Target|Clip type)[^\n]*\|$", summary, re.M):
+            self.assertIn(header, template)  # The summary tables keep the record's columns.
+
     def test_d27_budget_covers_the_short_clip_burst_through_its_constant(self):
         self.assertEqual(MEASURE.d27_budget_bytes(2.0), 1_250_000 + 16 * 1024**2)
         self.assertEqual(MEASURE.d27_budget_bytes(0.5), 312_500 + 16 * 1024**2)

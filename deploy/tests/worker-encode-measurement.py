@@ -325,8 +325,9 @@ def summarize_stats(samples):
             "memory_usage_peak_bytes": max(sample["memory_usage_bytes"] for sample in samples),
             "memory_limit_bytes": max(sample["memory_limit_bytes"] for sample in samples),
             "pids_peak": max(pids) if pids else None,
-            "note": "Sampled about once a second by docker stats; may miss shorter peaks. MemUsage includes page "
-                    "cache. The cgroup memory.peak below is the kernel's own high-water mark."}
+            "note": "Sampled about once a second by docker stats; may miss shorter peaks. MemUsage is the cgroup "
+                    "usage minus inactive file cache. The cgroup memory.peak is the kernel's high-water mark of the "
+                    "whole usage, page cache included, so it can exceed what the processes need."}
 
 
 def d27_budget_bytes(media_seconds):
@@ -379,7 +380,49 @@ def derive(report):
         "d27_budget_bytes": budget,
         "d27_free_bytes_required_after_probe": DISK_RESERVE_MB * 1024**2 + max(budget, 2 * budget - UPLOAD_CAP_BYTES),
     }
-    return {"measured": measured, "fits": fits, "predicted_at_cap": prediction}
+    return {"measured": measured, "fits": fits, "predicted_at_cap": prediction,
+            "record": record_rows(report["probes"], runs, fits, predicted)}
+
+
+def run_peaks(runs):
+    """The largest peaks over a set of valid runs; None where no run has a sample."""
+    def largest(values):
+        return max((value for value in values if isinstance(value, (int, float))), default=None)
+    return {"temp_disk_peak_bytes": largest(run["temp_disk"]["peak_bytes"] for run in runs),
+            "cpu_percent_peak": largest(run["docker_stats"].get("cpu_percent_peak") for run in runs),
+            "memory_usage_peak_bytes": largest(run["docker_stats"].get("memory_usage_peak_bytes") for run in runs),
+            "cgroup_memory_peak_bytes": largest(run["cgroup"].get("memory.peak") for run in runs),
+            "pids_peak": largest(run["docker_stats"].get("pids_peak") for run in runs)}
+
+
+def record_rows(probes, runs, fits, predicted):
+    """The rows of the docs/testing/WORKER-ENCODE-MEASUREMENT.md record tables, in their order and units."""
+    generated = [probe for probe in probes if probe["media_seconds"] < CAP_SECONDS - 1]
+    probe_rows = []
+    if generated:
+        probe_rows.append({"target": "generated clips", "demuxer": ", ".join(sorted({p["demuxer"] for p in generated})),
+                           "media_seconds": [min(p["media_seconds"] for p in generated),
+                                             max(p["media_seconds"] for p in generated)],
+                           "worst_seconds": max(p["worst_seconds"] for p in generated)})
+    probe_rows += [{"target": probe["clip"], "demuxer": probe["demuxer"], "media_seconds": [probe["media_seconds"]] * 2,
+                    "worst_seconds": probe["worst_seconds"]} for probe in probes if probe not in generated]
+    encode_rows, cap_rows = [], []
+    for fit, item in zip(fits, predicted):
+        subset = [run for run in runs if run["kind"] == fit["kind"] and run["threads"] == fit["threads"]
+                  and not run["long"]]
+        encode_rows.append({"kind": fit["kind"], "threads": fit["threads"], "long": False,
+                            "encode_seconds_per_media_second": fit["encode_seconds_per_media_second"],
+                            "fixed_overhead_seconds": fit["fixed_overhead_seconds"],
+                            "steady_output_kbps": fit["output_bytes_per_media_second"] * 8 / 1000, **run_peaks(subset)})
+        cap_rows.append({"kind": item["kind"], "threads": item["threads"], "predicted": True,
+                         "encode_seconds": item["encode_seconds"], "output_bytes": item["output_bytes"],
+                         "temp_disk_peak_bytes": UPLOAD_CAP_BYTES + item["output_bytes"]})
+    # A long run is measured, not fitted: its own ratio includes the fixed overhead, which is small at length.
+    encode_rows += [{"kind": run["kind"], "threads": run["threads"], "long": True, "media_seconds": run["media_seconds"],
+                     "encode_seconds_per_media_second": run["encode_seconds_per_media_second"],
+                     "fixed_overhead_seconds": None, "steady_output_kbps": run["output"]["kbps"], **run_peaks([run])}
+                    for run in runs if run["long"]]
+    return {"probes": probe_rows, "encode": encode_rows, "at_cap": cap_rows}
 
 
 class Docker:
@@ -671,11 +714,44 @@ def render_summary(report):
                   f"2048 MiB raw copy: about {mib(prediction['temp_disk_peak_bytes'])} (predicted)",
                   f"- ADR-010 D27 budget B at the cap: {mib(prediction['d27_budget_bytes'])}; free space required after "
                   f"probing: {mib(prediction['d27_free_bytes_required_after_probe'])}"]
+        lines += render_record(derived.get("record"), number, mib)
     if report.get("failure"):
         lines += ["", "Failure: " + report["failure"]]
     lines += ["", "Runner timings are not an NFR-002 baseline and not A1 VPS evidence; the owner sets the timeouts "
                   "with a margin (docs/testing/WORKER-ENCODE-MEASUREMENT.md).", ""]
     return "\n".join(lines)
+
+
+def render_record(record, number, mib):
+    """The record tables of docs/testing/WORKER-ENCODE-MEASUREMENT.md, filled from this run."""
+    if not record:
+        return []
+    lines = ["", "## Record rows", "",
+             "Rows for the tables of docs/testing/WORKER-ENCODE-MEASUREMENT.md, in the same columns and units.", "",
+             "FFprobe:", "", "| Target | Demuxer | Media s | Worst probe s (of 3) |", "| --- | --- | --- | --- |"]
+    for row in record["probes"]:
+        low, high = (number(value, 0) for value in row["media_seconds"])
+        lines.append(f"| {row['target']} | {row['demuxer']} | {low if low == high else low + '-' + high} | "
+                     f"{number(row['worst_seconds'], 3)} |")
+    lines += ["", "FFmpeg reference encode (measured):", "",
+              "| Clip type | Threads | Encode s per media s | Fixed overhead s | Steady output kb/s | Largest temp-disk "
+              "peak | CPU % peak | MemUsage peak | `memory.peak` | PIDs peak |", "|" + " --- |" * 10]
+    for row in record["encode"]:
+        clip_type = (f"Long {row['kind']} ({number(row['media_seconds'], 0)} s)" if row["long"]
+                     else row["kind"].capitalize())
+        lines.append(f"| {clip_type} | {row['threads']} | {number(row['encode_seconds_per_media_second'], 3)} | "
+                     f"{number(row['fixed_overhead_seconds'])} | {number(row['steady_output_kbps'], 0)} | "
+                     f"{mib(row['temp_disk_peak_bytes'])} | {number(row['cpu_percent_peak'], 0)} | "
+                     f"{mib(row['memory_usage_peak_bytes'])} | {mib(row['cgroup_memory_peak_bytes'])} | "
+                     f"{'n/a' if row['pids_peak'] is None else row['pids_peak']} |")
+    lines += ["", f"At the {CAP_SECONDS} s cap (predicted, not measured):", "",
+              "| Clip type, threads | Encode duration | HLS output | Temp-disk peak with a 2048 MiB raw copy |",
+              "| --- | --- | --- | --- |"]
+    for row in record["at_cap"]:
+        lines.append(f"| {row['kind'].capitalize()}, {row['threads']} | {number(row['encode_seconds'] / 3600)} h "
+                     f"(predicted) | {mib(row['output_bytes'])} (predicted) | {mib(row['temp_disk_peak_bytes'])} "
+                     "(predicted) |")
+    return lines
 
 
 def main():
