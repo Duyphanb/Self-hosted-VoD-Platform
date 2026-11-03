@@ -24,10 +24,14 @@
         <module>storage</module>
         <module>status</module>
         <module>cleanup</module>
+        <module>test-support</module>
     </modules>
 
     <properties>
         <java.version>21</java.version>
+        <!-- FFmpeg-tagged tests (#123) need the worker image binary; run them with -Pffmpeg-tests. -->
+        <worker.test.groups></worker.test.groups>
+        <worker.test.excludedGroups>ffmpeg</worker.test.excludedGroups>
         <!-- Boot 4.1.1 manages amqp-client 5.30.0 (HIGH: CVE-2026-63337/69219/69220/75516; all fixed by 5.34.0). -->
         <rabbit-amqp-client.version>5.37.0</rabbit-amqp-client.version>
         <!-- Boot 4.1.1 manages Tomcat 11.0.24 (CVE-2026-65182, CVE-2026-65905, CVE-2026-68525; fixed in 11.0.25). -->
@@ -36,4 +40,30 @@
         <!-- Boot 4.1.1 manages Jackson 3.1.5 (HIGH: CVE-2026-89407, CVE-2026-89425, CVE-2026-68497, CVE-2026-91776, CVE-2026-91777; fixed in 3.1.7). -->
         <jackson-bom.version>3.1.7</jackson-bom.version>
     </properties>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <groups>${worker.test.groups}</groups>
+                        <excludedGroups>${worker.test.excludedGroups}</excludedGroups>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+    <profiles>
+        <profile>
+            <!-- deploy/tests/worker-ffmpeg-tests.sh runs this inside the worker image's ffmpeg-test stage. -->
+            <id>ffmpeg-tests</id>
+            <properties>
+                <worker.test.groups>ffmpeg</worker.test.groups>
+                <worker.test.excludedGroups></worker.test.excludedGroups>
+            </properties>
+        </profile>
+    </profiles>
 </project>
