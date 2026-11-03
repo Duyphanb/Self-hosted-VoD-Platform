@@ -853,7 +853,7 @@ Implement main processing orchestrator that coordinates: mark status `PROCESSING
 ### Issue 5.8: Worker Dockerfile and Environment Config
 
 **Description:**  
-Create worker Dockerfile with FFmpeg and FFprobe installed. Document required environment variables in `.env.example`: RabbitMQ credentials, MinIO credentials and bucket names, PostgreSQL connection, FFmpeg/FFprobe paths.
+Harden the worker Dockerfile that Issue 5.4 moved to the ADR-010 D25 base (FFmpeg and FFprobe from Debian). Document required environment variables in `.env.example`: RabbitMQ credentials, MinIO credentials and bucket names, PostgreSQL connection, FFmpeg/FFprobe paths.
 
 **Acceptance Criteria:**
 - Keep the ADR-010 D25 base introduced in Issue 5.4 (digest-pinned `debian:trixie-slim`, Debian `ffmpeg` and `openjdk-21-jre-headless`); CI asserts a non-root `id -u` and the recorded minimum ffmpeg version with `dpkg --compare-versions`, logs the installed versions, and adds the weekly rebuild; the #124 arm64 job builds the same Dockerfile; container OS scan limits stay with #54
