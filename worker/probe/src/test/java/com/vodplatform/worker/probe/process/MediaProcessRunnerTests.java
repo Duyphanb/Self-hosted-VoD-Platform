@@ -18,6 +18,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /** The runner against {@link FakeMediaTool}, a stand-in tool on the test JVM, so these run on any OS. */
@@ -108,6 +110,35 @@ class MediaProcessRunnerTests {
         assertThat(tree).noneMatch(ProcessHandle::isAlive);
         assertThat(Duration.ofNanos(System.nanoTime() - started))
                 .isLessThan(Duration.ofSeconds(4).plus(MediaProcessRunner.KILL_WAIT).plus(MediaProcessRunner.DRAIN_GRACE));
+    }
+
+    @Test
+    void aChildThatOutlivesTheToolIsKilledWhenTheDeadlineEndsTheRun() throws Exception {
+        // The tool exits by itself a second after starting a child that keeps the output pipes open, so only the
+        // deadline can end the run. The orphaned child is no longer the tool's descendant and must still die.
+        CompletableFuture<MediaProcessRunner.Result> run = CompletableFuture.supplyAsync(() -> run(
+                FakeMediaTool.command("spawn-and-exit", directory.toString(), "1000"), Duration.ofSeconds(6)));
+        List<ProcessHandle> tree = handles(FakeMediaTool.awaitPids(directory, GENEROUS));
+        assertThat(tree.getFirst().onExit()).succeedsWithin(GENEROUS);
+        assertThat(tree.get(1).isAlive()).isTrue();
+        assertThat(run).isNotDone();
+
+        MediaProcessRunner.Result result = run.get(60, TimeUnit.SECONDS);
+
+        assertThat(result.timedOut()).isTrue();
+        assertThat(tree.get(1).onExit()).succeedsWithin(GENEROUS);
+    }
+
+    @Test
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "A Windows child inherits every inheritable handle, the tool's pipes too")
+    void aDetachedChildLeftByAToolThatExitedNormallyIsKilledWhenTheRunReturns() throws Exception {
+        // The child holds none of the pipes, so the run ends normally when the tool exits; the child must not outlive it.
+        CompletableFuture<MediaProcessRunner.Result> run = CompletableFuture.supplyAsync(() -> run(
+                FakeMediaTool.command("spawn-detached-and-exit", directory.toString(), "1000"), GENEROUS));
+        List<ProcessHandle> tree = handles(FakeMediaTool.awaitPids(directory, GENEROUS));
+
+        assertThat(run.get(60, TimeUnit.SECONDS)).isEqualTo(new MediaProcessRunner.Result(false, 0));
+        assertThat(tree.get(1).onExit()).succeedsWithin(GENEROUS);
     }
 
     @Test

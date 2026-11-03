@@ -3,11 +3,12 @@ package com.vodplatform.worker.probe.process;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.SequencedSet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.slf4j.Logger;
@@ -20,12 +21,18 @@ import org.slf4j.LoggerFactory;
  * {@link OutputSink}s so a full pipe never stalls the tool, and a deadline that kills the whole process
  * tree, descendants first. Exit values are reported, never interpreted: callers treat any non-zero exit as
  * a failure and must not depend on specific values, which differ between FFmpeg releases.
+ *
+ * <p>While the tool runs, its descendants are listed every {@link #TREE_POLL}. A descendant that outlives the
+ * tool is re-parented away from it, but is still killed when the run ends, so no process of the tree is left
+ * behind whatever the outcome. Only a descendant that is started and orphaned between two listings cannot be
+ * found; FFprobe and FFmpeg start no processes, so this bound concerns a misbehaving or compromised tool.
  */
 public final class MediaProcessRunner {
     /** The only variables a media tool inherits; everything else in the worker environment is dropped. */
     public static final List<String> INHERITED_VARIABLES = List.of("PATH", "LANG", "HOME");
     static final Duration KILL_WAIT = Duration.ofSeconds(5);
     static final Duration DRAIN_GRACE = Duration.ofSeconds(2);
+    static final Duration TREE_POLL = Duration.ofMillis(100);
     private static final Logger log = LoggerFactory.getLogger(MediaProcessRunner.class);
     private final Map<String, String> environment;
 
@@ -48,6 +55,7 @@ public final class MediaProcessRunner {
     /**
      * Starts {@code command} (executable first) and waits until it exits and its output is drained, or until
      * {@code timeout} has passed; then the process tree is killed and the result is {@link Result#timedOut()}.
+     * Descendants still running when the run ends are killed on every outcome.
      *
      * @throws IOException when the executable cannot be started
      * @throws InterruptedException when the calling thread is interrupted; the process tree is killed first
@@ -65,12 +73,13 @@ public final class MediaProcessRunner {
         builder.environment().putAll(environment);
         long deadline = System.nanoTime() + timeout.toNanos();
         Process process = builder.start();
+        ProcessTree tree = new ProcessTree(process);
         try {
             closeStdin(process);
             Drain out = Drain.start(process.getInputStream(), stdout, "media-stdout-" + process.pid());
             Drain err = Drain.start(process.getErrorStream(), stderr, "media-stderr-" + process.pid());
-            if (!process.waitFor(deadline - System.nanoTime(), TimeUnit.NANOSECONDS)) {
-                killTree(process);
+            if (!tree.waitFor(deadline)) {
+                tree.kill();
                 out.await(DRAIN_GRACE);
                 err.await(DRAIN_GRACE);
                 return Result.TIMED_OUT;
@@ -79,48 +88,16 @@ public final class MediaProcessRunner {
             long drainDeadline = Math.max(deadline, System.nanoTime() + DRAIN_GRACE.toNanos());
             if (!out.await(until(drainDeadline)) || !err.await(until(drainDeadline))) {
                 log.warn("Media process {} exited but its output stayed open past the deadline", process.pid());
+                tree.kill();
+                out.await(DRAIN_GRACE);
+                err.await(DRAIN_GRACE);
                 return Result.TIMED_OUT;
             }
             out.rethrowSinkFailure();
             err.rethrowSinkFailure();
             return new Result(false, process.exitValue());
         } finally {
-            if (process.isAlive()) killTree(process);
-        }
-    }
-
-    /**
-     * Kills {@code process} and its descendants. {@link Process#descendants()} lists breadth first, so the
-     * reversed list starts with the deepest processes: each one dies while its parent is still alive to reap
-     * it, instead of being orphaned (and escaping the snapshot) when an ancestor dies first.
-     */
-    static void killTree(Process process) {
-        boolean interrupted = Thread.interrupted();
-        boolean waiting = true;
-        long deadline = System.nanoTime() + KILL_WAIT.toNanos();
-        List<ProcessHandle> killed = new ArrayList<>();
-        try {
-            for (int round = 0; round < 3; round++) {
-                List<ProcessHandle> descendants = process.descendants().toList().reversed();
-                if (descendants.isEmpty()) break;
-                for (ProcessHandle descendant : descendants) {
-                    descendant.destroyForcibly();
-                    killed.add(descendant);
-                    if (waiting && !awaitExit(descendant, deadline)) {
-                        waiting = false;
-                        interrupted = true;
-                    }
-                }
-            }
-            process.destroyForcibly();
-            killed.add(process.toHandle());
-            if (waiting && !awaitExit(process.toHandle(), deadline)) interrupted = true;
-            long survivors = killed.stream().filter(ProcessHandle::isAlive).count();
-            if (survivors > 0) {
-                log.warn("{} media process(es) of tree {} still alive after a forced kill", survivors, process.pid());
-            }
-        } finally {
-            if (interrupted) Thread.currentThread().interrupt();
+            tree.kill();
         }
     }
 
@@ -165,6 +142,82 @@ public final class MediaProcessRunner {
 
         public boolean succeeded() {
             return !timedOut && exitCode == 0;
+        }
+    }
+
+    /**
+     * The tool and every descendant listed while it ran. A {@link ProcessHandle} also carries the process
+     * start time, so a remembered handle never matches a later process that reuses the PID.
+     */
+    private static final class ProcessTree {
+        /** Pruned of exited processes past this size, so a tool that keeps starting processes stays bounded. */
+        private static final int MAX_REMEMBERED = 256;
+        private final Process process;
+        private final SequencedSet<ProcessHandle> remembered = new LinkedHashSet<>();
+        private boolean killed;
+
+        ProcessTree(Process process) {
+            this.process = process;
+        }
+
+        /** Waits for the tool to exit until {@code deadline}, listing its descendants every {@link #TREE_POLL}. */
+        boolean waitFor(long deadline) throws InterruptedException {
+            while (true) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) return !process.isAlive();
+                if (process.waitFor(Math.min(remaining, TREE_POLL.toNanos()), TimeUnit.NANOSECONDS)) return true;
+                remember();
+            }
+        }
+
+        /**
+         * Kills the remembered and current descendants, then the tool. {@link Process#descendants()} lists
+         * breadth first and later listings only add processes, so an ancestor is always remembered before its
+         * descendants: the reversed order kills each process while its parent can still reap it, instead of
+         * orphaning it first. Does nothing when no process of the tree is alive, or when it already ran.
+         */
+        void kill() {
+            if (killed) return;
+            killed = true;
+            boolean interrupted = Thread.interrupted();
+            boolean waiting = true;
+            boolean toolExited = !process.isAlive();
+            long deadline = System.nanoTime() + KILL_WAIT.toNanos();
+            try {
+                for (int round = 0; round < 3; round++) {
+                    remember();
+                    List<ProcessHandle> alive = remembered.reversed().stream().filter(ProcessHandle::isAlive).toList();
+                    if (alive.isEmpty()) break;
+                    if (toolExited && round == 0) {
+                        log.warn("Media process {} exited and left {} descendant process(es) running; killing them",
+                                process.pid(), alive.size());
+                    }
+                    for (ProcessHandle descendant : alive) {
+                        descendant.destroyForcibly();
+                        if (waiting && !awaitExit(descendant, deadline)) {
+                            waiting = false;
+                            interrupted = true;
+                        }
+                    }
+                }
+                if (process.isAlive()) {
+                    process.destroyForcibly();
+                    if (waiting && !awaitExit(process.toHandle(), deadline)) interrupted = true;
+                }
+                long survivors = remembered.stream().filter(ProcessHandle::isAlive).count() + (process.isAlive() ? 1 : 0);
+                if (survivors > 0) {
+                    log.warn("{} media process(es) of tree {} still alive after a forced kill", survivors, process.pid());
+                }
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
+        }
+
+        /** Adds the tool's current descendants; once it has exited they are re-parented and no longer listed. */
+        private void remember() {
+            if (!process.isAlive()) return;
+            process.descendants().forEach(remembered::add);
+            if (remembered.size() > MAX_REMEMBERED) remembered.removeIf(handle -> !handle.isAlive());
         }
     }
 

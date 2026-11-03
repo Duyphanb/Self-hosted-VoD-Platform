@@ -34,7 +34,10 @@ public final class FakeMediaTool {
      * input); {@code print-env} (prints NAME=value lines); {@code flood <bytes>} (writes that many bytes to
      * stdout and to stderr, interleaved, so a reader of one stream alone deadlocks); {@code spawn-and-sleep
      * <directory>} (starts a {@code sleep} child that shares its output pipes, records both PIDs in
-     * {@link #PID_FILE}, then sleeps); {@code sleep}.
+     * {@link #PID_FILE}, then sleeps); {@code spawn-and-exit <directory> <millis>} (the same child, but the tool
+     * exits with 0 after {@code millis} and leaves the child running with its pipes open);
+     * {@code spawn-detached-and-exit <directory> <millis>} (as before, with the child's output discarded, so on
+     * POSIX systems it holds none of the tool's pipes; a Windows child inherits them anyway); {@code sleep}.
      */
     public static void main(String[] args) throws Exception {
         switch (args[0]) {
@@ -52,6 +55,16 @@ public final class FakeMediaTool {
                 Process child = new ProcessBuilder(command("sleep")).inheritIO().start();
                 recordPids(Path.of(args[1]), ProcessHandle.current().pid(), child.pid());
                 sleepForever();
+            }
+            case "spawn-and-exit", "spawn-detached-and-exit" -> {
+                ProcessBuilder builder = new ProcessBuilder(command("sleep")).inheritIO();
+                if (args[0].equals("spawn-detached-and-exit")) {
+                    builder.redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD);
+                }
+                Process child = builder.start();
+                recordPids(Path.of(args[1]), ProcessHandle.current().pid(), child.pid());
+                Thread.sleep(Long.parseLong(args[2]));
+                System.exit(0);
             }
             case "sleep" -> sleepForever();
             default -> throw new IllegalArgumentException("Unknown mode " + args[0]);

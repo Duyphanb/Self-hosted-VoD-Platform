@@ -45,4 +45,18 @@ class FakeMediaToolTests {
             process.destroyForcibly().waitFor();
         }
     }
+
+    @Test
+    void spawnAndExitModeExitsAndLeavesItsChildRunning() throws IOException, InterruptedException {
+        Process process = new ProcessBuilder(FakeMediaTool.command("spawn-and-exit", directory.toString(), "0"))
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        ProcessHandle child = ProcessHandle.of(FakeMediaTool.awaitPids(directory, Duration.ofSeconds(30)).get(1)).orElseThrow();
+        try {
+            assertThat(process.waitFor(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(process.exitValue()).isZero();
+            assertThat(child.isAlive()).isTrue();
+        } finally {
+            child.destroyForcibly();
+        }
+    }
 }
