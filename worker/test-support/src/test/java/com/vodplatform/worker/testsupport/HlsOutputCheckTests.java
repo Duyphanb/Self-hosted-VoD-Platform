@@ -56,6 +56,21 @@ class HlsOutputCheckTests {
     }
 
     @Test
+    void rejectsResourceUriTagsOutsideTheMpegTsProfile() throws IOException {
+        for (String tag : new String[] {
+                "#EXT-X-KEY:METHOD=AES-128,URI=\"https://example.invalid/key\"",
+                "#EXT-X-KEY:METHOD=AES-128,URI=\"segments/seg_00000.ts\"",
+                "#EXT-X-MAP:URI=\"file:/outside/init.mp4\"",
+                "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",URI=\"audio.m3u8\"",
+                "#EXT-X-FUTURE:VALUE=1,URI=\"https://example.invalid/resource\""}) {
+            playlist(HlsPlaylistTests.FFMPEG_VOD.replace("#EXT-X-VERSION:6", "#EXT-X-VERSION:6\n" + tag));
+
+            assertThat(HlsOutputCheck.d27Violations(hls, 13.0)).as(tag)
+                    .singleElement().asString().contains("resource URI tag");
+        }
+    }
+
+    @Test
     void rejectsMissingEmptyAndUnreferencedFiles() throws IOException {
         Files.delete(hls.resolve("segments/seg_00001.ts"));
         Files.write(hls.resolve("segments/seg_00002.ts"), new byte[0]);

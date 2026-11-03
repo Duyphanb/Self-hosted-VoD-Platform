@@ -2,12 +2,15 @@ package com.vodplatform.worker.testsupport;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * Minimal RFC 8216 media-playlist reader for test assertions. It is deliberately independent of the
- * worker's own output validator (Issue 5.5), so the two can check each other.
+ * worker's own output validator (Issue 5.5), so the two can check each other. The D27 MPEG-TS profile
+ * has only segment URIs; tags that reference additional resources are outside that profile.
  */
 public record HlsPlaylist(Integer targetDurationSeconds, String playlistType, boolean endList, List<Segment> segments) {
+    private static final Pattern RESOURCE_URI_ATTRIBUTE = Pattern.compile("[:,]\\s*(?:[A-Z0-9-]+-)?URI\\s*=");
 
     public static HlsPlaylist parse(String text) {
         String[] lines = text.split("\r?\n", -1);
@@ -29,6 +32,9 @@ public record HlsPlaylist(Integer targetDurationSeconds, String playlistType, bo
                 playlistType = line.substring("#EXT-X-PLAYLIST-TYPE:".length());
             } else if (line.equals("#EXT-X-ENDLIST")) {
                 endList = true;
+            } else if (line.startsWith("#EXT") && RESOURCE_URI_ATTRIBUTE.matcher(line).find()) {
+                // Do not silently skip a key, init map, rendition or future URI-bearing extension.
+                throw invalid("resource URI tag is outside the MPEG-TS output profile on line " + (i + 1));
             } else if (!line.startsWith("#")) {
                 if (pendingDuration == null) throw invalid("URI without #EXTINF on line " + (i + 1));
                 segments.add(new Segment(pendingDuration, line));
