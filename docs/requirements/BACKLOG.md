@@ -770,14 +770,14 @@ Implement FFprobe service that executes `ffprobe` command to extract duration, w
 - FFprobe command execution uses configurable path from environment
 - Force mov or matroska demuxer from trusted key extension through the fixed ADR-010 table (an unknown extension fails before any tool runs), whitelist file protocol and absolute file: input; typed ProcessBuilder arguments, close stdin, clear environment except PATH/LANG/HOME; do not pass FFmpeg-only -nostdin
 - Pass `-max_streams` (`WORKER_MAX_STREAMS`) and the ADR-010 D26 `-codec_whitelist`; a stream whose decoder is not listed fails as UNSUPPORTED_MEDIA
-- Select the first video stream with `disposition.attached_pic=0`; use the selected stream's duration, or the format duration when the stream has none (WebM often reports `N/A`), as the one media duration for caps, deadline, disk budget and validation; require that duration and the rotation-corrected dimensions (Display Matrix side data, `tags.rotate` as the fallback) to be finite and positive; accept only 0/90/180/270-degree rotation; ignore unknown JSON keys; round duration up to whole seconds; store bitrate as null outside the int range
+- Select the first video stream with `disposition.attached_pic=0`; use the selected stream's duration, or the format duration when the stream has none (WebM often reports `N/A`), as the one media duration for caps, deadline, disk budget and validation; require that duration and the rotation-corrected dimensions (Display Matrix side data, `tags.rotate` as the fallback) to be finite and positive; round the rotation to whole degrees, normalize it modulo 360 (FFprobe reports [-180, 180], so -90 means 270) and accept only 0/90/180/270; ignore unknown JSON keys; round duration up to whole seconds; store bitrate as null outside the int range
 - Extracts duration, width, height, codec, bitrate
 - Parses JSON output safely
 - Drain capped stderr and bound JSON output; enforce `WORKER_FFPROBE_TIMEOUT_SECONDS` (**to be measured using #124**) and the D26 product caps orientation-neutrally (long side <= `WORKER_MAX_WIDTH`, short side <= `WORKER_MAX_HEIGHT`, duration <= `WORKER_MAX_DURATION_SECONDS`)
 - Deadline kills the process tree; codes PROBE_FAILED/PROBE_TIMEOUT/UNSUPPORTED_MEDIA/MEDIA_LIMIT_EXCEEDED from the ADR-010 D28 enum; no fps allowlist
 - Returns metadata DTO
 - Unit tests cover parsing logic
-- Generated #123 fixtures test valid families, key/content family mismatch, truncated file with moov at the end, audio-only, cover-art-only, a decoder outside the allowlist, disguised playlist, timeout and caps; command integration test uses the ADR-010 D25 binary and pins the decoder names
+- Generated #123 fixtures test valid families, negative and positive 90/180-degree rotation tags, key/content family mismatch, truncated file with moov at the end, audio-only, cover-art-only, a decoder outside the allowlist, disguised playlist, timeout and caps; command integration test uses the ADR-010 D25 binary and pins the decoder names
 
 **Dependencies:** Issue 5.2, #123, #124 measurement record
 
