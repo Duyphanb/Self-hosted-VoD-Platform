@@ -180,7 +180,7 @@ Update procedure:
 1. Watch debian-security-announce for ffmpeg and openjdk-21 advisories.
 2. On an advisory, and weekly, bump the base digest and build with `--pull --no-cache`.
 3. Raise the recorded minimum ffmpeg version when the advisory requires it. CI asserts it with `dpkg --compare-versions` and asserts a non-root `id -u`.
-4. Run the #123 media tests (`sh deploy/tests/worker-ffmpeg-tests.sh`, part of the `Worker Maven build and test` CI job) on amd64 and the #124 arm64 job.
+4. Run the #123 media tests (`sh deploy/tests/worker-ffmpeg-tests.sh`, part of the `Worker Maven build and test` CI job) on amd64 and in the #124 `arm64 worker` workflow.
 5. Record the `dpkg-query -W` versions in the PR.
 6. Roll back by redeploying the previous image tag.
 
