@@ -84,12 +84,16 @@ jobs:
           WORKER_FFMPEG_TEST_IMAGE: vod-worker-ffmpeg-test-arm64
         run: sh deploy/tests/worker-ffmpeg-tests.sh
 
+      # The smoke starts the images built above under the names Compose gives its project's services, so it
+      # does not rebuild them from a worker context that now holds the media tests' target directories.
       - name: Verify the JVM options under the production overlay
         if: ${{ !cancelled() && steps.images.outcome == 'success' }}
-        run: >-
-          python3 deploy/tests/jvm-limits-smoke.py
-          --project "${COMPOSE_PROJECT_NAME}-jvm"
-          --output-dir "$RUNNER_TEMP/arm64-evidence/jvm-limits"
+        run: |
+          project="${COMPOSE_PROJECT_NAME}-jvm"
+          docker tag vod-backend-arm64 "$project-backend"
+          docker tag vod-worker-arm64 "$project-worker"
+          python3 deploy/tests/jvm-limits-smoke.py --project "$project" --no-build \
+            --output-dir "$RUNNER_TEMP/arm64-evidence/jvm-limits"
 
       # ADR-004 executed the pinned Silo image only on amd64; this runs the same storage contract on arm64.
       - name: Verify the pinned Silo image on arm64
