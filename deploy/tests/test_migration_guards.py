@@ -1,6 +1,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -118,6 +119,23 @@ class SchemaSnapshotTests(unittest.TestCase):
         self.assertIn(SNAPSHOT.FLYWAY_IMAGE, ci)
         self.assertIn("-validateMigrationNaming=true", ci)
         self.assertIn('FLYWAY_VALIDATE_MIGRATION_NAMING: "true"', compose)
+
+    def test_jvm_test_database_matches_the_ci_postgresql(self):
+        # #119: the backend context tests' Testcontainers database uses the CI service's digest and collation.
+        source = (SNAPSHOT.ROOT / "backend" / "common" / "src" / "test" / "java" / "com" / "vodplatform" / "common"
+                  / "support" / "PostgresTestDatabase.java").read_text(encoding="utf-8")
+        digest = SNAPSHOT.POSTGRES_IMAGE.split("@", 1)[1]
+        self.assertIn(f'"postgres@{digest}"', source)
+        self.assertIn('"--locale-provider=icu --icu-locale=vi"', source)
+        self.assertIn('"spring.flyway.validate-migration-naming=true"', source)
+
+    def test_ci_requires_evidence_for_every_selected_postgresql_suite(self):
+        ci = (SNAPSHOT.ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        selected = [suite for match in re.findall(r"-Dtest=([\w,]+)", ci) for suite in match.split(",")]
+        self.assertIn("CreationOrderPostgresTest", selected)
+        for suite in selected:
+            with self.subTest(suite=suite):
+                self.assertRegex(ci, rf"surefire-reports/TEST-[\w.]+\.{suite}\.xml")
 
 
 if __name__ == "__main__":
