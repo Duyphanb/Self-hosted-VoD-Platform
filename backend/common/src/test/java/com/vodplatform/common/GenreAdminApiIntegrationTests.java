@@ -16,6 +16,7 @@ import com.vodplatform.catalog.dto.GenreResponse;
 import com.vodplatform.catalog.persistence.Genre;
 import com.vodplatform.catalog.persistence.GenreRepository;
 import com.vodplatform.catalog.web.GenreAdminController;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -49,7 +50,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * {@code /api/v1/admin/genres} through the assembled application: the bearer security chain, the
- * controller, the service and the H2 database (PostgreSQL mode). Each test rolls back.
+ * controller, the service and the test PostgreSQL. Each test rolls back.
  */
 @SpringBootTest(
         properties = {
@@ -60,7 +61,7 @@ import org.springframework.transaction.annotation.Transactional;
 )
 @AutoConfigureMockMvc
 @Transactional
-class GenreAdminApiIntegrationTests {
+class GenreAdminApiIntegrationTests implements PostgresTestDatabase {
 
     private static final String GENRES = "/api/v1/admin/genres";
     private static final JsonComparator STRICT_WITH_ANY_TIMESTAMP = JsonAssert.comparator(new CustomComparator(

@@ -13,6 +13,7 @@ import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
 import com.vodplatform.auth.service.RefreshTokenService;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +41,7 @@ import tools.jackson.databind.ObjectMapper;
 )
 @AutoConfigureMockMvc
 @Transactional
-class LoginIntegrationTests {
+class LoginIntegrationTests implements PostgresTestDatabase {
 
     @Autowired
     private MockMvc mockMvc;
@@ -65,7 +66,6 @@ class LoginIntegrationTests {
 
     @BeforeEach
     void createRegisteredUser() {
-        jdbcTemplate.update("INSERT INTO roles (name) VALUES (?)", "ROLE_USER");
         RoleEntity role = roleRepository.findByName("ROLE_USER").orElseThrow();
         Instant now = Instant.now();
         UserEntity user = new UserEntity(

@@ -16,6 +16,7 @@ import com.jayway.jsonpath.JsonPath;
 import com.vodplatform.catalog.persistence.Person;
 import com.vodplatform.catalog.persistence.PersonRepository;
 import com.vodplatform.catalog.web.PersonAdminController;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -49,7 +50,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * {@code /api/v1/admin/people} through the assembled application: the bearer security chain, the
- * controller, the service and the H2 database (PostgreSQL mode). Each test rolls back.
+ * controller, the service and the test PostgreSQL. Each test rolls back.
  */
 @SpringBootTest(
         properties = {
@@ -60,7 +61,7 @@ import org.springframework.transaction.annotation.Transactional;
 )
 @AutoConfigureMockMvc
 @Transactional
-class PersonAdminApiIntegrationTests {
+class PersonAdminApiIntegrationTests implements PostgresTestDatabase {
 
     private static final String PEOPLE = "/api/v1/admin/people";
     private static final JsonComparator STRICT_WITH_ANY_TIMESTAMP = JsonAssert.comparator(new CustomComparator(
