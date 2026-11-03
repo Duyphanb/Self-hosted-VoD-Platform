@@ -17,7 +17,7 @@ id_rsa.*
 
 # Media (#122, R-002): test media is generated at test time (#123); never commit third-party media.
 # Do not add *.ts or *.mts: they are TypeScript sources in frontend/. Globs are case-sensitive on
-# Linux, so #123 adds a CI guard that checks committed files for media content.
+# Linux, so CI also runs deploy/tests/committed-media-check.py on committed names and content.
 *.mp4
 *.m4v
 *.mov

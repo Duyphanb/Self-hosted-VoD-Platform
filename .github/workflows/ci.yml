@@ -42,7 +42,7 @@ jobs:
   worker-build:
     name: Worker Maven build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -58,9 +58,17 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Reject committed media files
+        run: python3 deploy/tests/committed-media-check.py
+
       - name: Build and test all worker modules
         working-directory: worker
         run: mvn -B -ntp verify
+
+      # #123: generated fixtures and the ADR-010 D27 reference encode, on the worker image's own
+      # ffmpeg/ffprobe (the ffmpeg-test stage shares the runtime stage's layers).
+      - name: Run FFmpeg-tagged tests in the worker image
+        run: sh deploy/tests/worker-ffmpeg-tests.sh
 
   skeleton:
     name: Skeleton build checks

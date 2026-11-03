@@ -173,13 +173,13 @@ Media settings have no application defaults: the worker fails startup when one i
 
 ### Worker runtime image
 
-[ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28) selects the worker image: `debian:trixie-slim` pinned by digest, Debian `ffmpeg` and `openjdk-21-jre-headless` from trixie and trixie-security, a non-root runtime user, for amd64 and arm64. The base and packages land first: Issue 5.4, together with the #123 harness, switches `worker/Dockerfile` to this base, so the 5.4/5.5 command tests and the #124 arm64 measurement all run the D25 binary. Issue 5.8 then adds the non-root, read-only and volume hardening, the version-floor assertion and the weekly rebuild.
+[ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28) selects the worker image: `debian:trixie-slim` pinned by digest, Debian `ffmpeg` and `openjdk-21-jre-headless` from trixie and trixie-security, a non-root runtime user, for amd64 and arm64. The base and packages landed first, with the #123 harness: `worker/Dockerfile` pins the trixie-slim index digest in a `runtime-base` stage, so the 5.4/5.5 command tests and the #124 arm64 measurement all run the D25 binary. On 2026-11-03 it installed ffmpeg `7:7.1.5-0+deb13u1` and openjdk-21-jre-headless `21.0.13+9-1~deb13u2`. Its `ffmpeg-test` stage adds a JDK and Maven on top of `runtime-base` for the FFmpeg-tagged tests (`deploy/tests/worker-ffmpeg-tests.sh`) and is never deployed. Issue 5.8 then adds the non-root, read-only and volume hardening, the version-floor assertion and the weekly rebuild.
 
 Update procedure:
 1. Watch debian-security-announce for ffmpeg and openjdk-21 advisories.
 2. On an advisory, and weekly, bump the base digest and build with `--pull --no-cache`.
 3. Raise the recorded minimum ffmpeg version when the advisory requires it. CI asserts it with `dpkg --compare-versions` and asserts a non-root `id -u`.
-4. Run the #123 media tests on amd64 and the #124 arm64 job.
+4. Run the #123 media tests (`sh deploy/tests/worker-ffmpeg-tests.sh`, part of the `Worker Maven build and test` CI job) on amd64 and the #124 arm64 job.
 5. Record the `dpkg-query -W` versions in the PR.
 6. Roll back by redeploying the previous image tag.
 
