@@ -136,10 +136,10 @@ The overlay passes JVM options to the backend and worker through `JAVA_TOOL_OPTI
 memory limit, and an `OutOfMemoryError` ends the JVM, so `restart: unless-stopped` replaces it. Without the
 exit, a JVM that ran out of memory could keep passing the TCP health check. The worker's share is smaller
 because FFmpeg runs inside the same memory limit. `.env.production` may override the defaults with
-`BACKEND_JAVA_TOOL_OPTIONS` and `WORKER_JAVA_TOOL_OPTIONS`. The preflight then rejects a value whose last
-`ExitOnOutOfMemoryError` setting is not `-XX:+ExitOnOutOfMemoryError`, or whose last `-XX:MaxRAMPercentage`
-is not a whole number from 1 to 100. It also rejects quotes and backslashes, because the JVM would parse them
-differently. The values are sized from the [worker encode measurement](../testing/WORKER-ENCODE-MEASUREMENT.md).
+`BACKEND_JAVA_TOOL_OPTIONS` and `WORKER_JAVA_TOOL_OPTIONS`. The preflight then requires
+`-XX:+ExitOnOutOfMemoryError` as the last `ExitOnOutOfMemoryError` setting, and a last `-XX:MaxRAMPercentage`
+that is a whole number from 1 to 100. It rejects quotes and backslashes, which the JVM would parse differently.
+The values are sized from the [worker encode measurement](../testing/WORKER-ENCODE-MEASUREMENT.md).
 
 The production-only `production-config-check` service rejects the published
 development placeholders and a loopback-bound edge before PostgreSQL,
