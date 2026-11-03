@@ -67,8 +67,8 @@ It removes only its own project's containers, networks and volumes.
   (ADR-004 ran Silo only on amd64), and the measurement. Results go to the artifact
   `arm64-worker-measurement-not-vps-evidence`. A dispatch can change the durations and thread counts and add
   the long clip. A cap-length high-entropy encode is likely to outlast the 6-hour hosted-job limit: local
-  amd64 dry runs, which are not evidence, needed about 4 to 5 encode seconds per media second for the
-  high-entropy clip at one CPU, so 10800 s would take 12 hours or more. The cap length therefore stays
+  amd64 dry runs, which are not evidence, took about 3.5 to 7 encode seconds per media second for 2 to 6 s
+  high-entropy clips at one CPU, so 10800 s would take 10 hours or more. The cap length therefore stays
   opt-in, and the default run extrapolates.
 - **A1 VM (owner):** build the worker image on the VM and run the measurement there. For example:
   `python3 deploy/tests/worker-encode-measurement.py --image <worker image> --output-dir <dir> --long-clip-seconds 10800`.
