@@ -163,7 +163,7 @@ These are the approved settings to wire into `.env.example`, application configu
 | `WORKER_MAX_DURATION_SECONDS`, `WORKER_MAX_WIDTH`, `WORKER_MAX_HEIGHT`, `WORKER_MAX_STREAMS` | 10800, 1920, 1080 and 8 (owner policy, ADR-010 D26). Width and height cap the long and short side in either orientation; no 4K sources |
 | `HLS_SEGMENT_SECONDS` | 6; integer 2-10; drives both `-hls_time` and the forced keyframes |
 | `HLS_TARGET_HEIGHT` | 720; even integer 240-1080; output fits a box of this short side and a long side of 16/9 of it (1280×720, or 720×1280 for portrait), never upscaled |
-| `HLS_VIDEO_MAXRATE_KBPS` | 4000; VBV `-maxrate:v`, with `-bufsize:v` twice this value (ADR-010 D27) |
+| `HLS_VIDEO_MAXRATE_KBPS` | 4000; passed as `-maxrate:v 4000k -bufsize:v 8000k` (the `k` suffix is required; ADR-010 D27) |
 | `WORKER_FFMPEG_THREADS` | 1; integer 1-16; FFmpeg `-threads` and `-filter_threads`; revisit from #124 |
 | `WORKER_OUTPUT_BUDGET_KBPS`, `WORKER_DISK_RESERVE_MB` | 5000 and 5120; the output bytes budgeted per media second and the free-space reserve of the ADR-010 D27 disk checks and watchdog; #124/#180 calibrate them |
 
