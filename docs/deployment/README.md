@@ -255,6 +255,9 @@ elsewhere; investigate before retrying.
 
 **Adopting #106 on an existing deployment.** The first `postgres-init` run
 transfers the existing tables to the schema owner and removes `PUBLIC` access.
+It fails at `role membership check` if a configured role already exists and
+holds a membership in another role, such as `pg_read_all_data`: review the
+grant, `REVOKE` it as the bootstrap superuser, and rerun `postgres-init`.
 Because the applications held the bootstrap PostgreSQL and RabbitMQ identities
 before #106, rotate both bootstrap passwords afterwards as above, just as the
 storage root pair is rotated after #169.

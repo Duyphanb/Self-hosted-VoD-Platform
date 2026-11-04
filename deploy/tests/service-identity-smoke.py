@@ -230,6 +230,15 @@ class Smoke:
             self.compose_run("run", "--rm", "--no-deps", "flyway", label="flyway rerun")
         self.assert_ownership_and_grants()
         print("PASS init and owner migration: ownership transferred, exact grants, idempotent reruns", flush=True)
+        # A reused role that inherits another role's privileges is refused, not silently kept.
+        worker = self.env["POSTGRES_WORKER_USER"]
+        self._psql('GRANT pg_read_all_data TO "%s";' % worker, "membership fixture")
+        refused = self.compose_run("run", "--rm", "--no-deps", "postgres-init", check=False, label="membership init")
+        if refused.returncode == 0 or "failed: role membership check" not in refused.stderr:
+            raise SmokeError("Check failed: init-refuses-role-membership")
+        self._psql('REVOKE pg_read_all_data FROM "%s";' % worker, "membership revoke")
+        self.compose_run("run", "--rm", "--no-deps", "postgres-init", label="postgres-init after revoke")
+        print("PASS init refuses a configured role that holds another role's membership", flush=True)
         self.compose_run("run", "--rm", "--no-deps", "--entrypoint", "/bin/sh", "postgres-init", "-ec", ROLE_CHECKS,
                          label="role checks")
         print("PASS owner, backend and worker roles can do only their own operations", flush=True)

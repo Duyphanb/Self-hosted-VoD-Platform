@@ -247,6 +247,12 @@ printf 'VOD_STEP:complete\\n'
         self.assertLess(script.index("BEGIN;"), script.index("PASSWORD :'owner_password'"))
         for attributes in ("NOSUPERUSER", "NOCREATEDB", "NOCREATEROLE", "NOREPLICATION", "NOBYPASSRLS"):
             self.assertEqual(script.count(attributes), 3, attributes)
+        # A reused role holding any membership is refused before its password or grants change.
+        membership = script.index("\\echo VOD_STEP:role membership check")
+        self.assertLess(script.index("BEGIN;"), membership)
+        self.assertLess(membership, script.index("ALTER ROLE"))
+        self.assertIn("RAISE EXCEPTION", script[membership:script.index("ALTER ROLE")])
+        self.assertIn("WHERE r.rolname IN (:'owner_user', :'backend_user', :'worker_user')) \\gexec", script)
         self.assertIn("GRANT USAGE, CREATE ON SCHEMA public TO :\"owner_user\";", script)
         self.assertIn("GRANT USAGE ON SCHEMA public TO :\"backend_user\", :\"worker_user\";", script)
 
@@ -279,7 +285,8 @@ printf 'VOD_STEP:complete\\n'
         self.assertIsNone(fixture.read("script.sql"))
 
     def test_failure_names_the_last_phase_without_tool_output(self):
-        for phase in ("role provisioning", "database privileges", "schema privileges", "ownership transfer"):
+        for phase in ("role provisioning", "role membership check", "database privileges", "schema privileges",
+                      "ownership transfer"):
             with self.subTest(phase):
                 _, result = self.start(FAIL_AFTER=phase)
                 self.assertNotEqual(result.returncode, 0)

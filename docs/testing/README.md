@@ -43,7 +43,8 @@ These checks prove that each service can do only its own operations
 ([Service identities and network](../architecture/INFRASTRUCTURE.md#service-identities-and-network)).
 `python deploy/tests/service-identity-smoke.py --project <name>` owns a fresh disposable
 Compose project and removes it on exit. It migrates a database the pre-#106 way, then runs
-`postgres-init` and Flyway and checks ownership, exact grants, idempotent reruns, the allowed
+`postgres-init` and Flyway and checks ownership, exact grants, idempotent reruns, the refusal
+of a configured role that holds another role's membership, the allowed
 and denied statements of the owner, backend and worker roles, a password rotation, Redis
 authentication and network membership. With `--running-stack` it inspects an already healthy
 full stack instead: JDBC sessions use only application roles, broker connections only

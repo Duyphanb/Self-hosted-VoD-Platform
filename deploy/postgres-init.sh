@@ -2,8 +2,9 @@
 # Least-privilege PostgreSQL roles (#106). The bootstrap superuser (POSTGRES_USER)
 # runs only this one-shot init and explicit operator maintenance. It creates or
 # updates the schema owner that Flyway uses, the backend DML role and the worker
-# role; limits database and schema access to them; and moves public relations
-# created before #106 by the bootstrap user to the owner. Flyway's afterMigrate
+# role; refuses a role that holds a membership in any other role; limits
+# database and schema access to them; and moves public relations created before
+# #106 by the bootstrap user to the owner. Flyway's afterMigrate
 # callback (deploy/flyway) then grants the table privileges as that owner.
 # Passwords reach psql only through the environment (\getenv), never argv, and
 # the session keeps statement text out of the server log. Tool output is
@@ -74,6 +75,13 @@ SELECT pg_advisory_xact_lock(106) AS serialized \gset
 SELECT format('CREATE ROLE %I', wanted.name)
   FROM (VALUES (:'owner_user'), (:'backend_user'), (:'worker_user')) AS wanted(name)
  WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = wanted.name) \gexec
+\echo VOD_STEP:role membership check
+-- A reused role may have been granted another role (pg_read_all_data, a sibling, ...),
+-- whose privileges it inherits or can SET ROLE to; the REVOKEs below do not remove that.
+-- Refuse instead of guessing which grant was intended; the operator revokes it.
+SELECT 'DO $$BEGIN RAISE EXCEPTION ''configured role holds a role membership''; END$$'
+ WHERE EXISTS (SELECT FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
+                WHERE r.rolname IN (:'owner_user', :'backend_user', :'worker_user')) \gexec
 ALTER ROLE :"owner_user" WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
   INHERIT CONNECTION LIMIT -1 VALID UNTIL 'infinity' PASSWORD :'owner_password';
 ALTER ROLE :"backend_user" WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
