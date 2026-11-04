@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.vodplatform.worker.testsupport.FakeMediaTool;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -126,7 +127,7 @@ class MediaProcessRunnerTests {
         MediaProcessRunner.Result result = run.get(60, TimeUnit.SECONDS);
 
         assertThat(result.timedOut()).isTrue();
-        assertThat(tree.get(1).onExit()).succeedsWithin(GENEROUS);
+        assertThat(exitedWithin(tree.get(1), GENEROUS)).isTrue();
     }
 
     @Test
@@ -138,7 +139,7 @@ class MediaProcessRunnerTests {
         List<ProcessHandle> tree = handles(FakeMediaTool.awaitPids(directory, GENEROUS));
 
         assertThat(run.get(60, TimeUnit.SECONDS)).isEqualTo(new MediaProcessRunner.Result(false, 0));
-        assertThat(tree.get(1).onExit()).succeedsWithin(GENEROUS);
+        assertThat(exitedWithin(tree.get(1), GENEROUS)).isTrue();
     }
 
     @Test
@@ -207,5 +208,28 @@ class MediaProcessRunnerTests {
     /** Handles taken while the processes live, so a later reuse of their PIDs cannot look alive. */
     private static List<ProcessHandle> handles(List<Long> pids) {
         return pids.stream().map(pid -> ProcessHandle.of(pid).orElseThrow()).toList();
+    }
+
+    /**
+     * Waits for a killed orphan to exit. Init normally reaps it, but where PID 1 does not reap (a JVM as PID 1 in
+     * a container without an init) it stays a zombie, which {@link ProcessHandle#isAlive()} still reports.
+     */
+    private static boolean exitedWithin(ProcessHandle handle, Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (handle.isAlive() && !zombie(handle)) {
+            if (System.nanoTime() - deadline > 0) return false;
+            Thread.sleep(50);
+        }
+        return true;
+    }
+
+    /** Linux only: the state field of /proc/PID/stat, after the parenthesized command name, is Z. */
+    private static boolean zombie(ProcessHandle handle) {
+        try {
+            String stat = Files.readString(Path.of("/proc", Long.toString(handle.pid()), "stat"), UTF_8);
+            return stat.substring(stat.lastIndexOf(')') + 1).strip().startsWith("Z");
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
     }
 }
