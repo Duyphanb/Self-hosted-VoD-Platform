@@ -133,14 +133,14 @@ The free space required after probing is then 5120 MiB + max(B, 2B - R): about 1
 | backend, arm64 | `-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError` | 768 MiB | _pending_ | _pending_ | _pending_ | _pending_ |
 | worker, arm64 | `-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError` | 1024 MiB | _pending_ | _pending_ | _pending_ | _pending_ |
 
-Two local amd64 runs of the JVM smoke (Docker Desktop, 2026-11-03 and 2026-11-04) are not arm64 or VPS
+Three local amd64 runs of the JVM smoke (Docker Desktop, 2026-11-03 and 2026-11-04) are not arm64 or VPS
 evidence. They found:
 
 - **Backend:** a 500 MiB `MaxHeapSize` (`Runtime.maxMemory()` 483 MiB) instead of the earlier 25% default
-  (about 185 MiB), SerialGC with one CPU, `ExitOnOutOfMemoryError` true, and an idle MemUsage of 307 to
+  (about 185 MiB), SerialGC with one CPU, `ExitOnOutOfMemoryError` true, and an idle MemUsage of 301 to
   362 MiB.
 - **Worker:** a 308 MiB `MaxHeapSize` (298 MiB), SerialGC, `ExitOnOutOfMemoryError` true, and an idle
-  MemUsage of 145 to 162 MiB.
+  MemUsage of 130 to 162 MiB.
 
 ### Silo on arm64
 
