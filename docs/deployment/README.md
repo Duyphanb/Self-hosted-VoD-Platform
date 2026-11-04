@@ -115,8 +115,19 @@ provide non-empty, non-default values for:
 
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
+- `POSTGRES_OWNER_USER`
+- `POSTGRES_OWNER_PASSWORD`
+- `POSTGRES_BACKEND_USER`
+- `POSTGRES_BACKEND_PASSWORD`
+- `POSTGRES_WORKER_USER`
+- `POSTGRES_WORKER_PASSWORD`
+- `REDIS_PASSWORD`
 - `RABBITMQ_USERNAME`
 - `RABBITMQ_PASSWORD`
+- `RABBITMQ_BACKEND_USERNAME`
+- `RABBITMQ_BACKEND_PASSWORD`
+- `RABBITMQ_WORKER_USERNAME`
+- `RABBITMQ_WORKER_PASSWORD`
 - `MINIO_ACCESS_KEY`
 - `MINIO_SECRET_KEY`
 - `MINIO_BACKEND_ACCESS_KEY`
@@ -124,6 +135,24 @@ provide non-empty, non-default values for:
 - `MINIO_WORKER_ACCESS_KEY`
 - `MINIO_WORKER_SECRET_KEY`
 - `JWT_SECRET`
+
+`POSTGRES_USER`/`POSTGRES_PASSWORD` (the cluster's bootstrap superuser) and
+`RABBITMQ_USERNAME`/`RABBITMQ_PASSWORD` (the broker administrator) are reserved
+for the servers, the one-shot `postgres-init` job, broker definitions and
+explicit operator maintenance (#106). Flyway migrates as the schema owner
+(`POSTGRES_OWNER_*`); the backend and worker receive only their own
+`POSTGRES_BACKEND_*`/`POSTGRES_WORKER_*` and `RABBITMQ_BACKEND_*`/`RABBITMQ_WORKER_*`
+identities, and only the backend receives `REDIS_PASSWORD`. The roles, grants
+and permission patterns are in
+[Service identities and network](../architecture/INFRASTRUCTURE.md#service-identities-and-network).
+User names must differ from the other identities of the same service, and no
+secret may be reused by any other identity, including the storage secrets and
+`JWT_SECRET`. PostgreSQL role names use lowercase letters, digits and `_`, do
+not start with `pg_` and have at most 63 characters. `REDIS_PASSWORD` must not
+contain whitespace or quotes. Leave `SPRING_DATASOURCE_URL` unset: the
+backend and worker derive it from `POSTGRES_HOST`, `POSTGRES_PORT` and
+`POSTGRES_DB` exactly as Flyway does, and preflight rejects an explicit URL
+that differs.
 
 Root storage keys are reserved for bootstrap and explicit operator maintenance, inside a one-off internal `minio-init` container; applications receive only scoped identities. Supply distinct backend/worker identities and secrets, also distinct from root, before rerunning `minio-init` and starting the applications on an existing volume. Do not reuse an operator account or attach extra policies/groups to these dedicated users. See [the IAM policy and SDK contract](../architecture/INFRASTRUCTURE.md#storage-identities-and-policies); account provisioning does not require deleting storage data. All three storage access keys require at least three characters, no `=` or `,`, and no leading/trailing whitespace; all three secrets require at least eight characters. Preflight reports the variable name only.
 
@@ -133,14 +162,15 @@ It must also set `NGINX_HTTP_PORT=80`, as described in
 The production-only `production-config-check` service rejects the published
 development placeholders and a loopback-bound edge before PostgreSQL,
 RabbitMQ, MinIO, or Nginx can start. It reports only the rejected variable name
-and never its value. Backend, worker, Flyway, and initialization services
-consume the same canonical credentials. Starting production applications or
+and never its value. Each application, Flyway and each initialization job
+receives only the identity listed above for it; no two services share a
+credential. Starting production applications or
 provisioning with `--no-deps` is unsupported because that option bypasses the
 dependency gates. The one intended production exception is the explicit root
 maintenance shell below, after preflight and the target storage server have
 been verified; it must not start applications or replace the normal init path.
 
-The preflight validates the configuration being supplied; it does not itself rotate persisted credentials. A subsequent `minio-init` run updates the configured scoped storage secrets and re-enables those users. PostgreSQL and other persisted service credentials need their service-specific rotation procedure; use the storage procedure below for Silo.
+The preflight validates the configuration being supplied; it does not itself rotate persisted credentials. A subsequent `minio-init` run updates the configured scoped storage secrets and re-enables those users. Use [Service Identity Rotation](#service-identity-rotation) for PostgreSQL, RabbitMQ and Redis, and the storage procedure below for Silo.
 
 Run the repository regression check before a deployment:
 
@@ -152,6 +182,82 @@ The script uses synthetic test-only values. It verifies that local Compose
 still accepts its development defaults and publishes the edge on loopback only,
 missing production values fail during configuration, published defaults and a
 loopback-bound edge fail the runtime preflight, invalid storage key/secret formats fail with variable names only, and non-default values pass.
+It also checks that every PostgreSQL, RabbitMQ, Redis and storage identity is
+independent, that unsafe role names and Redis passwords fail, that a datasource
+URL differing from Flyway's fails, and that each service receives only its own
+identity. `python3 deploy/tests/service-identity-smoke.py --project <name>`
+proves on a fresh disposable stack that each PostgreSQL role and Redis client
+can do only its own operations; see [Testing Docs](../testing/README.md#service-identity-checks-106).
+
+## Service Identity Rotation
+
+This is an operator procedure for an explicitly authorized environment, with the
+same precautions as the storage procedure below: confirm the Compose project and
+environment file, keep a recoverable backup and the previous configuration,
+never print secrets, enable shell tracing or pass secrets as arguments. The
+examples use production; for a local stack use `--env-file .env` and the base
+file only. `C` stands for the full command prefix:
+
+```bash
+C="docker compose -p $PROJECT --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml"
+```
+
+**PostgreSQL application roles.** Generate a new independent secret for the
+affected `POSTGRES_OWNER_PASSWORD`, `POSTGRES_BACKEND_PASSWORD` or
+`POSTGRES_WORKER_PASSWORD`. `postgres-init` sets the configured passwords on
+every run, so run `$C run --rm production-config-check`, then
+`$C run --rm postgres-init`, and stop if either fails. Then recreate only the
+consumer: `$C run --rm flyway` for the owner, `$C up -d backend` or
+`$C up -d worker` for an application role. Verify aggregate `/actuator/health`.
+
+**PostgreSQL bootstrap superuser.** `POSTGRES_PASSWORD` is applied only when the
+volume is first initialized, and the user name cannot change afterwards. Set the
+new password inside the container over the local socket, where psql prompts for
+it, then store the same value in the environment file and confirm it by rerunning
+`production-config-check` and `postgres-init`:
+
+```bash
+$C exec postgres sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\password"'
+```
+
+**RabbitMQ.** The broker imports its definitions at every boot, which overwrites
+the configured users' passwords and permissions, so a changed broker secret needs
+a broker restart. After preflight, run `$C up -d rabbitmq` and then `$C up -d`
+for the affected application. Restarting the broker interrupts both applications
+briefly; the durable queue keeps its persistent jobs, and the relay retries jobs
+whose publication was not confirmed ([Encoding Recovery](#encoding-recovery)).
+
+**Redis.** After preflight, `$C up -d redis backend` recreates the server with
+the new `requirepass` and the backend with the new password.
+
+**Retired identities.** Changing a user name leaves the old identity in place.
+For RabbitMQ, run `$C exec rabbitmq rabbitmqctl delete_user "$OLD_USER"` after
+the new user works. For PostgreSQL, rerun `postgres-init` and Flyway with the new
+name first: init moves the relations to a new owner, and Flyway grants the
+application roles. Then remove the reviewed old role; the guard refuses the
+bootstrap user and any configured role:
+
+```bash
+OLD_ROLE='reviewed_retired_role'   # never the bootstrap user or a configured role
+$C exec -T postgres sh -c '
+  for active in "$POSTGRES_USER" "$2" "$3" "$4"; do [ "$1" != "$active" ] || exit 1; done
+  psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v old="$1" -v owner="$2"' \
+  sh "$OLD_ROLE" "$POSTGRES_OWNER_USER" "$POSTGRES_BACKEND_USER" "$POSTGRES_WORKER_USER" <<'SQL'
+REASSIGN OWNED BY :"old" TO :"owner";
+DROP OWNED BY :"old";
+DROP ROLE :"old";
+SQL
+```
+
+Export the three configured role names from the environment file first. A
+non-zero exit means nothing was dropped or the role still holds privileges
+elsewhere; investigate before retrying.
+
+**Adopting #106 on an existing deployment.** The first `postgres-init` run
+transfers the existing tables to the schema owner and removes `PUBLIC` access.
+Because the applications held the bootstrap PostgreSQL and RabbitMQ identities
+before #106, rotate both bootstrap passwords afterwards as above, just as the
+storage root pair is rotated after #169.
 
 ## Storage Identity Rotation and Revocation
 

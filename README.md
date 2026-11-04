@@ -50,11 +50,11 @@ Bash:
 cp .env.example .env
 ```
 
-The committed `.env.example` contains placeholders only. Before sharing the stack or using persistent data, replace at least `JWT_SECRET`, `POSTGRES_PASSWORD`, `SPRING_DATASOURCE_PASSWORD`, `RABBITMQ_PASSWORD`, `MINIO_SECRET_KEY`, and the independent `MINIO_BACKEND_*`/`MINIO_WORKER_*` credentials in the ignored `.env` file. Storage root keys are reserved for bootstrap and explicit operator maintenance; [scoped application policies](docs/architecture/INFRASTRUCTURE.md#storage-identities-and-policies) are provisioned by minio-init.
+The committed `.env.example` contains placeholders only. Before sharing the stack or using persistent data, replace at least `JWT_SECRET`, `REDIS_PASSWORD`, every `POSTGRES_*_PASSWORD` and `RABBITMQ_*_PASSWORD`, `MINIO_SECRET_KEY`, and the independent `MINIO_BACKEND_*`/`MINIO_WORKER_*` credentials in the ignored `.env` file, each with its own value. Storage root keys are reserved for bootstrap and explicit operator maintenance; [scoped application policies](docs/architecture/INFRASTRUCTURE.md#storage-identities-and-policies) are provisioned by minio-init.
 
-For the default local Compose setup, `SPRING_DATASOURCE_PASSWORD` must match `POSTGRES_PASSWORD`. If you also change the PostgreSQL database name or username, keep `SPRING_DATASOURCE_URL` and `SPRING_DATASOURCE_USERNAME` aligned with the corresponding `POSTGRES_*` values.
+Each service receives only its own identity (#106): `POSTGRES_USER` and `RABBITMQ_USERNAME` are the bootstrap superuser and broker administrator, `postgres-init` provisions the `POSTGRES_OWNER_*` role for Flyway and the `POSTGRES_BACKEND_*`/`POSTGRES_WORKER_*` roles for the applications, the broker loads the `RABBITMQ_BACKEND_*`/`RABBITMQ_WORKER_*` users, and only the backend receives `REDIS_PASSWORD`. Leave `SPRING_DATASOURCE_URL` unset; the backend and worker derive it from `POSTGRES_HOST`, `POSTGRES_PORT` and `POSTGRES_DB`, as Flyway does. See [Service identities and network](docs/architecture/INFRASTRUCTURE.md#service-identities-and-network).
 
-Do not commit `.env`. Rerunning `minio-init` overwrites and re-enables the configured scoped storage users, including their secrets; changing an access key leaves the old user valid until explicitly removed. Other services' persisted credentials need their own rotation procedure. Follow the [storage identity rotation and revocation runbook](docs/deployment/README.md#storage-identity-rotation-and-revocation) for existing volumes.
+Do not commit `.env`. Rerunning `minio-init` overwrites and re-enables the configured scoped storage users, including their secrets; changing an access key leaves the old user valid until explicitly removed. PostgreSQL, RabbitMQ and Redis credentials follow the [service identity rotation](docs/deployment/README.md#service-identity-rotation) procedure. Follow the [storage identity rotation and revocation runbook](docs/deployment/README.md#storage-identity-rotation-and-revocation) for existing volumes.
 
 ### 2. Build and start
 
@@ -73,7 +73,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml ps -a
 Expected result for the full stack:
 
 - `postgres`, `redis`, `rabbitmq`, `minio`, `backend`, `worker`, `frontend`, and `nginx` are running and healthy.
-- `flyway` and `minio-init` have exited successfully with status code 0.
+- `postgres-init`, `flyway` and `minio-init` have exited successfully with status code 0.
 
 ### 4. Verify the public routes
 
@@ -101,7 +101,7 @@ Nginx is the only service published to the host by the local Compose file, and b
 | `http://localhost/hls/*` | backend:8080 | Authenticated HLS proxy route |
 | `${NGINX_HTTP_PORT:-127.0.0.1:80}` | nginx:80 | Configurable host HTTP address and port, loopback only by default |
 
-These service ports are available only inside the `vod_internal` Docker network:
+These service ports are not published to the host. Nginx and the frontend share the `vod_edge` network with the backend; the data stores and the worker sit on the `internal: true` `vod_internal` network, which the backend also joins:
 
 | Service | Internal port |
 |---|---:|
