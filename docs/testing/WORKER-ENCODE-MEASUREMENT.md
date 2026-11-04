@@ -42,6 +42,9 @@ the Docker host, so it never measures under emulation.
   - `docker stats` peaks: CPU %, MemUsage (the cgroup usage minus inactive file cache) and PIDs.
   - The cgroup's own `memory.peak`, `pids.peak`, CPU throttling (`cpu.stat`) and OOM events. `memory.peak`
     includes page cache, such as the HLS segments just written, so it can exceed what FFmpeg needs.
+  - FFmpeg sizes its automatic threads, such as the decoder's, from the CPUs it may run on, not from the
+    `--cpus` quota, so the PIDs and memory peaks also depend on the host's CPU count, which the run identity
+    records. Compare them only between hosts with the same count.
 - **Derived.** A least-squares fit per clip type and thread count gives encode seconds per media second (the
   slope) and the fixed overhead (the intercept). Output bytes are fitted too, because the VBV buffer lets a
   clip's first seconds exceed the maxrate: a 2 s clip's kb/s overstates the steady rate. Values at 10800 s
