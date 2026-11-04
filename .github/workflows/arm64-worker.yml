@@ -51,6 +51,7 @@ jobs:
           persist-credentials: false
 
       - name: Require a native arm64 runner and Docker engine
+        id: native
         run: |
           test "$(uname -m)" = aarch64
           test "$(docker info --format '{{.Architecture}}')" = aarch64
@@ -100,8 +101,9 @@ jobs:
             --output-dir "$RUNNER_TEMP/arm64-evidence/jvm-limits"
 
       # ADR-004 executed the pinned Silo image only on amd64; this runs the same storage contract on arm64.
+      # It needs no application image, so it runs even if a build failed, but only on a verified arm64 host.
       - name: Verify the pinned Silo image on arm64
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.native.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

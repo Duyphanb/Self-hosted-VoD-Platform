@@ -360,6 +360,21 @@ class WorkflowTests(unittest.TestCase):
         ci = (MEASURE.ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertNotIn("ubuntu-24.04-arm", ci)
 
+    def test_arm64_evidence_steps_run_only_on_a_verified_native_host(self):
+        workflow = (MEASURE.ROOT / ".github/workflows/arm64-worker.yml").read_text(encoding="utf-8")
+        steps = re.split(r"\n {6}- name: ", workflow.split("\n    steps:\n", 1)[1])[1:]
+        native = [step for step in steps if "\n        id: native\n" in step]
+        self.assertEqual(len(native), 1)
+        self.assertIn('test "$(uname -m)" = aarch64', native[0])
+        self.assertIn("test \"$(docker info --format '{{.Architecture}}')\" = aarch64", native[0])
+        # A step that still runs after an earlier failure must depend on the native check, directly or
+        # through the image build (which runs only after every earlier step succeeded).
+        guarded = [step for step in steps if "!cancelled()" in step]
+        self.assertGreaterEqual(len(guarded), 4)
+        for step in guarded:
+            with self.subTest(step=step.splitlines()[0]):
+                self.assertRegex(step, r"steps\.(native|images)\.outcome == 'success'")
+
 
 if __name__ == "__main__":
     unittest.main()
