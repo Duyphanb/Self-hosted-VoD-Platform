@@ -38,6 +38,14 @@ def redacted(text, env):
     return text
 
 
+def port_overlay(port):
+    """The data network is internal (#106) and cannot publish ports, so the store also joins
+    a disposable network that carries only the loopback port."""
+    return {"services": {"minio": {"ports": [f"127.0.0.1:{port}:9000"],
+                                   "networks": ["vod_internal", "audit_published"]}},
+            "networks": {"audit_published": {}}}
+
+
 def preserve_first_failure(action, cleanup, record_failure=lambda error: None):
     try:
         action()
@@ -94,7 +102,7 @@ def main():
         port = sock.getsockname()[1]
     with tempfile.TemporaryDirectory(prefix="vod-storage-sdk-") as temp:
         overlay = Path(temp) / "ports.json"
-        overlay.write_text(json.dumps({"services": {"minio": {"ports": [f"127.0.0.1:{port}:9000"]}}}))
+        overlay.write_text(json.dumps(port_overlay(port)))
         compose = ["docker", "compose", "-p", args.project, "--env-file", os.devnull,
                    "-f", "deploy/docker-compose.yml", "-f", str(overlay)]
         def check():

@@ -42,11 +42,27 @@ class RabbitmqPublisherSmokeTests(unittest.TestCase):
             report.write_text('<testsuite tests="4" skipped="0" failures="0" errors="0"/>', encoding="utf-8")
             SMOKE.require_executed_tests(report)
 
-    def test_worker_and_backend_have_separate_report_locations(self):
-        paths = [SMOKE.report_path(Path("repo"), *suite) for suite in SMOKE.SUITES]
-        self.assertEqual(len(set(paths)), 2)
+    def test_every_suite_has_its_own_report_and_the_broker_stopping_suite_runs_last(self):
+        paths = [SMOKE.report_path(Path("repo"), *suite[:3]) for suite in SMOKE.SUITES]
+        self.assertEqual(len(set(paths)), 3)
         self.assertIn("worker/queue/target/surefire-reports", paths[0].as_posix())
         self.assertIn("backend/common/target/surefire-reports", paths[1].as_posix())
+        # EncodingPublisherBrokerTests stops the broker at its end.
+        self.assertTrue(SMOKE.SUITES[-1][2].endswith(".EncodingPublisherBrokerTests"))
+
+    def test_scoped_users_run_the_declarations_and_only_publisher_outcomes_use_the_administrator(self):
+        identities = {suite[2].rsplit(".", 1)[1]: suite[3] for suite in SMOKE.SUITES}
+        self.assertEqual(identities, {"EncodingQueueBrokerTests": "WORKER",
+                                      "EncodingBrokerPermissionTests": None,
+                                      "EncodingPublisherBrokerTests": "ADMIN"})
+
+    def test_published_port_uses_loopback_and_a_disposable_network_beside_the_internal_one(self):
+        overlay = SMOKE.port_overlay(15672)
+        broker = overlay["services"]["rabbitmq"]
+        self.assertEqual(broker["ports"], ["127.0.0.1:15672:5672"])
+        # An internal network cannot publish ports (#106); the broker keeps its data network.
+        self.assertEqual(broker["networks"], ["vod_internal", "audit_published"])
+        self.assertEqual(overlay["networks"], {"audit_published": {}})
 
     def test_redacts_production_and_test_credentials_longest_first(self):
         env = {"RABBITMQ_USERNAME": "audit-user", "RABBITMQ_PASSWORD": "secret",
