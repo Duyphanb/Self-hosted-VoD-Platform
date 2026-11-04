@@ -72,7 +72,10 @@ It removes only its own project's containers, networks and volumes.
   opt-in, and the default run extrapolates.
 - **A1 VM (owner):** build the worker image on the VM and run the measurement there. For example:
   `python3 deploy/tests/worker-encode-measurement.py --image <worker image> --output-dir <dir> --long-clip-seconds 10800`.
-  Run the JVM smoke with a fresh project name. Check free disk first: a cap-length run needs about 11 GB.
+  Run the JVM smoke with a fresh project name. Check free disk first: a cap-length run needs about 11 GB. If
+  `/tmp` is a tmpfs, pass `--work-dir` on the disk that will hold `WORKER_TEMP_DIR`, which is disk-backed.
+- **Evidence label:** each report states where it ran. A run on a GitHub-hosted runner is runner evidence, not
+  A1 VPS evidence; any other run counts as A1 VPS evidence only when it ran on the A1 VM.
 - **Local dry run:** allowed on amd64 to check the scripts. Its numbers are not evidence, and arm64 is never
   emulated locally.
 - **Clean-up:** the measurement removes its containers and work directory, and the JVM smoke its project's

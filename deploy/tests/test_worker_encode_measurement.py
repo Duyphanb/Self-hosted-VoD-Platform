@@ -2,10 +2,12 @@
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location("worker_encode_measurement",
                                               Path(__file__).with_name("worker-encode-measurement.py"))
@@ -265,11 +267,27 @@ class DerivedValuesTests(unittest.TestCase):
         self.assertAlmostEqual(prediction["output_bytes"], 1_000_000 + 500_000 * 10800)
         self.assertEqual(prediction["temp_disk_peak_bytes"], MEASURE.UPLOAD_CAP_BYTES + prediction["output_bytes"])
         self.assertEqual(prediction["d27_budget_bytes"], 10800 * 625_000 + 16 * 1024**2)
-        summary = MEASURE.render_summary({"result": "PASS", "runs": report["runs"], "probes": report["probes"],
-                                          "derived": derived})
+        with patch.dict(os.environ, {"RUNNER_ENVIRONMENT": "github-hosted"}):
+            summary = MEASURE.render_summary({"result": "PASS", "runs": report["runs"], "probes": report["probes"],
+                                              "derived": derived})
         self.assertIn("PREDICTED", summary)
-        self.assertIn("not A1 VPS evidence", summary)
+        self.assertIn("Evidence: GitHub-hosted runner: runner evidence, not A1 VPS evidence.", summary)
         self.assertIn("| high-entropy-600s.mp4 | 1 | 600.0 | 1900.00 | 3.167 |", summary)
+
+    def test_report_names_where_it_ran(self):
+        # The A1 VM runs this script too, so only a GitHub-hosted run says it is not A1 VPS evidence.
+        for environment, expected in (("github-hosted", "GitHub-hosted runner: runner evidence, not A1 VPS evidence"),
+                                      ("self-hosted", "A1 VPS evidence only when run on the A1 VM"),
+                                      (None, "A1 VPS evidence only when run on the A1 VM")):
+            with self.subTest(environment=environment), patch.dict(os.environ):
+                os.environ.pop("RUNNER_ENVIRONMENT", None)
+                if environment:
+                    os.environ["RUNNER_ENVIRONMENT"] = environment
+                self.assertIn(expected, MEASURE.evidence())
+                summary = MEASURE.render_summary({"result": "FAIL", "runs": [], "probes": [],
+                                                  "evidence": MEASURE.evidence()})
+                self.assertIn("Evidence: " + MEASURE.evidence() + ".", summary)
+                self.assertNotIn("Runner timings", summary)
 
     def test_record_rows_follow_the_record_tables(self):
         report = {"probes": [{"clip": "typical-2s.mp4", "demuxer": "mov", "worst_seconds": 0.3, "media_seconds": 2.0},

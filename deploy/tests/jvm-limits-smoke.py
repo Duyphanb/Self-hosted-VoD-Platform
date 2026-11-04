@@ -27,6 +27,9 @@ LABEL = "Production-overlay JVM limits (#124)"
 SERVICES = ("backend", "worker")
 PROJECT_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 HEAP_TOLERANCE = 0.03
+# The JVM rounds MaxHeapSize up to its heap alignment, 512 times the page size: 2 MiB with 4 KiB pages, but
+# 32 MiB with the 64 KiB pages some arm64 kernels use (the worker's 307.2 MiB target then becomes 320 MiB).
+HEAP_ALIGNMENT_ALLOWANCE = 32 * 1024**2
 STATS_SAMPLES = 8
 
 
@@ -43,6 +46,13 @@ def command(args, *, env=None, timeout=120, check=True):
     if check and result.returncode:
         raise SmokeError("A smoke command failed (output withheld): " + " ".join(args[:4]))
     return result
+
+
+def evidence():
+    """What a report is evidence of. The A1 VM runs this script too, so a fixed runner label would be wrong."""
+    if os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted":
+        return "GitHub-hosted runner: runner evidence, not A1 VPS evidence"
+    return "Not a GitHub-hosted runner: A1 VPS evidence only when run on the A1 VM; a local run is not evidence"
 
 
 def validate_project(project):
@@ -181,7 +191,8 @@ def check_service(service, expected, observed):
     if observed["memory_limit_bytes"] != expected["memory_limit_bytes"]:
         failures.append(service + ": the container memory limit differs from the overlay")
     target = expected["memory_limit_bytes"] * expected["max_ram_percentage"] / 100
-    if not target * (1 - HEAP_TOLERANCE) <= int(flags["MaxHeapSize"]) <= target * (1 + HEAP_TOLERANCE):
+    highest = max(target * (1 + HEAP_TOLERANCE), target + HEAP_ALIGNMENT_ALLOWANCE)
+    if not target * (1 - HEAP_TOLERANCE) <= int(flags["MaxHeapSize"]) <= highest:
         failures.append(service + ": MaxHeapSize does not follow MaxRAMPercentage of the memory limit")
     if not observed["stats"]["memory_usage_peak_bytes"] < expected["memory_limit_bytes"]:
         failures.append(service + ": docker stats memory reached the limit")
@@ -233,8 +244,8 @@ def write_report(output, report):
                      f"{mib(observed.get('main_jvm_rss_bytes'))} |")
     if report.get("failures"):
         lines += [""] + ["- " + failure for failure in report["failures"]]
-    lines += ["", "Idle stack after startup; docker stats MemUsage is the cgroup usage minus inactive file cache. "
-                  "Not A1 VPS evidence.", ""]
+    lines += ["", "Idle stack after startup; docker stats MemUsage is the cgroup usage minus inactive file cache.",
+              "", "Evidence: " + report.get("evidence", evidence()) + ".", ""]
     summary = "\n".join(lines)
     (output / "summary.md").write_text(summary, encoding="utf-8")
     if os.environ.get("GITHUB_STEP_SUMMARY"):
@@ -253,7 +264,8 @@ def main():
         raise SmokeError("The Compose project already exists; choose a fresh project name")
     env = new_environment()
     compose = compose_command(args.project)
-    report = {"label": LABEL, "result": "FAIL", "started_at": datetime.now(timezone.utc).isoformat(),
+    report = {"label": LABEL, "evidence": evidence(), "result": "FAIL",
+              "started_at": datetime.now(timezone.utc).isoformat(),
               "commit": os.environ.get("GITHUB_SHA"), "overlay": "deploy/docker-compose.prod.yml",
               "architecture": command(["docker", "info", "--format", "{{.Architecture}}"]).stdout.strip()}
     failure = None

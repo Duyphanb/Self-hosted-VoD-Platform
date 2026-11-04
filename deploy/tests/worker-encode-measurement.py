@@ -10,9 +10,10 @@ every requested WORKER_FFMPEG_THREADS value. The report records the probe times 
 cap-length file), encode seconds per media second, the fixed overhead, output bytes per second, the temp-disk
 peak and docker stats peaks, in measurement.json and summary.md.
 
-Values for the 10800 s cap that come from shorter clips are labelled predicted. A GitHub runner is not the
-A1 VPS: the report is runner evidence, not an NFR-002 baseline or VPS evidence. No credentials are involved;
-only the generated clips and their outputs are written, under a fresh work directory removed at the end.
+Values for the 10800 s cap that come from shorter clips are labelled predicted. The report states where it
+ran: on a GitHub-hosted runner it is runner evidence, not A1 VPS evidence, and no run is an NFR-002 baseline.
+No credentials are involved; only the generated clips and their outputs are written, under a fresh work
+directory removed at the end.
 """
 import argparse
 from datetime import datetime, timezone
@@ -32,7 +33,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-LABEL = "Runner measurement of the ADR-010 D27 reference encode - not A1 VPS evidence"
+LABEL = "Measurement of the ADR-010 D27 reference encode in the worker image (#124)"
 CAP_SECONDS = 10800                      # WORKER_MAX_DURATION_SECONDS (ADR-010 D26)
 CAP_SIZE = (1920, 1080)                  # WORKER_MAX_WIDTH x WORKER_MAX_HEIGHT, landscape
 BOX = (1280, 720)                        # HLS_TARGET_HEIGHT=720 box, landscape (ADR-010 D27)
@@ -93,6 +94,13 @@ exit "$status"
 
 class MeasurementError(RuntimeError):
     """A measurement step failed; the message names the step."""
+
+
+def evidence():
+    """What a report is evidence of. The A1 VM runs this script too, so a fixed runner label would be wrong."""
+    if os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted":
+        return "GitHub-hosted runner: runner evidence, not A1 VPS evidence"
+    return "Not a GitHub-hosted runner: A1 VPS evidence only when run on the A1 VM; a local run is not evidence"
 
 
 def reference_arguments(input_path, demuxer, hls, box_width, box_height, threads):
@@ -679,7 +687,8 @@ def render_summary(report):
     def mib(value):
         return "n/a" if value is None else f"{value / 1024**2:.1f} MiB"
 
-    lines = [f"# {LABEL}", "", f"Result: **{report['result']}**", ""]
+    lines = [f"# {LABEL}", "", f"Evidence: {report.get('evidence') or evidence()}.", "",
+             f"Result: **{report['result']}**", ""]
     environment = report.get("environment", {})
     if environment:
         host, image = environment["host"], environment["image"]
@@ -725,8 +734,8 @@ def render_summary(report):
         lines += render_record(derived.get("record"), number, mib)
     if report.get("failure"):
         lines += ["", "Failure: " + report["failure"]]
-    lines += ["", "Runner timings are not an NFR-002 baseline and not A1 VPS evidence; the owner sets the timeouts "
-                  "with a margin (docs/testing/WORKER-ENCODE-MEASUREMENT.md).", ""]
+    lines += ["", "Timings are not an NFR-002 baseline; the owner sets the timeouts with a margin "
+                  "(docs/testing/WORKER-ENCODE-MEASUREMENT.md).", ""]
     return "\n".join(lines)
 
 
@@ -784,7 +793,8 @@ def main():
     if not parent.is_dir():
         raise MeasurementError("The work directory parent does not exist")
     work = Path(tempfile.mkdtemp(prefix="vod-encode-measure-", dir=parent)).resolve()
-    report = {"label": LABEL, "result": "FAIL", "started_at": datetime.now(timezone.utc).isoformat(),
+    report = {"label": LABEL, "evidence": evidence(), "result": "FAIL",
+              "started_at": datetime.now(timezone.utc).isoformat(),
               "commit": os.environ.get("GITHUB_SHA"), "clip_seconds": args.clip_seconds, "threads": args.threads,
               "long_clip_seconds": args.long_clip_seconds, "long_clip_threads": args.long_clip_threads,
               "probes": [], "runs": [], "clips": [],

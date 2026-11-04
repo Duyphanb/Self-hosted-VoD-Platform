@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -77,6 +78,46 @@ class JvmLimitsSmokeTests(unittest.TestCase):
                 failures = SMOKE.check_service("backend", EXPECTED, values)
                 self.assertEqual(len(failures), 1, failures)
                 self.assertIn(expected_text, failures[0])
+
+    def test_heap_may_be_rounded_up_to_the_alignment_of_64_kib_pages(self):
+        # 30% of 1024 MiB is 307.2 MiB: 308 MiB with 4 KiB pages, 320 MiB with 64 KiB pages (32 MiB alignment).
+        worker_options = "-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError"
+        expected = {"java_tool_options": worker_options, "max_ram_percentage": 30, "memory_limit_bytes": 1024**3,
+                    "cpus": 1.0}
+
+        def worker(heap_mib):
+            flags = SMOKE.parse_flags(FLAGS.replace("524288000", str(heap_mib * 1024**2))
+                                      .replace("65.000000", "30.000000"))
+            return observed(java_tool_options=worker_options, flags=flags, memory_limit_bytes=1024**3)
+
+        for heap_mib in (308, 320):
+            with self.subTest(heap_mib=heap_mib):
+                self.assertEqual(SMOKE.check_service("worker", expected, worker(heap_mib)), [])
+        # Below the target, or above one alignment step, the heap does not follow the memory limit.
+        for heap_mib in (290, 340, 4096):
+            with self.subTest(heap_mib=heap_mib):
+                failures = SMOKE.check_service("worker", expected, worker(heap_mib))
+                self.assertEqual(len(failures), 1, failures)
+                self.assertIn("MaxHeapSize does not follow", failures[0])
+
+    def test_report_names_where_it_ran(self):
+        # The A1 VM runs this script too, so only a GitHub-hosted run says it is not A1 VPS evidence.
+        for environment, expected in (("github-hosted", "GitHub-hosted runner: runner evidence, not A1 VPS evidence"),
+                                      ("self-hosted", "A1 VPS evidence only when run on the A1 VM"),
+                                      (None, "A1 VPS evidence only when run on the A1 VM")):
+            with self.subTest(environment=environment), patch.dict(os.environ), \
+                    tempfile.TemporaryDirectory() as directory:
+                os.environ.pop("RUNNER_ENVIRONMENT", None)
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
+                if environment:
+                    os.environ["RUNNER_ENVIRONMENT"] = environment
+                self.assertIn(expected, SMOKE.evidence())
+                SMOKE.write_report(Path(directory), {"label": SMOKE.LABEL, "evidence": SMOKE.evidence(),
+                                                     "result": "PASS", "services": {}})
+                summary = (Path(directory) / "summary.md").read_text(encoding="utf-8")
+                self.assertIn("Evidence: " + SMOKE.evidence() + ".", summary)
+                report = json.loads((Path(directory) / "jvm-limits.json").read_text(encoding="utf-8"))
+                self.assertEqual(report["evidence"], SMOKE.evidence())
 
     def test_stats_rows_map_to_services_and_incomplete_samples_fail(self):
         ids = {"backend": "a" * 64, "worker": "b" * 64}
