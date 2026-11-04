@@ -127,9 +127,11 @@ class StorageCredentialPreflightTests(unittest.TestCase):
 
     def test_jvm_options_must_not_size_the_heap_without_the_memory_limit(self):
         # Each of these lets the heap ignore the container memory limit, even with MaxRAMPercentage set:
-        # -Xms/-XX:InitialHeapSize raise the maximum to the initial size when it is larger.
+        # -Xms/-XX:InitialHeapSize raise the maximum to the initial size when it is larger, and JDK 21 does the
+        # same for -XX:MinHeapSize and for a new plus old generation size above it (-Xmn, -XX:NewSize, -XX:OldSize).
         for name in JVM_DEFAULTS:
             for option in ("-Xmx512m", "-Xms768m", "-XX:MaxHeapSize=536870912", "-XX:InitialHeapSize=805306368",
+                           "-XX:MinHeapSize=1g", "-Xmn900m", "-XX:NewSize=900m", "-XX:OldSize=900m",
                            "-XX:MaxRAM=4g", "-XX:-UseContainerSupport"):
                 for value in (f"-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError {option}",
                               f"{option} -XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError"):
@@ -155,7 +157,7 @@ class StorageCredentialPreflightTests(unittest.TestCase):
                           "-XX:MaxRAMPercentage=1 -XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=100",
                           "-XX:+UseSerialGC\t-XX:MaxRAMPercentage=40 -XX:+ExitOnOutOfMemoryError -Xss512k",
                           "-XX:InitialRAMPercentage=10 -XX:MaxRAMPercentage=40 -XX:+ExitOnOutOfMemoryError "
-                          "-XX:+UseContainerSupport -Xmn64m"):
+                          "-XX:+UseContainerSupport -XX:MaxNewSize=64m -XX:MinHeapFreeRatio=20"):
                 with self.subTest(name=name, value=value):
                     result = self.execute(name, value)
                     self.assertEqual(result.returncode, 0, result.stderr)
