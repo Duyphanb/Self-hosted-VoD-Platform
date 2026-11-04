@@ -70,9 +70,10 @@ class FfprobeServiceFfmpegTests {
     @CsvSource({"H264_AAC_MP4, h264, 640, 360, 0", "VP9_OPUS_WEBM, vp9, 640, 360, 0", "H264_HIGH10_FLAC_MKV, h264, 640, 360, 0",
             "PORTRAIT_H264_AAC_MP4, h264, 360, 640, 0", "SILENT_H264_MP4, h264, 640, 360, 0",
             "HEVC_MAIN10_HDR_AC3_MKV, hevc, 640, 360, 0",
-            // Rotation: a 90/270-degree Display Matrix swaps the display size; -90 is 270 and -180 is 180.
+            // Rotation: a 90/270-degree Display Matrix swaps the display size; -90 is 270 and -180 is 180. The
+            // legacy tag counts clockwise, so rotate=90 is 270.
             "ROTATED_90_MP4, h264, 360, 640, 90", "ROTATED_MINUS_90_MKV, h264, 360, 640, 270",
-            "ROTATED_180_MP4, h264, 640, 360, 180", "ROTATE_TAG_90_MKV, h264, 360, 640, 90"})
+            "ROTATED_180_MP4, h264, 640, 360, 180", "ROTATE_TAG_90_MKV, h264, 360, 640, 270"})
     void validFamiliesProbeToTheirMetadata(MediaFixture fixture, String codec, int width, int height, int rotation) {
         MediaMetadata metadata = probe(policy(), fixture);
 

@@ -15,7 +15,8 @@ public enum MediaFixture {
     SILENT_H264_MP4("silent-h264.mp4", Kind.VALID),
     HEVC_MAIN10_HDR_AC3_MKV("hevc-main10-hdr-ac3.mkv", Kind.VALID),
     // Rotation (ADR-010 D26), copied from H264_AAC_MP4 with a Display Matrix, or only the legacy rotate tag that
-    // the Matroska muxer writes as ROTATE. FFprobe reports the matrix in [-180, 180]: 180 degrees as -180.
+    // the Matroska muxer writes as ROTATE. FFprobe reports the matrix in [-180, 180]: 180 degrees as -180. The
+    // matrix angle counts counterclockwise, the legacy tag clockwise (rotate=90 is a matrix of -90).
     ROTATED_90_MP4("rotated-90.mp4", Kind.VALID),
     ROTATED_MINUS_90_MKV("rotated-minus-90.mkv", Kind.VALID),
     ROTATED_180_MP4("rotated-180.mp4", Kind.VALID),

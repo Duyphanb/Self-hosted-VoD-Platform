@@ -92,29 +92,33 @@ final class FfprobeOutput {
      * The Display Matrix rotation, or the legacy {@code rotate} tag (any case; the Matroska muxer writes
      * {@code ROTATE}) when there is none. FFprobe reports the matrix angle counterclockwise in [-180, 180]: it
      * is rounded to whole degrees and normalized modulo 360, so -90 becomes 270 and -180 becomes 180.
+     *
+     * <p>The legacy tag counts clockwise: FFmpeg before 5.0 exported a Display Matrix of -90 degrees as
+     * {@code rotate=90} and rotated such a file clockwise for display. The tag is therefore negated into the
+     * counterclockwise matrix convention, so {@code rotate=90} is 270. Issue 5.5 hands this one rotation to
+     * FFmpeg, whose 7.1 autorotation no longer reads the tag, so the sign decides the output orientation.
      */
     private static int rotation(JsonNode stream) {
-        JsonNode degrees = null;
         JsonNode sideDataList = stream.path("side_data_list");
         if (sideDataList.isArray()) {
             for (JsonNode sideData : sideDataList) {
                 if ("Display Matrix".equals(text(sideData.path("side_data_type"))) && sideData.has("rotation")) {
-                    degrees = sideData.get("rotation");
-                    break;
+                    return rightAngle(finiteNumber(sideData.get("rotation"), "rotation"));
                 }
             }
         }
         JsonNode tags = stream.path("tags");
-        if (degrees == null && tags.isObject()) {
+        if (tags.isObject()) {
             for (Map.Entry<String, JsonNode> tag : tags.properties()) {
-                if (tag.getKey().equalsIgnoreCase("rotate")) {
-                    degrees = tag.getValue();
-                    break;
-                }
+                if (tag.getKey().equalsIgnoreCase("rotate")) return rightAngle(-finiteNumber(tag.getValue(), "rotation"));
             }
         }
-        if (degrees == null) return 0;
-        int normalized = (int) Math.floorMod(Math.round(finiteNumber(degrees, "rotation")), 360L);
+        return 0;
+    }
+
+    /** {@code counterclockwise} rounded to whole degrees and normalized modulo 360; only right angles pass. */
+    private static int rightAngle(double counterclockwise) {
+        int normalized = (int) Math.floorMod(Math.round(counterclockwise), 360L);
         if (normalized % 90 != 0) throw failure(UNSUPPORTED_MEDIA, "Media rotation is not a multiple of 90 degrees");
         return normalized;
     }

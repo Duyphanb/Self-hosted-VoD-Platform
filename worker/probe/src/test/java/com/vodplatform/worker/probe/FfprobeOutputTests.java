@@ -142,8 +142,13 @@ class FfprobeOutputTests {
 
     @Test
     void theRotateTagIsTheFallbackInAnyCase() {
-        assertThat(metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"ROTATE\":\"90\"}"))).rotation()).isEqualTo(90);
-        assertThat(metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"-90\"}"))).width()).isEqualTo(360);
+        // The legacy tag counts clockwise, the opposite of the Display Matrix: rotate=90 is a matrix of -90, so 270.
+        assertThat(metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"ROTATE\":\"90\"}"))).rotation()).isEqualTo(270);
+        MediaMetadata counterclockwise = metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"-90\"}")));
+        assertThat(List.of(counterclockwise.rotation(), counterclockwise.width())).containsExactly(90, 360);
+        assertThat(metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"180\"}"))).rotation()).isEqualTo(180);
+        assertThat(metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"270\"}"))).rotation()).isEqualTo(90);
+        assertFails(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"45\"}")), UNSUPPORTED_MEDIA);
         // The Display Matrix wins over the tag; other side data carries no rotation.
         assertThat(metadata(probe(format("5.0"), video(640, 360, displayMatrix("0"), "\"tags\":{\"rotate\":\"90\"}"))).rotation())
                 .isZero();
