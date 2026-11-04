@@ -13,6 +13,7 @@ These retain the repository's engineering conventions. Frozen contracts govern b
 - Use request/response DTOs, never exposed JPA entities; Spring Validation and centralized `@RestControllerAdvice` handle validation/errors.
 - Use SLF4J, not `System.out.println`. Keep OpenAPI behavior synchronized with the frozen API contract.
 - Full-context `@AutoConfigureMockMvc` tests in `backend/common` validate every response against `docs/architecture/API-CONTRACT.yaml` (`ContractValidation`); update the contract first, and mark only deliberate off-contract requests with `offContract(reason)`.
+- Full-context tests in `backend/common` implement `PostgresTestDatabase`: one shared PostgreSQL 16 Testcontainers database with the committed Flyway migrations and `ddl-auto=validate`, so backend `mvn verify` needs Docker (`-DskipPostgresTests` only on machines without it). Remove the rows a test commits and use the V2/V3 role seeds. `@DataJpaTest` slices in the feature modules still run on H2 ([testing docs](docs/testing/README.md#backend-postgresql-tests-119)).
 - Use JUnit Jupiter and Mockito by default, at the versions managed by Spring Boot (do not override them). Persistence, queue, and storage changes need appropriate boundary integration coverage.
 
 ### Spring Boot 4 conventions

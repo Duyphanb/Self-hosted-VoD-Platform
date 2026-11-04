@@ -27,6 +27,7 @@ import com.vodplatform.catalog.persistence.Person;
 import com.vodplatform.catalog.persistence.PersonRepository;
 import com.vodplatform.catalog.web.MovieController;
 import com.vodplatform.common.support.MovieVisibilityRule;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import jakarta.persistence.EntityManager;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -74,7 +75,7 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * The admin movie writes ({@code POST /api/v1/movies}, {@code PUT} and {@code DELETE
  * /api/v1/movies/{movieId}}, Issue 3.5) through the assembled application: the bearer security
- * chain, the controller, the movie service and the H2 database (PostgreSQL mode). Every response is
+ * chain, the controller, the movie service and the test PostgreSQL. Every response is
  * also checked against the API contract.
  *
  * <p>Each test rolls back. The service therefore joins the test transaction and makes a single
@@ -91,7 +92,7 @@ import tools.jackson.databind.node.ObjectNode;
 )
 @AutoConfigureMockMvc
 @Transactional
-class MovieAdminApiIntegrationTests {
+class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
 
     private static final String MOVIES = "/api/v1/movies";
     private static final String ADMIN_MOVIES = "/api/v1/admin/movies";

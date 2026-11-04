@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.vodplatform.common.contract.ApiContract;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.common.web.MultipartRouteFilter;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
 import com.vodplatform.encoding.messaging.PublishOutcome;
@@ -79,7 +80,8 @@ import java.util.stream.Stream;
 /**
  * Real-Tomcat multipart lifecycle of the production upload operation: the route gate, authorization
  * before parsing, the spool lifecycle, the operation's error mappings and requestId, and the
- * connector idle timeout. Storage and the broker are mocked; the database is the test H2.
+ * connector idle timeout. Storage and the broker are mocked; the database is the shared test
+ * PostgreSQL ({@link PostgresTestDatabase}).
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -89,7 +91,7 @@ import java.util.stream.Stream;
             "spring.servlet.multipart.max-request-size=8KB"
         })
 @Import(MultipartLifecycleTests.Endpoint.class)
-class MultipartLifecycleTests {
+class MultipartLifecycleTests implements PostgresTestDatabase {
 
     private static final UUID MOVIE = UUID.fromString("6f1d2a4e-8c3b-4a5f-9e7d-1b2c3d4e5f60");
 
@@ -185,6 +187,8 @@ class MultipartLifecycleTests {
                         + "(select id from video_assets where movie_id=?)",
                 MOVIE);
         jdbc.update("delete from video_assets where movie_id=?", MOVIE);
+        // The database outlives this class's context: leave no movie for other classes' lists.
+        jdbc.update("delete from movies where id=?", MOVIE);
     }
 
     private String bearer(String role) {

@@ -20,6 +20,7 @@ import com.vodplatform.catalog.persistence.Person;
 import com.vodplatform.catalog.persistence.PersonRepository;
 import com.vodplatform.catalog.web.MovieAdminController;
 import com.vodplatform.common.support.MovieVisibilityRule;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import jakarta.persistence.EntityManager;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -59,7 +60,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * {@code GET /api/v1/movies}, {@code GET /api/v1/admin/movies} and
  * {@code GET /api/v1/movies/{movieId}} through the assembled application: the bearer security
- * chain, the controllers, the movie service and the H2 database (PostgreSQL mode). Each test rolls
+ * chain, the controllers, the movie service and the test PostgreSQL. Each test rolls
  * back; the fixtures are written directly with the catalog repositories, so creation times and
  * therefore the {@code latest} order are fixed.
  *
@@ -75,7 +76,7 @@ import org.springframework.transaction.annotation.Transactional;
 )
 @AutoConfigureMockMvc
 @Transactional
-class MovieApiIntegrationTests {
+class MovieApiIntegrationTests implements PostgresTestDatabase {
 
     private static final String MOVIES = "/api/v1/movies";
     private static final String ADMIN_MOVIES = "/api/v1/admin/movies";

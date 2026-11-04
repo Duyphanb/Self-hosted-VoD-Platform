@@ -10,6 +10,7 @@ import com.vodplatform.auth.web.LoginController;
 import com.vodplatform.auth.web.LogoutController;
 import com.vodplatform.auth.web.RefreshTokenController;
 import com.vodplatform.auth.web.RegistrationController;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,7 +19,7 @@ import org.springframework.boot.test.context.SpringBootTest;
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes"
 )
-class AuthComponentScanTests {
+class AuthComponentScanTests implements PostgresTestDatabase {
 
     @Autowired
     private RegistrationService registrationService;

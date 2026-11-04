@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vodplatform.common.support.PostgresTestDatabase;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -17,11 +18,11 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** Real storage contributor and HTTP health aggregation, with only local H2/closed-port fixtures. */
+/** Real storage contributor and HTTP health aggregation, with only local database/closed-port fixtures. */
 @SpringBootTest(properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes")
 @AutoConfigureMockMvc
 @Import(RabbitReadinessStub.class)
-class StorageReadinessIntegrationTests {
+class StorageReadinessIntegrationTests implements PostgresTestDatabase {
     private static final int CLOSED_PORT = closedPort();
 
     private final MockMvc mvc;
