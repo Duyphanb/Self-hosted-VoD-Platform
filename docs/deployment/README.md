@@ -253,14 +253,28 @@ Export the three configured role names from the environment file first. A
 non-zero exit means nothing was dropped or the role still holds privileges
 elsewhere; investigate before retrying.
 
-**Adopting #106 on an existing deployment.** The first `postgres-init` run
-transfers the existing tables to the schema owner and removes `PUBLIC` access.
-It fails at `role membership check` if a configured role already exists and
-holds a membership in another role, such as `pg_read_all_data`: review the
-grant, `REVOKE` it as the bootstrap superuser, and rerun `postgres-init`.
-Because the applications held the bootstrap PostgreSQL and RabbitMQ identities
-before #106, rotate both bootstrap passwords afterwards as above, just as the
-storage root pair is rotated after #169.
+**Adopting #106 on an existing deployment.** Plan a maintenance window and take
+a recoverable PostgreSQL backup first. With the #106 revision checked out and the
+new variables in the protected environment file:
+
+1. Run `$C run --rm production-config-check` and stop if it fails. The check
+   has no network, so it does not touch the running stack.
+2. Run `$C down --remove-orphans`, never with `--volumes` or `-v`. #106 makes
+   `vod_internal` an `internal: true` network and moves `nginx` and `frontend`
+   to `vod_edge`. Compose recreates a network whose definition changed, but it
+   disconnects only the services the new configuration attaches to it, so a
+   plain `up` fails while the old `nginx` and `frontend` containers still hold
+   endpoints, after it has already stopped the data services. `down` removes
+   the project's containers and networks and keeps the named volumes.
+3. Run `$C up -d --wait` and verify aggregate `/actuator/health`.
+
+The first `postgres-init` run transfers the existing tables to the schema owner
+and removes `PUBLIC` access. It fails at `role membership check` if a configured
+role already exists and holds a membership in another role, such as
+`pg_read_all_data`: review the grant, `REVOKE` it as the bootstrap superuser,
+and rerun `postgres-init`. Because the applications held the bootstrap
+PostgreSQL and RabbitMQ identities before #106, rotate both bootstrap passwords
+afterwards as above, just as the storage root pair is rotated after #169.
 
 ## Storage Identity Rotation and Revocation
 
