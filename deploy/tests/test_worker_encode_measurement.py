@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -158,9 +160,57 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(metrics["cgroup"]["cpu.max"], "100000 100000")
         self.assertEqual(metrics["cgroup"]["cpu.stat.nr_throttled"], 12)
         for broken in ("", "start_ns=1\nend_ns=2\n", "start_ns=5\nend_ns=1\nexit_code=0\n", "garbage\n",
-                       "start_ns=1\nend_ns=x\nexit_code=0\n"):
+                       "start_ns=1\nend_ns=x\nexit_code=0\n", "start_ns=1\nend_ns=2\nexit_code=0\nexit_code=1\n",
+                       "start_ns=1\nend_ns=2\nexit_code=0\n=3\n", "start_ns=1\nend_ns=2\nexit_code=0\nbad key=3\n"):
             with self.subTest(broken=broken), self.assertRaises(MEASURE.MeasurementError):
                 MEASURE.parse_metrics(broken)
+
+    def test_blank_lines_are_ignored_and_every_failure_names_its_line(self):
+        metrics = MEASURE.parse_metrics("\nstart_ns=1\n\nend_ns=2\nexit_code=3\n  \n")
+        self.assertEqual(metrics, {"seconds": 1e-9, "exit_code": 3, "cgroup": {}})
+        valid = "start_ns=1\nend_ns=2\nexit_code=0\n"
+        for text, message in (
+                (valid + "core_sched.force_idle_usec 0\n", "line 4: 'core_sched.force_idle_usec 0'"),
+                (valid + "exit_code=1\n", "Repeated wrapper metric on line 4: 'exit_code=1'"),
+                ("start_ns=1\nexit_code=0\n", "no end_ns"),
+                ("start_ns=1\nend_ns=2\nexit_code=\x1b[31m\n", r"exit_code is '\x1b[31m'"),
+                ("start_ns=5\nend_ns=1\nexit_code=0\n", "start_ns=5, end_ns=1"),
+                (valid + "x" * 500 + "\n", "'" + "x" * 120 + "...'")):
+            with self.subTest(text=text[:60]), self.assertRaises(MEASURE.MeasurementError) as raised:
+                MEASURE.parse_metrics(text)
+            self.assertIn(message, str(raised.exception))
+            self.assertLess(len(str(raised.exception)), 200)
+
+    @unittest.skipUnless(shutil.which("sh") and shutil.which("sed"), "needs a POSIX shell and sed")
+    def test_wrapper_keeps_tool_output_out_of_the_metrics_and_reads_dotted_cgroup_keys(self):
+        # cpu.stat as a kernel with CONFIG_SCHED_CORE prints it (Ubuntu, so the GitHub-hosted runners).
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory, "cgroup")
+            cgroup.mkdir()
+            (cgroup / "cpu.stat").write_text("usage_usec 1500\nuser_usec 1000\nsystem_usec 500\n"
+                                             "core_sched.force_idle_usec 0\nnr_periods 4\nnr_throttled 2\n"
+                                             "throttled_usec 700\nnr_bursts 0\nburst_usec 0\n", encoding="utf-8")
+            (cgroup / "memory.events").write_text("low 0\nhigh 0\nmax 1\noom 0\noom_kill 0\noom_group_kill 0\n",
+                                                  encoding="utf-8")
+            (cgroup / "memory.peak").write_text("268435456\n", encoding="utf-8")
+            (cgroup / "cpu.max").write_text("100000 100000\n", encoding="utf-8")
+            wrapper = MEASURE.WRAPPER.replace("cgroup=/sys/fs/cgroup\n", f"cgroup={cgroup.as_posix()}\n")
+            self.assertNotEqual(wrapper, MEASURE.WRAPPER)
+            metrics = Path(directory, "metrics").as_posix()
+            tool = "echo out=1; echo; echo 'warning: no equals sign' >&2; exit 3"
+            result = subprocess.run(["sh", "-c", wrapper, "sh", metrics, "sh", "-c", tool],
+                                    capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 3)
+            parsed = MEASURE.parse_metrics(Path(metrics).read_text(encoding="utf-8"))
+            self.assertEqual(parsed["exit_code"], 3)
+            self.assertEqual(parsed["cgroup"]["cpu.stat.core_sched.force_idle_usec"], 0)
+            self.assertEqual(parsed["cgroup"]["cpu.stat.nr_throttled"], 2)
+            self.assertEqual(parsed["cgroup"]["memory.events.max"], 1)
+            self.assertEqual(parsed["cgroup"]["memory.peak"], 268435456)
+            self.assertEqual(parsed["cgroup"]["cpu.max"], "100000 100000")
+            self.assertNotIn("out", parsed["cgroup"])
+            self.assertEqual(Path(metrics + ".stdout").read_text(encoding="utf-8"), "out=1\n\n")
+            self.assertEqual(Path(metrics + ".stderr").read_text(encoding="utf-8"), "warning: no equals sign\n")
 
     def test_docker_stats_rows_strip_terminal_codes_and_skip_missing_samples(self):
         row = {"CPUPerc": "99.87%", "MemUsage": "312.5MiB / 1GiB", "PIDs": "23"}

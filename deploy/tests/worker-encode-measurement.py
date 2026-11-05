@@ -71,8 +71,13 @@ CLIPS = {
 # The shell wrapper times the tool inside the container, so container start and stop are excluded, and
 # reads the container's own cgroup files before the container exits: the kernel's high-water marks
 # (memory.peak, memory.swap.peak, pids.peak), the applied limits, OOM events and CPU throttling.
+# Only the wrapper writes the metrics file: the tool's stdout and stderr go to their own files, and the
+# wrapper's own error output stays in the container log. A flat-keyed file's key is everything before the
+# first space: a kernel built with CONFIG_SCHED_CORE (Ubuntu's) adds the dotted key
+# core_sched.force_idle_usec to cpu.stat.
 WRAPPER = r"""metrics=$1
 shift
+cgroup=/sys/fs/cgroup
 start=$(date +%s%N)
 "$@" >"$metrics.stdout" 2>"$metrics.stderr"
 status=$?
@@ -82,14 +87,16 @@ end=$(date +%s%N)
   echo "end_ns=$end"
   echo "exit_code=$status"
   for name in memory.peak memory.max memory.swap.peak memory.swap.max cpu.max pids.peak; do
-    if [ -r "/sys/fs/cgroup/$name" ]; then echo "$name=$(cat "/sys/fs/cgroup/$name")"; fi
+    if [ -r "$cgroup/$name" ]; then echo "$name=$(cat "$cgroup/$name")"; fi
   done
   for name in memory.events cpu.stat; do
-    if [ -r "/sys/fs/cgroup/$name" ]; then sed "s/^\([a-z_]*\) /$name.\1=/" "/sys/fs/cgroup/$name"; fi
+    if [ -r "$cgroup/$name" ]; then sed "s/^\([^ =][^ =]*\) /$name.\1=/" "$cgroup/$name"; fi
   done
 } >"$metrics"
 exit "$status"
 """
+REQUIRED_METRICS = ("start_ns", "end_ns", "exit_code")
+METRIC_KEY = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.]*")
 
 
 class MeasurementError(RuntimeError):
@@ -241,23 +248,38 @@ def parse_stats_line(line):
             "memory_limit_bytes": size_bytes(limit), "pids": int(pids) if pids.isdigit() else None}
 
 
+def shown(text, limit=120):
+    """A metrics line or value for an error message: quoted, escaped and truncated."""
+    return repr(text if len(text) <= limit else text[:limit] + "...")
+
+
 def parse_metrics(text):
-    """The wrapper's key=value lines: timing, exit status and the container's cgroup counters."""
+    """The wrapper's key=value lines: timing, exit status and the container's cgroup counters.
+
+    Blank lines are ignored; any other line must be one well-formed, unrepeated key=value, and an error
+    names the offending line so a CI log shows what the kernel or wrapper printed.
+    """
     values = {}
-    for line in text.splitlines():
-        if "=" not in line:
-            raise MeasurementError("Malformed wrapper metrics")
-        key, value = line.split("=", 1)
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or not METRIC_KEY.fullmatch(key):
+            raise MeasurementError(f"Malformed wrapper metrics line {number}: {shown(line)}")
+        if key in values:
+            raise MeasurementError(f"Repeated wrapper metric on line {number}: {shown(line)}")
         values[key] = value
-    for key in ("start_ns", "end_ns", "exit_code"):
-        if not re.fullmatch(r"[0-9]+", values.get(key, "")):
-            raise MeasurementError("Incomplete wrapper metrics")
+    for key in REQUIRED_METRICS:
+        if key not in values:
+            raise MeasurementError(f"Incomplete wrapper metrics: no {key}")
+        if not re.fullmatch(r"[0-9]+", values[key]):
+            raise MeasurementError(f"Incomplete wrapper metrics: {key} is {shown(values[key])}")
     start, end = int(values["start_ns"]), int(values["end_ns"])
     if end < start:
-        raise MeasurementError("Wrapper clock went backwards")
+        raise MeasurementError(f"Wrapper clock went backwards: start_ns={start}, end_ns={end}")
     cgroup = {}
     for key, value in values.items():
-        if key in ("start_ns", "end_ns", "exit_code"):
+        if key in REQUIRED_METRICS:
             continue
         cgroup[key] = int(value) if re.fullmatch(r"[0-9]+", value) else value
     return {"seconds": (end - start) / 1e9, "exit_code": int(values["exit_code"]), "cgroup": cgroup}
@@ -554,7 +576,10 @@ class Measurement:
         metrics_file = run_dir / "metrics"
         if not metrics_file.is_file():
             raise MeasurementError(f"The {purpose} container wrote no metrics")
-        metrics = parse_metrics(metrics_file.read_text(encoding="utf-8"))
+        try:
+            metrics = parse_metrics(metrics_file.read_text(encoding="utf-8", errors="replace"))
+        except MeasurementError as error:
+            raise MeasurementError(f"The {purpose} container metrics: {error}") from None
         metrics["container_wall_seconds"] = wall
         stdout = (run_dir / "metrics.stdout").read_text(encoding="utf-8", errors="replace")
         stderr = (run_dir / "metrics.stderr").read_text(encoding="utf-8", errors="replace")[-2000:]
