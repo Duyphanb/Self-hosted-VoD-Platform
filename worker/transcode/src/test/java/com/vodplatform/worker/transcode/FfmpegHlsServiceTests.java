@@ -21,7 +21,7 @@ import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** Path rules, ordering and the outcome mapping; HlsTranscodeFfmpegTests runs the service with the D25 binary. */
+/** Path rules, ordering and the outcome mapping; FfmpegHlsServiceFfmpegTests runs the service with the D25 binary. */
 class FfmpegHlsServiceTests {
     private static final MediaMetadata METADATA = new MediaMetadata(Duration.ofSeconds(13), 640, 360, 0, "h264", 1000);
     @TempDir

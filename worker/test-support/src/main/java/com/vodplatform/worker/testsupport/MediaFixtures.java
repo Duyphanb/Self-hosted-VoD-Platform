@@ -9,9 +9,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Generates {@link MediaFixture} files on demand with FFmpeg's lavfi test sources, so tests never need
@@ -19,9 +21,16 @@ import java.util.Objects;
  */
 public final class MediaFixtures {
     public static final double SOURCE_SECONDS = 13;
+    /** The length of the Issue 5.5 encode-matrix sources, from {@code H264_AAC_1080P30_MP4} on. */
+    public static final double SHORT_SOURCE_SECONDS = 7;
     private static final String VIDEO = "testsrc2=size=640x360:rate=30:duration=13";
     private static final String PORTRAIT_VIDEO = "testsrc2=size=360x640:rate=30:duration=13";
     private static final String TONE = "sine=frequency=440:sample_rate=48000:duration=13";
+    private static final String SHORT_TONE = "sine=frequency=440:sample_rate=48000:duration=7";
+    private static final Set<MediaFixture> SHORT_SOURCES = EnumSet.of(MediaFixture.H264_AAC_1080P30_MP4,
+            MediaFixture.PORTRAIT_720X1280_MP4, MediaFixture.PORTRAIT_1080X1920_MP4, MediaFixture.ODD_641X359_WEBM,
+            MediaFixture.SD_853X480_MP4, MediaFixture.FPS_60_MP4, MediaFixture.FPS_120_MP4, MediaFixture.FPS_29_97_MP4,
+            MediaFixture.SCENE_CUTS_MP4);
     private static final List<String> FAST_H264 = List.of("-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p");
     private static final List<String> STEREO_AAC = List.of("-c:a", "aac", "-ac", "2");
     private final MediaTools tools;
@@ -50,6 +59,12 @@ public final class MediaFixtures {
         }
         created.put(fixture, target);
         return target;
+    }
+
+    /** The length a valid fixture was generated with: {@link #SOURCE_SECONDS} or {@link #SHORT_SOURCE_SECONDS}. */
+    public static double sourceSeconds(MediaFixture fixture) {
+        if (!fixture.valid()) throw new IllegalArgumentException(fixture + " is not a valid source");
+        return SHORT_SOURCES.contains(fixture) ? SHORT_SOURCE_SECONDS : SOURCE_SECONDS;
     }
 
     /** A path the playlist fixtures reference; it is never created, so opening it can only fail. */
@@ -85,6 +100,33 @@ public final class MediaFixtures {
             case ROTATED_45_MP4 -> rotate(target, 45);
             case ROTATE_TAG_90_MKV -> encode(target, List.of("-i", "file:" + path(MediaFixture.H264_AAC_MP4)),
                     List.of("-map", "0", "-c", "copy", "-metadata:s:v:0", "rotate=90"));
+            case H264_AAC_1080P30_MP4 -> encode(target, inputs(shortVideo("1920x1080", "30"), SHORT_TONE),
+                    List.of("-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"), STEREO_AAC,
+                    List.of("-movflags", "+faststart", "-shortest"));
+            case PORTRAIT_720X1280_MP4 -> encode(target, inputs(shortVideo("720x1280", "30"), SHORT_TONE), FAST_H264,
+                    STEREO_AAC, List.of("-shortest"));
+            case PORTRAIT_1080X1920_MP4 -> encode(target, inputs(shortVideo("1080x1920", "30"), SHORT_TONE), FAST_H264,
+                    STEREO_AAC, List.of("-shortest"));
+            // testsrc2 and crop round a 4:2:0 frame to even sizes, so the odd crop happens in 4:4:4.
+            case ODD_641X359_WEBM -> encode(target, inputs(shortVideo("642x360", "30") + ",format=yuv444p,crop=641:359:0:0",
+                    SHORT_TONE), List.of("-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-b:v", "400k",
+                    "-pix_fmt", "yuv420p"), List.of("-c:a", "libopus", "-ac", "2", "-shortest"));
+            case SD_853X480_MP4 -> encode(target, inputs(shortVideo("854x480", "30") + ",format=yuv444p,crop=853:480:0:0",
+                    SHORT_TONE), List.of("-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv444p"), STEREO_AAC,
+                    List.of("-shortest"));
+            case FPS_60_MP4 -> encode(target, inputs(shortVideo("640x360", "60"), SHORT_TONE), FAST_H264, STEREO_AAC,
+                    List.of("-shortest"));
+            case FPS_120_MP4 -> encode(target, inputs(shortVideo("640x360", "120"), SHORT_TONE), FAST_H264, STEREO_AAC,
+                    List.of("-shortest"));
+            case FPS_29_97_MP4 -> encode(target, inputs(shortVideo("640x360", "30000/1001"), SHORT_TONE), FAST_H264,
+                    STEREO_AAC, List.of("-shortest"));
+            // Four unrelated pictures cut together at 2.5, 4.0 and 5.7 s, none on a 6 s segment boundary.
+            case SCENE_CUTS_MP4 -> encode(target, List.of("-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=2.5",
+                    "-f", "lavfi", "-i", "smptebars=size=640x360:rate=30:duration=1.5",
+                    "-f", "lavfi", "-i", "mandelbrot=size=640x360:rate=30,trim=duration=1.7",
+                    "-f", "lavfi", "-i", "rgbtestsrc=size=640x360:rate=30:duration=1.3", "-f", "lavfi", "-i", SHORT_TONE),
+                    List.of("-filter_complex", "[0:v][1:v][2:v][3:v]concat=n=4:v=1:a=0,format=yuv420p[v]",
+                            "-map", "[v]", "-map", "4:a"), FAST_H264, STEREO_AAC, List.of("-shortest"));
             case EBML_UNDER_MP4_KEY -> Files.copy(path(MediaFixture.VP9_OPUS_WEBM), target);
             case TEXT_UNDER_MP4_KEY -> Files.writeString(target, "Plain text uploaded under a video key.\n",
                     StandardCharsets.UTF_8);
@@ -118,6 +160,10 @@ public final class MediaFixtures {
     private void rotate(Path target, int degrees) {
         encode(target, List.of("-display_rotation:v:0", String.valueOf(degrees), "-i", "file:" + path(MediaFixture.H264_AAC_MP4)),
                 List.of("-map", "0", "-c", "copy"));
+    }
+
+    private static String shortVideo(String size, String rate) {
+        return "testsrc2=size=" + size + ":rate=" + rate + ":duration=" + (int) SHORT_SOURCE_SECONDS;
     }
 
     private Path moovAtEndSource() throws IOException {

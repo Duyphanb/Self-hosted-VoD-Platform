@@ -4,6 +4,10 @@ import static com.vodplatform.worker.testsupport.MediaFixture.AUDIO_ONLY_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.COVER_ART_ONLY_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.EBML_UNDER_MP4_KEY;
 import static com.vodplatform.worker.testsupport.MediaFixture.FFCONCAT_UNDER_MKV_KEY;
+import static com.vodplatform.worker.testsupport.MediaFixture.FPS_120_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.FPS_29_97_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.FPS_60_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.H264_AAC_1080P30_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.H264_AAC_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.H264_HIGH10_FLAC_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.HEVC_MAIN10_HDR_AC3_MKV;
@@ -12,13 +16,18 @@ import static com.vodplatform.worker.testsupport.MediaFixture.MP2_AUDIO_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.MPEG2_VIDEO_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.NINE_STREAMS_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.NINE_STREAMS_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.ODD_641X359_WEBM;
 import static com.vodplatform.worker.testsupport.MediaFixture.OVER_CAP_2560X1440_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.PORTRAIT_1080X1920_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.PORTRAIT_720X1280_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.PORTRAIT_H264_AAC_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_180_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_45_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_90_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.ROTATED_MINUS_90_MKV;
 import static com.vodplatform.worker.testsupport.MediaFixture.ROTATE_TAG_90_MKV;
+import static com.vodplatform.worker.testsupport.MediaFixture.SCENE_CUTS_MP4;
+import static com.vodplatform.worker.testsupport.MediaFixture.SD_853X480_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.SILENT_H264_MP4;
 import static com.vodplatform.worker.testsupport.MediaFixture.TEXT_UNDER_MP4_KEY;
 import static com.vodplatform.worker.testsupport.MediaFixture.TRUNCATED_FASTSTART_MP4;
@@ -71,8 +80,26 @@ class GeneratedFixturesFfmpegTests {
             if (!fixture.valid()) continue;
             JsonNode format = probe(fixture).get("format");
             assertThat(Double.parseDouble(format.get("duration").asString())).as(fixture.name())
-                    .isCloseTo(MediaFixtures.SOURCE_SECONDS, within(0.1));
+                    .isCloseTo(MediaFixtures.sourceSeconds(fixture), within(0.1));
         }
+    }
+
+    @Test
+    void encodeMatrixSourcesHaveTheDeclaredGeometryAndFrameRate() {
+        assertStreams(H264_AAC_1080P30_MP4, "video h264 High yuv420p 1920x1080", "audio aac 2ch");
+        assertStreams(PORTRAIT_720X1280_MP4, "video h264 Constrained Baseline yuv420p 720x1280", "audio aac 2ch");
+        assertStreams(PORTRAIT_1080X1920_MP4, "video h264 Constrained Baseline yuv420p 1080x1920", "audio aac 2ch");
+        assertStreams(ODD_641X359_WEBM, "video vp9 Profile 0 yuv420p 641x359", "audio opus 2ch");
+        assertStreams(SD_853X480_MP4, "video h264 High 4:4:4 Predictive yuv444p 853x480", "audio aac 2ch");
+        assertThat(frameRate(H264_AAC_1080P30_MP4)).isEqualTo("30/1");
+        assertThat(frameRate(FPS_60_MP4)).isEqualTo("60/1");
+        assertThat(frameRate(FPS_120_MP4)).isEqualTo("120/1");
+        assertThat(frameRate(FPS_29_97_MP4)).isEqualTo("30000/1001");
+        assertStreams(SCENE_CUTS_MP4, "video h264 Constrained Baseline yuv420p 640x360", "audio aac 2ch");
+        for (MediaFixture fixture : List.of(H264_AAC_1080P30_MP4, ODD_641X359_WEBM, FPS_120_MP4, SCENE_CUTS_MP4)) {
+            assertThat(MediaFixtures.sourceSeconds(fixture)).isEqualTo(MediaFixtures.SHORT_SOURCE_SECONDS);
+        }
+        assertThat(MediaFixtures.sourceSeconds(H264_AAC_MP4)).isEqualTo(MediaFixtures.SOURCE_SECONDS);
     }
 
     @Test
@@ -160,6 +187,10 @@ class GeneratedFixturesFfmpegTests {
 
     private static JsonNode probe(MediaFixture fixture) {
         return tools.probeJson(fixtures.path(fixture), fixture.demuxer());
+    }
+
+    private static String frameRate(MediaFixture fixture) {
+        return probe(fixture).get("streams").get(0).get("avg_frame_rate").asString();
     }
 
     private static int displayMatrixRotation(MediaFixture fixture) {
