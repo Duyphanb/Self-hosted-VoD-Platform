@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -184,7 +185,7 @@ class ParsingTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("sh") and shutil.which("sed"), "needs a POSIX shell and sed")
     def test_wrapper_keeps_tool_output_out_of_the_metrics_and_reads_dotted_cgroup_keys(self):
         # cpu.stat as a kernel with CONFIG_SCHED_CORE prints it (Ubuntu, so the GitHub-hosted runners).
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(prefix="vod measure ") as directory:  # a space, as a real path may have
             cgroup = Path(directory, "cgroup")
             cgroup.mkdir()
             (cgroup / "cpu.stat").write_text("usage_usec 1500\nuser_usec 1000\nsystem_usec 500\n"
@@ -194,7 +195,7 @@ class ParsingTests(unittest.TestCase):
                                                   encoding="utf-8")
             (cgroup / "memory.peak").write_text("268435456\n", encoding="utf-8")
             (cgroup / "cpu.max").write_text("100000 100000\n", encoding="utf-8")
-            wrapper = MEASURE.WRAPPER.replace("cgroup=/sys/fs/cgroup\n", f"cgroup={cgroup.as_posix()}\n")
+            wrapper = MEASURE.WRAPPER.replace("cgroup=/sys/fs/cgroup\n", f"cgroup={shlex.quote(cgroup.as_posix())}\n")
             self.assertNotEqual(wrapper, MEASURE.WRAPPER)
             metrics = Path(directory, "metrics").as_posix()
             tool = "echo out=1; echo; echo 'warning: no equals sign' >&2; exit 3"
