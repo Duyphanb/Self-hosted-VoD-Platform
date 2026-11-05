@@ -115,7 +115,7 @@ class EncodingPublisherBrokerTests {
             assertThat(publisher.publish(message, Optional.empty())).isInstanceOf(PublishOutcome.TimedOut.class);
             assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(6));
         } finally {
-            ctl("set_vm_memory_high_watermark", "0.4");
+            ctl("set_vm_memory_high_watermark", "0.6"); // RabbitMQ 4.x default (#74)
         }
         await(() -> publisher.publish(message, Optional.empty()) instanceof PublishOutcome.Confirmed);
         admin.purgeQueue(queue);
