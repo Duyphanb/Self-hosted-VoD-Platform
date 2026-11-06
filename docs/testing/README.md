@@ -16,6 +16,7 @@ Use this folder for verification evidence and hardening guides.
 - [Sprint 2 Auth closeout](SPRINT-2-CLOSEOUT.md)
 - [Dependency security](DEPENDENCY-SECURITY.md)
 - [Upload transport/storage rehearsal](UPLOAD-REHEARSAL.md)
+- [Worker encode measurement (#124)](WORKER-ENCODE-MEASUREMENT.md) (template until the arm64 run is recorded)
 
 ## Upload edge checks
 
@@ -68,6 +69,16 @@ What the tests pin for FFmpeg 7.1.5 (the ADR-010 D25 binary):
   the reference retags BT.709 with the `setparams` filter. Issue 5.5 needs this.
 - `-max_streams 8` makes FFprobe fail on a nine-track MP4 but drop the ninth Matroska track and exit 0.
   Issue 5.4 must not rely on the probed stream count alone.
+
+## arm64 worker job and encode measurement (#124)
+
+The non-required `arm64 worker` workflow builds the images natively on `ubuntu-24.04-arm`. It runs the
+FFmpeg-tagged tests above, `jvm-limits-smoke.py` under the production overlay, and the Silo storage smoke.
+It then runs `worker-encode-measurement.py`, which measures FFprobe and the D27 reference encode in the worker
+image at the production worker limits. [WORKER-ENCODE-MEASUREMENT.md](WORKER-ENCODE-MEASUREMENT.md) describes
+both scripts and holds the record the arm64 run fills in. `python -m unittest discover -s deploy/tests -p 'test_*.py'`
+covers their parsing, fits and safety checks without Docker. The measurement keeps its copy of the reference
+command equal to `ReferenceHlsEncodeFfmpegTests.referenceArguments`.
 
 ## Purpose
 

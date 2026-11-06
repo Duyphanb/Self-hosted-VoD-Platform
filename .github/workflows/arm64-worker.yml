@@ -1,0 +1,145 @@
+name: arm64 worker
+
+# #124: production is Ampere A1 (arm64), so the images are built, the FFmpeg-tagged tests run and the
+# reference encode is measured natively on an arm64 runner, never under emulation. This check is not
+# required by branch protection until it has proven stable. Runner timings are not an NFR-002 baseline
+# and not A1 VPS evidence (docs/testing/WORKER-ENCODE-MEASUREMENT.md).
+"on":
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      clip_seconds:
+        description: Clip durations in seconds, at least two (the fit gives the fixed overhead)
+        required: false
+        default: "2 20 60"
+      threads:
+        description: WORKER_FFMPEG_THREADS values to measure
+        required: false
+        default: "1 2"
+      long_clip_seconds:
+        description: Opt-in high-entropy clip length in seconds, up to the 10800 s cap (0 = none; a cap-length encode can outlast the 6-hour job limit)
+        required: false
+        default: "0"
+      long_clip_threads:
+        description: The one WORKER_FFMPEG_THREADS value the long clip is encoded with
+        required: false
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('arm64-worker-pr-{0}', github.event.pull_request.number) || format('arm64-worker-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  arm64-worker:
+    name: arm64 worker build, media tests and encode measurement (non-required)
+    runs-on: ubuntu-24.04-arm
+    # A long dispatched clip gets the hosted-runner maximum; everything else stays bounded.
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.long_clip_seconds != '0' && inputs.long_clip_seconds != '' && 360 || 120 }}
+    env:
+      COMPOSE_PROJECT_NAME: vod-auth-audit-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require a native arm64 runner and Docker engine
+        id: native
+        run: |
+          test "$(uname -m)" = aarch64
+          test "$(docker info --format '{{.Architecture}}')" = aarch64
+          nproc
+          free -m
+          df -h / "$RUNNER_TEMP"
+
+      # The FFmpeg-tagged tests mount ~/.m2; the cache keeps them from downloading every dependency.
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          verify-signature: true
+          java-version: "21"
+          cache: maven
+
+      - name: Build the backend, worker and frontend images natively
+        id: images
+        run: |
+          docker build -t vod-backend-arm64 ./backend
+          docker build -t vod-worker-arm64 ./worker
+          docker build -t vod-frontend-arm64 ./frontend
+          docker image inspect --format '{{.RepoTags}} {{.Os}}/{{.Architecture}}' vod-backend-arm64 vod-worker-arm64 vod-frontend-arm64
+
+      - name: Record the worker media packages (ADR-010 D25)
+        run: |
+          docker run --rm vod-worker-arm64 sh -c 'ffmpeg -version | head -n 1 && ffprobe -version | head -n 1'
+          docker run --rm vod-worker-arm64 dpkg-query -W ffmpeg openjdk-21-jre-headless libx264-164
+
+      # The checks below are independent evidence: each runs once the images exist, even if an earlier one
+      # failed, and the job still fails if any of them does.
+      - name: Run FFmpeg-tagged tests in the worker image
+        if: ${{ !cancelled() && steps.images.outcome == 'success' }}
+        env:
+          WORKER_FFMPEG_TEST_IMAGE: vod-worker-ffmpeg-test-arm64
+        run: sh deploy/tests/worker-ffmpeg-tests.sh
+
+      # The smoke starts the images built above under the names Compose gives its project's services, so it
+      # does not rebuild them from a worker context that now holds the media tests' target directories.
+      - name: Verify the JVM options under the production overlay
+        if: ${{ !cancelled() && steps.images.outcome == 'success' }}
+        run: |
+          project="${COMPOSE_PROJECT_NAME}-jvm"
+          docker tag vod-backend-arm64 "$project-backend"
+          docker tag vod-worker-arm64 "$project-worker"
+          python3 deploy/tests/jvm-limits-smoke.py --project "$project" --no-build \
+            --output-dir "$RUNNER_TEMP/arm64-evidence/jvm-limits"
+
+      # ADR-004 executed the pinned Silo image only on amd64; this runs the same storage contract on arm64.
+      # It needs no application image, so it runs even if a build failed, but only on a verified arm64 host.
+      - name: Verify the pinned Silo image on arm64
+        if: ${{ !cancelled() && steps.native.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          project="${COMPOSE_PROJECT_NAME}-storage"
+          cleanup() { docker compose -p "$project" --env-file /dev/null -f deploy/docker-compose.yml down --volumes --remove-orphans; }
+          trap cleanup EXIT
+          MINIO_ACCESS_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          MINIO_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          MINIO_BACKEND_ACCESS_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          MINIO_BACKEND_SECRET_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          MINIO_WORKER_ACCESS_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          MINIO_WORKER_SECRET_KEY="$(python3 -c 'import secrets; print("audit_" + secrets.token_hex(12))')"
+          export MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_BACKEND_ACCESS_KEY MINIO_BACKEND_SECRET_KEY MINIO_WORKER_ACCESS_KEY MINIO_WORKER_SECRET_KEY
+          python3 deploy/tests/storage-runtime-smoke.py --project "$project"
+
+      - name: Measure FFprobe and the reference encode (runner evidence, not A1 VPS evidence)
+        if: ${{ !cancelled() && steps.images.outcome == 'success' }}
+        env:
+          CLIP_SECONDS: ${{ inputs.clip_seconds || '2 20 60' }}
+          THREADS: ${{ inputs.threads || '1 2' }}
+          LONG_CLIP_SECONDS: ${{ inputs.long_clip_seconds || '0' }}
+          LONG_CLIP_THREADS: ${{ inputs.long_clip_threads || '1' }}
+        run: >-
+          python3 deploy/tests/worker-encode-measurement.py
+          --image vod-worker-arm64
+          --output-dir "$RUNNER_TEMP/arm64-evidence/encode"
+          --clip-seconds "$CLIP_SECONDS"
+          --threads "$THREADS"
+          --long-clip-seconds "$LONG_CLIP_SECONDS"
+          --long-clip-threads "$LONG_CLIP_THREADS"
+
+      - name: Preserve the arm64 evidence (runner evidence, not A1 VPS evidence)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: arm64-worker-measurement-not-vps-evidence
+          path: ${{ runner.temp }}/arm64-evidence/
+          if-no-files-found: warn
+          retention-days: 30
