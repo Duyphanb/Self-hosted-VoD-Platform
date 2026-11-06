@@ -56,6 +56,19 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @Tag(MediaTools.FFMPEG_TAG)
 class FfmpegHlsServiceFfmpegTests {
+    @Test
+    void rejectsAnInputThroughALinkOutsideTheJob(@TempDir Path temp) throws IOException {
+        Path job = Files.createDirectory(temp.resolve("job"));
+        Path outside = Files.createDirectory(temp.resolve("outside"));
+        Files.writeString(outside.resolve("raw.mp4"), "not media");
+        Path linked = Files.createSymbolicLink(job.resolve("linked"), outside);
+        MediaMetadata metadata = new MediaMetadata(Duration.ofSeconds(13), 640, 360, 0, "h264", 1000);
+
+        assertThatThrownBy(() -> service(policy()).transcode(job, linked.resolve("raw.mp4"), "mp4", metadata))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(job.resolve("hls")).doesNotExist();
+    }
+
     private static final int SEGMENT_SECONDS = 6;
     private static final double SEGMENT_TOLERANCE_SECONDS = 0.1;
     private static final JsonMapper JSON = JsonMapper.builder().build();

@@ -116,5 +116,13 @@ public final class FfmpegHlsService {
                 || input.equals(jobDirectory) || !Files.isRegularFile(input, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalArgumentException("FFmpeg input must be a regular file inside the job directory");
         }
+        try {
+            Path expectedInput = jobDirectory.toRealPath().resolve(jobDirectory.relativize(input));
+            if (!input.toRealPath().equals(expectedInput)) {
+                throw new IllegalArgumentException("FFmpeg input path must not traverse a link inside the job directory");
+            }
+        } catch (IOException e) {
+            throw new IllegalArgumentException("FFmpeg input path could not be resolved", e);
+        }
     }
 }
