@@ -272,6 +272,16 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --no-deps --fo
 
 Keep that file outside Git and do not combine it with the production overlay. Production explicitly keeps `MINIO_BROWSER: "off"`; the production configuration regression check rejects console/port/image drift. Omitting `--console-address` alone is insufficient to disable the console.
 
+## RabbitMQ Upgrade (#74)
+
+The frozen broker baseline is RabbitMQ 4.4 classic queues, pinned to a multi-arch index digest with a fixed `hostname: rabbitmq`. No consumer acknowledgement timeout is configured. The existing local 3.13 broker volume cannot be treated as an automatic supported in-place upgrade: a new hostname selects a new node directory, and the 4.4 classic queue store format cannot be downgraded.
+
+**Before changing any broker with data:** quiesce uploads, backend relay and the one worker; record `rabbitmqctl list_queues name messages_ready messages_unacknowledged consumers` and alarms; enable all stable feature flags on the current version; stop the broker; then make an independently restorable backup of the `rabbitmq_data` volume. That backup contains password hashes and message bodies: keep it private and outside the repository. An in-place multi-series upgrade requires a supported hop sequence and a separate owner-approved rehearsal (https://www.rabbitmq.com/docs/upgrade). Do not attempt a direct 3.13 -> 4.4 jump on an existing data directory.
+
+For **disposable local 3.13 data**, the approved default is a fresh 4.4 node. Record any QUEUED jobs and reconcile them by re-uploading test media or, with a separately approved, quiesced exact-job review, following the guarded `published_at` recovery procedure below. The old node directory can remain inert; removing a volume or its contents is destructive and requires explicit owner authorization. Never run `down -v` as an upgrade shortcut.
+
+For **future 4.4 patch and series upgrades**, verify official support, digests, SBOM/provenance and feature flags, back up the volume with the old broker stopped, then start the supported target image on the same `hostname: rabbitmq`; wait for `rabbitmqctl await_startup`, enable stable feature flags and check queue counts, message persistence, health and the broker/Erlang versions before restoring the relay and worker. Roll back only by restoring the previous volume backup together with its previous image digest: RabbitMQ does not support in-place downgrades, and 4.4 `.sqs` store data is not compatible with 4.3 or earlier. Follow the [broker image update procedure](../architecture/INFRASTRUCTURE.md#broker-runtime-image).
+
 ## Encoding Recovery
 
 This is the approved procedure for the future Sprint 4/5 pipeline ([ADR-010](../architecture/adr/ADR-010.md)), not evidence that it exists at `24873be`. Exercise it against disposable local fixtures in Issues 4.5/5.7 before operational use. Commands below are operator procedures; this documentation task does not execute them. Confirm the project/environment/volume identities and obtain explicit authorization before mutating shared or production state. Preserve DB/storage backups for data-repair operations.
@@ -299,7 +309,7 @@ WHERE j.id = :'job_id'::uuid AND j.video_asset_id = a.id
 COMMIT;
 ```
 
-Restore backend/relay and the one worker, then edge only after health/status/queue checks. Relay republishes the same job ID; conditional claim makes duplicates safe. Recovery from an incorrect repair is a reviewed DB backup restore, never a blanket status update. #74 owns broker consumer-timeout sizing and DB-outage handling; a DB outage at claim/finish retries in-process with capped backoff and must not become FAILED or DLQ. On 4.3+ classic queues that timeout is not evaluated; on 3.13 verify the #74 environment-rendered setting. Do not change immutable queue args on a live queue as a shortcut.
+Restore backend/relay and the one worker, then edge only after health/status/queue checks. Relay republishes the same job ID; conditional claim makes duplicates safe. Recovery from an incorrect repair is a reviewed DB backup restore, never a blanket status update. On the #74 baseline (RabbitMQ 4.4 classic queues) no consumer timeout is evaluated; a DB outage at claim/finish retries in-process with capped backoff and must not become FAILED or DLQ.
 
 ## Media Purge and Orphan Audit
 

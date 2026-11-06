@@ -145,7 +145,7 @@ DB unavailability at claim or finish holds delivery and retries in-process with 
 
 An ambiguous claim COMMIT that readback identifies as this delivery's PROCESSING pair must proceed through probe/encode to READY; the single non-overlapping worker invariant supplies ownership without a claim-token column. Never skip it just because a repeated QUEUED update returned zero rows.
 
-Read back uncertain finish commit outcomes before cleanup: if this attempt already reached READY with its expected HLS keys, acknowledge success and retain those objects. DB outage alone does not stop the listener/worker or trigger startup orphan recovery; consumer-timeout sizing remains #74.
+Read back uncertain finish commit outcomes before cleanup: if this attempt already reached READY with its expected HLS keys, acknowledge success and retain those objects. DB outage alone does not stop the listener/worker or trigger startup orphan recovery; the #74 4.4 classic baseline evaluates no consumer timeout.
 
 ## Admin Retry Failed Encoding
 
