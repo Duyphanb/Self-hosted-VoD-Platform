@@ -76,15 +76,16 @@ class EncodingQueueBrokerTests {
             } finally {
                 connection.close();
             }
-            // AMQP rejects mismatched declarations without changing the existing queue.
+            // AMQP rejects mismatched declarations without changing the existing queue. A durable
+            // redeclaration avoids the transient non-exclusive queues RabbitMQ 4.3+ deprecates (#74).
             var mismatchConnection = connectionFactory.getRabbitConnectionFactory().newConnection();
             try (mismatchConnection) {
                 Channel mismatchChannel = mismatchConnection.createChannel();
                 String sourceName = queue;
                 Throwable mismatch = catchThrowable(() -> mismatchChannel.queueDeclare(
-                        sourceName, false, false, false,
+                        sourceName, true, false, false,
                         Map.of("x-dead-letter-exchange", sourceName + ".dlx",
-                                "x-dead-letter-routing-key", sourceName + ".dlq")));
+                                "x-dead-letter-routing-key", sourceName + ".mismatch")));
                 assertThat(mismatch).isNotNull();
                 ShutdownSignalException shutdown = null;
                 for (Throwable cause = mismatch; cause != null; cause = cause.getCause()) {
@@ -119,7 +120,11 @@ class EncodingQueueBrokerTests {
             assertThat(row.get("exclusive").booleanValue()).isFalse();
             assertThat(row.get("consumers").intValue()).isZero();
             assertThat(row.get("type").asString()).isEqualTo("classic");
-            assertThat(arguments(row.get("arguments"))).isEqualTo(name.equals(queue)
+            Map<String, String> recorded = arguments(row.get("arguments"));
+            // RabbitMQ 4.3+ records the default type on a fresh declaration (#74); upgraded queues keep none.
+            String recordedType = recorded.remove("x-queue-type");
+            if (recordedType != null) assertThat(recordedType).isEqualTo("classic");
+            assertThat(recorded).isEqualTo(name.equals(queue)
                     ? Map.of("x-dead-letter-exchange", queue + ".dlx", "x-dead-letter-routing-key", queue + ".dlq")
                     : Map.of());
         }

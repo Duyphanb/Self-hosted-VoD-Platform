@@ -18,7 +18,7 @@ Nginx is the only public edge in both local Compose and VPS runtime.
 | `worker` | Java 21 Spring Boot with FFmpeg/FFprobe from Debian trixie packages ([ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28)) | Video processing | Internal only |
 | `postgres` | PostgreSQL | Source-of-truth database | Internal only |
 | `redis` | Redis | Cache and playback-progress buffer | Internal only |
-| `rabbitmq` | RabbitMQ | Encoding job queue | Internal only |
+| `rabbitmq` | RabbitMQ 4.4 (Docker official alpine image, digest pinned; see Broker runtime image) | Encoding job queue | Internal only |
 | `minio` | PGSTY Silo (MinIO-compatible, digest pinned) | Private object storage | Internal only; console disabled |
 
 ## Public Routing
@@ -169,7 +169,18 @@ These are the approved settings to wire into `.env.example`, application configu
 
 Media settings have no application defaults: the worker fails startup when one is missing or invalid. The first PR that makes a setting required writes its value into `.env.example` and both Compose files, because CI starts the stack with `--env-file /dev/null`; tests inject explicit test values. The timeouts come from #124, which runs the Issue 5.5 command line in the worker image on arm64 at the product caps with a high-entropy source (ADR-010 D28). Document bounded storage/JDBC waits per operation in Issue 5.7. DB outage at claim/finish holds delivery and retries in-process with capped backoff delays, never FAILED or DLQ; it has no retry-exhaustion shutdown path. Worker `stop_grace_period` is 30s. Before the listener starts: sweep owned temp dirs, conditionally fail orphaned PROCESSING job/asset pairs, delete their attempt prefixes, then start consumption. No backend PROCESSING reconciler or QUEUED age timeout. Recovery assumes one backend relay and one non-overlapping worker.
 
-#74 decides the RabbitMQ version and consumer-timeout sizing before Sprint 5, including how it preserves D20 during DB-outage retries. Use classic durable queues with DLX/DLQ (identical backend/worker declarations), AUTO acknowledgement after terminal persistence, `default-requeue-rejected=false` and prefetch 1. On 4.3+ classic queues no consumer-timeout setting is needed. If staying on 3.13, render `consumer_timeout` from an environment setting into a mounted `conf.d` file in base/prod Compose above the media-processing deadline from #103/#124, with final sizing/DB-outage handling owned by #74, not an application DB-retry budget. Do not assume config environment interpolation or use immutable `x-consumer-timeout`; verify rendering, a long encode with a second queued job and DB-outage handling. This change does not upgrade the broker (#74).
+#74 selected the RabbitMQ 4.4 series. Use classic durable queues with DLX/DLQ (identical backend/worker declarations), AUTO acknowledgement after terminal persistence, `default-requeue-rejected=false` and prefetch 1. RabbitMQ 4.3+ classic queues evaluate no consumer timeout, so no consumer-timeout setting, policy or queue argument exists, and a DB outage at claim/finish holds the delivery for as long as it lasts (D20). Issue 5.1 verifies a long encode with a second queued job and DB-outage handling on a test broker with a 60000 ms node-wide `consumer_timeout`.
+
+### Broker runtime image
+
+#74 selects the RabbitMQ 4.4 series, community-supported until 2027-07-31 (https://www.rabbitmq.com/release-information). `deploy/docker-compose.yml` pins the Docker official `rabbitmq:<4.4.x>-alpine` multi-arch index digest (amd64 and arm64) with a version comment and sets `hostname: rabbitmq`: the broker stores data under its node name, which defaults to the hostname, so a recreated container without a fixed hostname starts an empty node on the same volume. The image carries SBOM and provenance attestations; container OS scanning stays with #54.
+
+Update procedure:
+1. Watch rabbitmq-server GitHub releases and security advisories, and the release-information page.
+2. On a 4.4 patch, a relevant advisory or an official image rebuild (checked weekly), bump the tag and index digest.
+3. Run the broker smoke and the full-stack CI; record `rabbitmqctl version` and the Erlang version in the PR.
+4. Before the series leaves community support, upgrade along a supported path of the upgrade guide, enabling all stable feature flags before and after.
+5. Back up the `rabbitmq_data` volume before any upgrade. RabbitMQ does not support downgrades, and 4.4 classic-queue store files cannot be read by 4.3 or earlier; roll back by restoring the backup with the previous digest.
 
 ### Worker runtime image
 
