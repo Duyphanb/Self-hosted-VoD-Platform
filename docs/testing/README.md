@@ -101,7 +101,7 @@ generates each `MediaFixture` with FFmpeg's lavfi sources into the test's tempor
 | Fixtures | Stands for |
 | --- | --- |
 | `h264-aac.mp4` (High), `vp9-opus.webm`, `h264-high10-flac.mkv`, `portrait-h264-aac.mp4`, `silent-h264.mp4`, `hevc-main10-hdr-ac3.mkv` | The valid corpus: 13 s, 640x360 (360x640 portrait), PQ/BT.2020 tags on the HDR source |
-| `rotated-90.mp4`, `rotated-minus-90.mkv`, `rotated-180.mp4`, `rotate-tag-90.mkv` | Valid rotated copies of `h264-aac.mp4` (#194): a Display Matrix of 90, -90 or 180 degrees, or only the legacy `ROTATE` tag that the Matroska muxer writes |
+| `rotated-90.mp4`, `rotated-minus-90.mkv`, `rotated-180.mp4`, `rotate-tag-90.mkv` | Valid rotated copies of `h264-aac.mp4` (#194): a Display Matrix of 90, -90 or 180 degrees (counterclockwise), or only the legacy `ROTATE` tag that the Matroska muxer writes (clockwise, so `90` probes as 270; #195) |
 | `ebml-under-mp4-key.mp4`, `text-under-mp4-key.mp4`, `hls-playlist-under-mp4-key.mp4`, `ffconcat-under-mkv-key.mkv` | Content that does not match its key; the forced demuxer refuses it |
 | `truncated-moov-at-end.mp4`, `truncated-faststart.mp4` | Truncation: the first never probes, the second probes but encodes short |
 | `audio-only.mp4`, `cover-art-only.mp4`, `video-with-cover-art.mp4`, `mpeg2-video.mkv`, `mp2-audio.mkv`, `rotated-45.mp4`, `nine-streams.mkv`/`.mp4`, `over-cap-2560x1440.mp4` | Well-formed files ADR-010 D26 rejects (no video, PNG cover art, a video or audio decoder outside the allowlist, a rotation that is not a right angle, caps) |

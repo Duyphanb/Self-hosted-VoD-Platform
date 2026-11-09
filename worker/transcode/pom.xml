@@ -12,4 +12,33 @@
 
     <artifactId>transcode</artifactId>
     <name>vod-worker-transcode</name>
+    <description>FFmpeg HLS transcoding service and the ADR-010 D27 output validator (Issue 5.5).</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>probe</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

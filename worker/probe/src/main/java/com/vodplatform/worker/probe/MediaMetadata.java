@@ -14,11 +14,13 @@ import java.util.Objects;
  * @param width    the display width: the selected stream's width, swapped with its height for 90 or 270 degrees
  * @param height   the display height
  * @param rotation the display rotation in whole degrees, normalized to 0, 90, 180 or 270
+ * @param rotationFromLegacyTag whether the rotation came from the legacy rotate tag in the absence of a Display Matrix
  * @param codec    the selected video stream's FFprobe codec name, for example {@code h264}
  * @param bitrate  the file's overall bitrate in bit/s from the FFprobe format, or null when FFprobe reports
  *                 none or a value outside the int range
  */
-public record MediaMetadata(Duration duration, int width, int height, int rotation, String codec, Integer bitrate) {
+public record MediaMetadata(Duration duration, int width, int height, int rotation, boolean rotationFromLegacyTag,
+                            String codec, Integer bitrate) {
     public MediaMetadata {
         Objects.requireNonNull(duration, "duration");
         if (duration.isNegative() || duration.isZero() || duration.getSeconds() >= Integer.MAX_VALUE) {
