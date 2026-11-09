@@ -144,7 +144,7 @@ class ReferenceHlsEncodeFfmpegTests {
         return tools.ffmpeg(referenceArguments(input, demuxer, hls, box[0], box[1]));
     }
 
-    /** 1280x720 in display orientation (720x1280 for portrait); the fixtures carry no rotation. */
+    /** 1280x720 in display orientation (720x1280 for portrait); the six fixtures encoded here carry no rotation. */
     private static int[] box(JsonNode video) {
         return video.get("width").asInt() >= video.get("height").asInt() ? new int[] {1280, 720} : new int[] {720, 1280};
     }

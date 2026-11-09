@@ -14,6 +14,12 @@ public enum MediaFixture {
     PORTRAIT_H264_AAC_MP4("portrait-h264-aac.mp4", Kind.VALID),
     SILENT_H264_MP4("silent-h264.mp4", Kind.VALID),
     HEVC_MAIN10_HDR_AC3_MKV("hevc-main10-hdr-ac3.mkv", Kind.VALID),
+    // Rotation (ADR-010 D26), copied from H264_AAC_MP4 with a Display Matrix, or only the legacy rotate tag that
+    // the Matroska muxer writes as ROTATE. FFprobe reports the matrix in [-180, 180]: 180 degrees as -180.
+    ROTATED_90_MP4("rotated-90.mp4", Kind.VALID),
+    ROTATED_MINUS_90_MKV("rotated-minus-90.mkv", Kind.VALID),
+    ROTATED_180_MP4("rotated-180.mp4", Kind.VALID),
+    ROTATE_TAG_90_MKV("rotate-tag-90.mkv", Kind.VALID),
 
     // Content that does not match its key: the forced demuxer must refuse it (#103, SECURITY.md).
     EBML_UNDER_MP4_KEY("ebml-under-mp4-key.mp4", Kind.INVALID),
@@ -26,7 +32,11 @@ public enum MediaFixture {
     // Well-formed files the worker must still reject (ADR-010 D26).
     AUDIO_ONLY_MP4("audio-only.mp4", Kind.INVALID),
     COVER_ART_ONLY_MP4("cover-art-only.mp4", Kind.INVALID),
+    // A real video with PNG cover art: probing opens the png decoder, which the D26 allowlist does not list.
+    VIDEO_WITH_COVER_ART_MP4("video-with-cover-art.mp4", Kind.INVALID),
     MPEG2_VIDEO_MKV("mpeg2-video.mkv", Kind.INVALID),
+    MP2_AUDIO_MKV("mp2-audio.mkv", Kind.INVALID),
+    ROTATED_45_MP4("rotated-45.mp4", Kind.INVALID),
     NINE_STREAMS_MKV("nine-streams.mkv", Kind.INVALID),
     NINE_STREAMS_MP4("nine-streams.mp4", Kind.INVALID),
     OVER_CAP_2560X1440_MP4("over-cap-2560x1440.mp4", Kind.INVALID);
