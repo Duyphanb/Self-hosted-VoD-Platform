@@ -176,6 +176,8 @@ Media settings have no application defaults: the worker fails startup when one i
 
 #74 selects the RabbitMQ 4.4 series, community-supported until 2027-07-31 (https://www.rabbitmq.com/release-information). `deploy/docker-compose.yml` pins the Docker official `rabbitmq:<4.4.x>-alpine` multi-arch index digest (amd64 and arm64) with a version comment and sets `hostname: rabbitmq`: the broker stores data under its node name, which defaults to the hostname, so a recreated container without a fixed hostname starts an empty node on the same volume. The image carries SBOM and provenance attestations; container OS scanning stays with #54.
 
+The production overlay mounts `deploy/rabbitmq/90-vod-prod.conf`, which sets `total_memory_available_override_value` to the broker's 512M memory limit, so the memory alarm is based on the container limit instead of the host RAM (owner decision, 2026-11-10). Change the two together.
+
 Update procedure:
 1. Watch rabbitmq-server GitHub releases and security advisories, and the release-information page.
 2. On a 4.4 patch, a relevant advisory or an official image rebuild (checked weekly), bump the tag and index digest.
