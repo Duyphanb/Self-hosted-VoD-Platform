@@ -76,9 +76,15 @@ def new_environment(port):
     env = {key: value for key, value in os.environ.items()
            if key in ("PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TEMP", "TMP",
                       "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "GH_TOKEN", "GITHUB_TOKEN")}
-    for prefix in ("POSTGRES", "RABBITMQ"):
-        env[prefix + "_USER" if prefix == "POSTGRES" else prefix + "_USERNAME"] = "audit_" + secrets.token_hex(8)
+    # #106: bootstrap identities plus independent application identities. PostgreSQL role
+    # names must be lowercase identifiers, which audit_<hex> satisfies.
+    for prefix in ("POSTGRES", "POSTGRES_OWNER", "POSTGRES_BACKEND", "POSTGRES_WORKER"):
+        env[prefix + "_USER"] = "audit_" + secrets.token_hex(8)
         env[prefix + "_PASSWORD"] = secrets.token_urlsafe(32)
+    for prefix in ("RABBITMQ", "RABBITMQ_BACKEND", "RABBITMQ_WORKER"):
+        env[prefix + "_USERNAME"] = "audit_" + secrets.token_hex(8)
+        env[prefix + "_PASSWORD"] = secrets.token_urlsafe(32)
+    env["REDIS_PASSWORD"] = secrets.token_urlsafe(32)
     for prefix in ("MINIO", "MINIO_BACKEND", "MINIO_WORKER"):
         env[prefix + "_ACCESS_KEY"] = "audit_" + secrets.token_hex(12)
         env[prefix + "_SECRET_KEY"] = secrets.token_urlsafe(48)

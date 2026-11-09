@@ -123,7 +123,7 @@ Sprint 5 must enforce the following before passing uploaded bytes to FFprobe/FFm
 - Use exactly one worker replica with concurrency/prefetch 1, no overlapping recreation, and a 30s stop grace. Startup conditionally fails orphaned PROCESSING pairs as `WORKER_INTERRUPTED` before consumption. Conditional DB claim/finish bounds a crashing input; DB outages hold delivery with capped in-process backoff, never a poison-message requeue loop.
 - Issue 5.8 requires a non-root user, read-only root, a disk-backed writable volume (not tmpfs) for `WORKER_TEMP_DIR`, guarded by the raw-size free-disk check, `cap_drop: ALL`, `no-new-privileges` and a validated `pids_limit`. It adds/documents that volume in INFRASTRUCTURE. The FFmpeg source is [ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28): Debian trixie packages covered by Debian security advisories, rebuilt on each advisory. Issue 5.8 records the package versions, the version floor and the runtime uid.
 
-Residual MVP risk accepted in ADR-010: a decoder exploit still shares the worker's network and can reach service credentials/process data. MIME/signature/protocol checks do not isolate a decoder RCE. Stronger per-invocation namespace/network isolation (for example nsjail/bubblewrap/gVisor) is post-MVP; known decoder fixes are applied as soon as the selected source ships them. CVEs that Debian postpones between advisories are assessed per ADR-010 D25 (reachability, monthly review, 90-day expiry, switch to an artifact with the fix), and the D26 decoder allowlist reduces the reachable decoders.
+Residual MVP risk accepted in ADR-010: a decoder exploit still shares the worker's network and can reach service credentials/process data. Since #106 those are only the worker's own [scoped identities](#service-identities-and-network-isolation), and the worker's network has no egress. MIME/signature/protocol checks do not isolate a decoder RCE. Stronger per-invocation namespace/network isolation (for example nsjail/bubblewrap/gVisor) is post-MVP; known decoder fixes are applied as soon as the selected source ships them. CVEs that Debian postpones between advisories are assessed per ADR-010 D25 (reachability, monthly review, 90-day expiry, switch to an artifact with the fix), and the D26 decoder allowlist reduces the reachable decoders.
 
 Planned negative fixtures (#123) cover:
 - a key/content family mismatch (EBML bytes under a `.mp4` key);
@@ -159,10 +159,23 @@ Never commit:
 - database passwords
 - MinIO credentials
 - RabbitMQ credentials
+- Redis password
 - SSH keys
 - cloud credentials
 
 `.env.example` must contain placeholders only.
+
+## Service Identities and Network Isolation
+
+Decision (#106, extending the #169 storage split): every application holds only its own least-privilege identity for each data store, so a SQL injection in the backend or a parser exploit in the worker does not become a full data-plane compromise. Bootstrap identities (the PostgreSQL superuser, the RabbitMQ administrator and the storage root) stay with their servers, one-shot initialization and explicit operator maintenance; Flyway, the backend and the worker never receive them.
+
+- PostgreSQL: Flyway migrates as a dedicated schema owner. The backend role has DML only on the application tables, with no DDL, `TRUNCATE`, temporary tables or migration-history access. The worker role can only read and update `encoding_jobs` and `video_assets` (the ADR-010 claim, finish and startup recovery). No application role is a superuser, creates roles or databases, bypasses RLS or holds a role membership, and `PUBLIC` has no database or schema access.
+- RabbitMQ: the backend and worker users have no management tag and are limited to the ADR-010 encoding queue, its DLX and DLQ on vhost `/`. Only the backend can publish jobs; neither can read the DLQ, which stays an operator task.
+- Silo: the scoped backend/worker policies of [#169](#object-storage-security).
+- Redis: the server always requires a password, and only the backend receives it.
+- Network: Nginx and the frontend sit on an edge network; the data stores, the init jobs and the worker sit on an `internal: true` network with no egress and no published ports. The backend is the only service on both.
+
+Production preflight rejects the published development identities and secrets, a user name reused by two identities of one service, a secret reused by any two identities, PostgreSQL role names that the init scripts cannot quote safely, and an application datasource URL that differs from the database Flyway migrates. It reports variable names only. The exact roles, grants, permission patterns and network membership are in [INFRASTRUCTURE.md](INFRASTRUCTURE.md#service-identities-and-network); rotation is in the [deployment runbook](../deployment/README.md#service-identity-rotation). Applications held the bootstrap PostgreSQL and RabbitMQ identities before #106, so an existing deployment also rotates those after adopting the split.
 
 ## API Safeguards
 
@@ -198,7 +211,8 @@ Single VPS production demo must include:
 
 - HTTPS through Nginx
 - non-default production secrets
-- internal Docker network for backend, worker, PostgreSQL, Redis, RabbitMQ, and MinIO
+- internal Docker network (`internal: true`) for backend, worker, PostgreSQL, Redis, RabbitMQ, and MinIO; Nginx and the frontend only on the edge network, which the backend also joins (#106)
+- least-privilege service identities and an authenticated Redis, as in [Service Identities and Network Isolation](#service-identities-and-network-isolation)
 - only ports 80 and 443 publicly exposed
 - backups documented before demo data matters
 - no verbose error responses in production profile
@@ -223,4 +237,5 @@ Minimum security evidence:
 - upload rejects invalid MIME type, signature-family mismatch (renamed text, HLS/ffconcat playlists, legacy MOV without `ftyp`) and oversize files
 - worker negative fixtures (#123) fail safely with the ADR-010 D28 codes, open no referenced file, never reach READY with partial or cover-art-only output, and leave no process or job directory behind after a deadline kill
 - auth failures do not reveal whether email or password was wrong
+- each service identity can perform only its own data-store operations, Redis refuses unauthenticated clients, and Nginx cannot reach an internal service (#106)
 - `.env.example` contains no real secret values

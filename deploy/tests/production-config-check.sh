@@ -49,6 +49,32 @@ validate_storage_secret() {
   [ "${#2}" -ge 8 ] || fail "$1 must have at least 8 characters"
 }
 
+# Same rule as deploy/postgres-init.sh, which quotes the names in role SQL.
+validate_postgres_role() {
+  case "$2" in
+    pg_*|[!a-z_]*|*[!a-z0-9_]*)
+      fail "$1 must be a lowercase PostgreSQL role name (a-z, 0-9, _), not starting with pg_" ;;
+  esac
+  [ "${#2}" -le 63 ] || fail "$1 must have at most 63 characters"
+}
+
+# Each named variable must differ from every variable named before it. The
+# names are literals from this script; only names are ever reported.
+require_independent() {
+  earlier_names=""
+  for current_name in "$@"
+  do
+    eval "current_value=\${$current_name:-}"
+    for earlier_name in $earlier_names
+    do
+      eval "earlier_value=\${$earlier_name:-}"
+      [ "$current_value" != "$earlier_value" ] \
+        || fail "$current_name must not reuse $earlier_name"
+    done
+    earlier_names="$earlier_names $current_name"
+  done
+}
+
 # #124: each JVM sizes its heap from its container memory limit and exits on
 # OutOfMemoryError, so the restart policy replaces it instead of leaving a JVM
 # that still passes the TCP health check. The overlay supplies the defaults; an
@@ -141,6 +167,40 @@ validate_storage_secret "MINIO_WORKER_SECRET_KEY" "$MINIO_WORKER_SECRET_KEY"
 [ "$MINIO_BACKEND_SECRET_KEY" != "$MINIO_SECRET_KEY" ] || fail "Scoped storage credentials must be independent"
 [ "$MINIO_WORKER_SECRET_KEY" != "$MINIO_SECRET_KEY" ] || fail "Scoped storage credentials must be independent"
 [ "$MINIO_BACKEND_SECRET_KEY" != "$MINIO_WORKER_SECRET_KEY" ] || fail "Scoped storage credentials must be independent"
+
+# #106: the schema owner, backend and worker identities are independent from the
+# bootstrap superuser/administrator and from each other; Redis requires a password.
+reject_published_default "POSTGRES_OWNER_USER" "${POSTGRES_OWNER_USER:-}" "vod_owner"
+reject_published_default "POSTGRES_OWNER_PASSWORD" "${POSTGRES_OWNER_PASSWORD:-}" "change-me-db-owner"
+reject_published_default "POSTGRES_BACKEND_USER" "${POSTGRES_BACKEND_USER:-}" "vod_backend"
+reject_published_default "POSTGRES_BACKEND_PASSWORD" "${POSTGRES_BACKEND_PASSWORD:-}" "change-me-db-backend"
+reject_published_default "POSTGRES_WORKER_USER" "${POSTGRES_WORKER_USER:-}" "vod_worker"
+reject_published_default "POSTGRES_WORKER_PASSWORD" "${POSTGRES_WORKER_PASSWORD:-}" "change-me-db-worker"
+reject_published_default "RABBITMQ_BACKEND_USERNAME" "${RABBITMQ_BACKEND_USERNAME:-}" "vod_backend"
+reject_published_default "RABBITMQ_BACKEND_PASSWORD" "${RABBITMQ_BACKEND_PASSWORD:-}" "change-me-mq-backend"
+reject_published_default "RABBITMQ_WORKER_USERNAME" "${RABBITMQ_WORKER_USERNAME:-}" "vod_worker"
+reject_published_default "RABBITMQ_WORKER_PASSWORD" "${RABBITMQ_WORKER_PASSWORD:-}" "change-me-mq-worker"
+reject_published_default "REDIS_PASSWORD" "${REDIS_PASSWORD:-}" "change-me-redis"
+validate_postgres_role "POSTGRES_OWNER_USER" "$POSTGRES_OWNER_USER"
+validate_postgres_role "POSTGRES_BACKEND_USER" "$POSTGRES_BACKEND_USER"
+validate_postgres_role "POSTGRES_WORKER_USER" "$POSTGRES_WORKER_USER"
+# deploy/redis-entrypoint.sh writes the password into a Redis configuration line.
+case "$REDIS_PASSWORD" in
+  *[[:space:]]*|*\"*|*\'*) fail "REDIS_PASSWORD must not contain whitespace or quotes" ;;
+esac
+require_independent POSTGRES_USER POSTGRES_OWNER_USER POSTGRES_BACKEND_USER POSTGRES_WORKER_USER
+require_independent RABBITMQ_USERNAME RABBITMQ_BACKEND_USERNAME RABBITMQ_WORKER_USERNAME
+# No secret may serve two identities, within or across services.
+require_independent \
+  POSTGRES_PASSWORD POSTGRES_OWNER_PASSWORD POSTGRES_BACKEND_PASSWORD POSTGRES_WORKER_PASSWORD \
+  RABBITMQ_PASSWORD RABBITMQ_BACKEND_PASSWORD RABBITMQ_WORKER_PASSWORD \
+  MINIO_SECRET_KEY MINIO_BACKEND_SECRET_KEY MINIO_WORKER_SECRET_KEY \
+  REDIS_PASSWORD JWT_SECRET
+
+# The applications must use the database that Flyway migrates (#106 comment).
+[ -n "${FLYWAY_URL:-}" ] || fail "FLYWAY_URL must be set"
+[ "${SPRING_DATASOURCE_URL:-}" = "$FLYWAY_URL" ] \
+  || fail "SPRING_DATASOURCE_URL must equal the Flyway URL built from POSTGRES_HOST, POSTGRES_PORT and POSTGRES_DB"
 
 validate_jvm_options "BACKEND_JAVA_TOOL_OPTIONS" "${BACKEND_JAVA_TOOL_OPTIONS:-}"
 validate_jvm_options "WORKER_JAVA_TOOL_OPTIONS" "${WORKER_JAVA_TOOL_OPTIONS:-}"

@@ -38,6 +38,24 @@ The regular CI `Skeleton build checks` job runs all three checks. The manual syn
 upload headroom remain the public-deployment gate in
 [#180](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/180).
 
+## Service identity checks (#106)
+
+These checks prove that each service can do only its own operations
+([Service identities and network](../architecture/INFRASTRUCTURE.md#service-identities-and-network)).
+`python deploy/tests/service-identity-smoke.py --project <name>` owns a fresh disposable
+Compose project and removes it on exit. It migrates a database the pre-#106 way, then runs
+`postgres-init` and Flyway and checks ownership, exact grants, idempotent reruns, the refusal
+of a configured role that holds another role's membership, the allowed
+and denied statements of the owner, backend and worker roles, a password rotation, Redis
+authentication and network membership. With `--running-stack` it inspects an already healthy
+full stack instead: JDBC sessions use only application roles, broker connections only
+application users, Redis refuses unauthenticated clients, and Nginx reaches the backend but no
+internal service. `python deploy/tests/rabbitmq-publisher-smoke.py --project <name>` runs the
+opt-in `EncodingBrokerPermissionTests` against the scoped broker users, and the storage smokes
+keep the #169 checks. `sh deploy/tests/production-config-smoke.sh` and
+`deploy/tests/test_production_config_check.py`/`test_service_identities.py` cover the preflight
+and Compose wiring without Docker state. CI runs all of them.
+
 ## Backend PostgreSQL tests (#119)
 
 `mvn -B -ntp verify` in `backend/` needs Docker. Every Spring context test in `backend/common`

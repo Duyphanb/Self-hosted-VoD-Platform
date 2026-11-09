@@ -18,9 +18,13 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 
+# (reactor, module, suite, identity). #106: the scoped worker user declares the ADR-010 topology;
+# the permission suite uses both scoped users. The publisher suite needs administrator operations
+# (purge, delete, policies) and runs last because it stops the broker.
 SUITES = (
-    ("worker", "queue", "com.vodplatform.worker.queue.messaging.EncodingQueueBrokerTests"),
-    ("backend", "common", "com.vodplatform.common.EncodingPublisherBrokerTests"),
+    ("worker", "queue", "com.vodplatform.worker.queue.messaging.EncodingQueueBrokerTests", "WORKER"),
+    ("backend", "common", "com.vodplatform.common.EncodingBrokerPermissionTests", None),
+    ("backend", "common", "com.vodplatform.common.EncodingPublisherBrokerTests", "ADMIN"),
 )
 
 
@@ -37,6 +41,14 @@ def require_fresh_project(run, project):
                        + ["--filter", "label=com.docker.compose.project=" + project])
         if existing.strip():
             raise AssertionError("Audit project already exists; refusing reuse")
+
+
+def port_overlay(port):
+    """The data network is internal (#106) and cannot publish ports, so the broker also joins
+    a disposable network that carries only the loopback port."""
+    return {"services": {"rabbitmq": {"ports": [f"127.0.0.1:{port}:5672"],
+                                      "networks": ["vod_internal", "audit_published"]}},
+            "networks": {"audit_published": {}}}
 
 
 def report_path(root, reactor, module, suite):
@@ -208,8 +220,9 @@ def main():
     root = Path(__file__).resolve().parents[2]
     os.chdir(root)
     env = os.environ.copy()
-    env["RABBITMQ_USERNAME"] = "audit_" + secrets.token_hex(16)
-    env["RABBITMQ_PASSWORD"] = secrets.token_urlsafe(40)
+    for role in ("", "BACKEND_", "WORKER_"):
+        env["RABBITMQ_" + role + "USERNAME"] = "audit_" + secrets.token_hex(16)
+        env["RABBITMQ_" + role + "PASSWORD"] = secrets.token_urlsafe(40)
     env["RABBITMQ_ENCODING_QUEUE"] = "video-encoding-queue"
     env["MAVEN_OPTS"] = "-Xmx192m"
     diagnostics = root / "backend/common/target/rabbitmq-publisher-smoke" / (args.project + "-" + secrets.token_hex(4))
@@ -246,8 +259,7 @@ def main():
         port = sock.getsockname()[1]
     with tempfile.TemporaryDirectory(prefix="vod-rabbitmq-smoke-") as directory:
         overlay = Path(directory) / "ports.json"
-        overlay.write_text(json.dumps({"services": {"rabbitmq": {
-            "ports": [f"127.0.0.1:{port}:5672"]}}}), encoding="utf-8")
+        overlay.write_text(json.dumps(port_overlay(port)), encoding="utf-8")
         compose = ["docker", "compose", "-p", args.project, "--env-file", os.devnull,
                    "-f", "deploy/docker-compose.yml", "-f", str(overlay)]
         container = None
@@ -301,20 +313,29 @@ def main():
             container = verify_baseline_and_recreation(container)
 
             for name, value in {
-                "HOST": "127.0.0.1", "PORT": str(port), "USERNAME": env["RABBITMQ_USERNAME"],
-                "PASSWORD": env["RABBITMQ_PASSWORD"], "CONTAINER": container,
+                "HOST": "127.0.0.1", "PORT": str(port), "CONTAINER": container,
                 "QUEUE": env["RABBITMQ_ENCODING_QUEUE"], "REQUIRED": "true",
+                "BACKEND_USERNAME": env["RABBITMQ_BACKEND_USERNAME"],
+                "BACKEND_PASSWORD": env["RABBITMQ_BACKEND_PASSWORD"],
+                "WORKER_USERNAME": env["RABBITMQ_WORKER_USERNAME"],
+                "WORKER_PASSWORD": env["RABBITMQ_WORKER_PASSWORD"],
             }.items():
                 env["ENCODING_TEST_RABBITMQ_" + name] = value
             env["RABBITMQ_HOST"] = "127.0.0.1"
             env["RABBITMQ_PORT"] = str(port)
-            # Delete both reports before any test, so a later failure cannot accept old evidence.
-            for reactor, module, suite in SUITES:
+            # Delete every report before any test, so a later failure cannot accept old evidence.
+            for reactor, module, suite, _ in SUITES:
                 report_path(root, reactor, module, suite).unlink(missing_ok=True)
-            for reactor, module, suite in SUITES:
+            for reactor, module, suite, identity in SUITES:
+                for field in ("USERNAME", "PASSWORD"):
+                    if identity is None:  # The suite reads both scoped identities itself.
+                        env.pop("ENCODING_TEST_RABBITMQ_" + field, None)
+                    else:
+                        prefix = "RABBITMQ_" if identity == "ADMIN" else "RABBITMQ_" + identity + "_"
+                        env["ENCODING_TEST_RABBITMQ_" + field] = env[prefix + field]
                 run([mvn, "-f", reactor + "/pom.xml", "-B", "-ntp", "-pl", module, "-am", "test",
                      "-Dtest=" + suite.rsplit(".", 1)[1], "-Dsurefire.failIfNoSpecifiedTests=false",
-                     "-DargLine=-Xmx384m"], timeout=900, log=reactor + "-test.log")
+                     "-DargLine=-Xmx384m"], timeout=900, log=suite.rsplit(".", 1)[1] + "-test.log")
                 require_executed_tests(report_path(root, reactor, module, suite))
 
         def record_failure(error):
@@ -327,7 +348,8 @@ def main():
         preserve_first_failure(check,
                                lambda: run(compose + ["down", "--volumes", "--remove-orphans"]),
                                record_failure)
-        print("PASS RabbitMQ pinned version, data across recreation, worker/backend declarations, wire properties, persistence, confirms, returns, nack, timeout and DLQ routing", flush=True)
+        print("PASS RabbitMQ pinned version, data across recreation, scoped worker/backend declarations and permissions, "
+              "wire properties, persistence, confirms, returns, nack, timeout and DLQ routing", flush=True)
 
 
 if __name__ == "__main__":
