@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vodplatform.common.support.PostgresTestDatabase;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -64,7 +65,7 @@ import org.springframework.web.bind.annotation.RestController;
 )
 @AutoConfigureMockMvc
 @Import(AdminUrlAuthorizationIntegrationTests.CatalogProbeController.class)
-class AdminUrlAuthorizationIntegrationTests {
+class AdminUrlAuthorizationIntegrationTests implements PostgresTestDatabase {
 
     /**
      * Probe mappings require this header, so they never clash with the real catalog controllers

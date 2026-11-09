@@ -2,6 +2,7 @@ package com.vodplatform.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.Map;
@@ -14,7 +15,7 @@ import org.springframework.context.ApplicationContext;
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes"
 )
-class AppClockContextTests {
+class AppClockContextTests implements PostgresTestDatabase {
 
     @Autowired
     private ApplicationContext applicationContext;

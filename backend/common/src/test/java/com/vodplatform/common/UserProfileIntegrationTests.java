@@ -14,6 +14,7 @@ import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +31,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -47,7 +47,7 @@ import tools.jackson.databind.ObjectMapper;
         }
 )
 @AutoConfigureMockMvc
-class UserProfileIntegrationTests {
+class UserProfileIntegrationTests implements PostgresTestDatabase {
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -82,9 +82,9 @@ class UserProfileIntegrationTests {
     }
 
     @ParameterizedTest
-    // H2 varchar counts UTF-16 units; PostgreSQL 51/100-code-point persistence is in auth-runtime-smoke.py.
-    @ValueSource(ints = {2, 50})
-    void acceptsAstralNamesOnBothEndpointsWithinH2Capacity(int count) throws Exception {
+    // PostgreSQL varchar(100) counts code points, so astral names persist up to the 100-code-point limit.
+    @ValueSource(ints = {2, 50, 51, 100})
+    void acceptsAstralNamesOnBothEndpointsUpToTheCodePointLimit(int count) throws Exception {
         String name = "😀".repeat(count);
         mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -125,9 +125,6 @@ class UserProfileIntegrationTests {
     private MockMvc mockMvc;
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
-
-    @Autowired
     private UserRepository userRepository;
 
     @Autowired
@@ -146,7 +143,6 @@ class UserProfileIntegrationTests {
     @BeforeEach
     void createUsers() {
         cleanDatabase();
-        jdbcTemplate.update("INSERT INTO roles (name) VALUES (?)", "ROLE_USER");
         RoleEntity role = roleRepository.findByName("ROLE_USER").orElseThrow();
         Instant now = Instant.now();
         currentUser = new UserEntity(
@@ -177,7 +173,6 @@ class UserProfileIntegrationTests {
     void cleanDatabase() {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
-        roleRepository.deleteAll();
     }
 
     @Test
