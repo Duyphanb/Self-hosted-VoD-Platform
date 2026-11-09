@@ -15,7 +15,6 @@
 
     <dependencies>
         <dependency>
-            <!-- Pure declarations/codec support only; runtime AMQP wiring belongs to Issue 5.1. -->
             <groupId>org.springframework.amqp</groupId>
             <artifactId>spring-rabbit</artifactId>
         </dependency>
