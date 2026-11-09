@@ -40,7 +40,12 @@ services:
       - vod_internal
 
   rabbitmq:
-    image: rabbitmq:3.13-alpine
+    # RabbitMQ 4.4.0 / Erlang 29.1.2 / Alpine 3.24, Docker official multi-arch index (amd64, arm64);
+    # community support ends 2027-07-31 (#74). Bump with the broker update procedure in
+    # docs/architecture/INFRASTRUCTURE.md (Broker runtime image).
+    image: docker.io/library/rabbitmq:4.4.0-alpine@sha256:21577d148f4f7563a87d761862fa353f59348a094833ca8b1b1a46a8102dffce
+    # Data lives under the node name rabbit@<hostname>; a fixed hostname keeps it across recreation.
+    hostname: rabbitmq
     # #106: boot-time definitions hold the bootstrap administrator and the scoped
     # backend/worker users; the rendered file lives on the tmpfs only.
     entrypoint: ["/bin/sh", "/init/rabbitmq-entrypoint.sh"]

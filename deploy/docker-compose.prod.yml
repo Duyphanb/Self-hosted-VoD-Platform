@@ -100,6 +100,10 @@ services:
       RABBITMQ_BACKEND_PASSWORD: ${RABBITMQ_BACKEND_PASSWORD:?Set an independent production RabbitMQ backend password}
       RABBITMQ_WORKER_USERNAME: ${RABBITMQ_WORKER_USERNAME:?Set an independent production RabbitMQ worker username}
       RABBITMQ_WORKER_PASSWORD: ${RABBITMQ_WORKER_PASSWORD:?Set an independent production RabbitMQ worker password}
+    volumes:
+      # One read-only file, not the directory: a directory mount would hide the image's own conf.d defaults.
+      # Its value must equal the memory limit below.
+      - ./rabbitmq/90-vod-prod.conf:/etc/rabbitmq/conf.d/90-vod-prod.conf:ro
     depends_on:
       production-config-check:
         condition: service_completed_successfully
