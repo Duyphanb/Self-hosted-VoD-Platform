@@ -58,6 +58,10 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?Set a non-default production RabbitMQ username}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set a non-default production RabbitMQ password}
+    volumes:
+      # One read-only file, not the directory: a directory mount would hide the image's own conf.d defaults.
+      # Its value must equal the memory limit below.
+      - ./rabbitmq/90-vod-prod.conf:/etc/rabbitmq/conf.d/90-vod-prod.conf:ro
     depends_on:
       production-config-check:
         condition: service_completed_successfully

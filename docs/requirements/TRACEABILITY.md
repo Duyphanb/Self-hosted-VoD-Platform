@@ -63,7 +63,7 @@ The Sprint 4 (4.x) parts of these rows are verified in the [Sprint 4 closeout](.
 | D6-D9, F-011/F-012 | #54 patched-binary/user evidence; #123 negative media fixtures; #124 target CPU measurement; 5.4/5.5/5.7/5.8 command restrictions, metadata caps, process-tree kill, disk check and container hardening |
 | D11-D15/D17, F-008/F-013/F-020 | 4.3/4.6 PostgreSQL partial index/concurrent 409 compensation; catalog READY fallback/tie ordering; 6.1/6.2 current-only playback/HLS/visibility-first 404; 9.2/9.3 newest-only retry/double retry/upload race |
 | D16/D19, F-009 | 4.2/4.5 golden fixture, confirms/returns, commit-before-publish, relay grace/crash/publish failure and fast-worker no-regression |
-| D18/D20/D21, F-010 | 5.1/5.3/5.7 terminal redelivery, stale attempt, poison DLQ, DB outage, orphan restart and long job with second queued; #74 version-dependent ack timeout |
+| D18/D20/D21, F-010 | 5.1/5.3/5.7 terminal redelivery, stale attempt, poison DLQ, DB outage, orphan restart and long job with second queued; #74 4.4 classic baseline: no ack timeout (5.1 long-job/DB-outage evidence) |
 | D22/D23, F-012/F-022, R-006 | 4.4 compensating raw delete/failed compensation; 5.6/5.7 attempt isolation, failed/lost-finish/orphan prefix delete, trailing-slash safety and temp sweep; Phase 5 manual dry-run purge/orphan audit protects current/newest FAILED/in-flight/archive |
 | D10/D24 | DTO bounds remain separate follow-up; one ADR/docs package, V5/counts implemented later in 4.3; independent AI review when a PR exists, before owner merge |
 
