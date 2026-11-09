@@ -16,6 +16,7 @@ Use this folder for verification evidence and hardening guides.
 - [Sprint 2 Auth closeout](SPRINT-2-CLOSEOUT.md)
 - [Dependency security](DEPENDENCY-SECURITY.md)
 - [Upload transport/storage rehearsal](UPLOAD-REHEARSAL.md)
+- [Worker encode measurement (#124)](WORKER-ENCODE-MEASUREMENT.md) (template until the arm64 run is recorded)
 
 ## Upload edge checks
 
@@ -135,6 +136,16 @@ valid families and rotations, key/content mismatch in both directions, moov-at-e
 disguised playlists, audio-only, cover-art-only, cover art beside a real video, decoders outside the
 allowlist, a 45-degree rotation, the size, duration and stream caps, and a deadline and an interrupt
 that kill the `FakeMediaTool` shell fake and its child.
+
+## arm64 worker job and encode measurement (#124)
+
+The non-required `arm64 worker` workflow builds the images natively on `ubuntu-24.04-arm`. It runs the
+FFmpeg-tagged tests above, `jvm-limits-smoke.py` under the production overlay, and the Silo storage smoke.
+It then runs `worker-encode-measurement.py`, which measures FFprobe and the D27 reference encode in the worker
+image at the production worker limits. [WORKER-ENCODE-MEASUREMENT.md](WORKER-ENCODE-MEASUREMENT.md) describes
+both scripts and holds the record the arm64 run fills in. `python -m unittest discover -s deploy/tests -p 'test_*.py'`
+covers their parsing, fits and safety checks without Docker. The measurement keeps its copy of the reference
+command equal to `ReferenceHlsEncodeFfmpegTests.referenceArguments`.
 
 ## Purpose
 
