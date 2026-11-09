@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.vodplatform.common.contract.ApiContract;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
 import com.vodplatform.encoding.messaging.PublishOutcome;
 import com.vodplatform.shared.storage.ObjectStorage;
@@ -20,7 +21,6 @@ import jakarta.servlet.MultipartConfigElement;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -30,8 +30,6 @@ import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import tools.jackson.databind.ObjectMapper;
@@ -55,21 +53,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * HTTP-level race on the disposable vod_upload_test PostgreSQL database (same guard as
- * {@link UploadPostgresTests}): two parallel uploads for one movie both pass the advisory pre-check
- * and store raw media; the per-movie lock and in-lock recheck then admit one pair (the V5 index
- * translation itself is covered by {@link UploadPostgresTests}). The winner gets 202, the loser a
- * contract 409 with its requestId, and only the loser's raw key is deleted. Storage and the broker
- * are mocked.
+ * HTTP-level race on the shared test PostgreSQL ({@link PostgresTestDatabase}): two parallel uploads
+ * for one movie both pass the advisory pre-check and store raw media; the per-movie lock and
+ * in-lock recheck then admit one pair (the V5 index translation itself is covered by
+ * {@link UploadPostgresTests}). The winner gets 202, the loser a contract 409 with its requestId,
+ * and only the loser's raw key is deleted. Storage and the broker are mocked.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {
-            "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
-            "spring.jpa.hibernate.ddl-auto=validate"
-        })
-@EnabledIf("configured")
-class UploadEndpointPostgresTests {
+        properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes")
+class UploadEndpointPostgresTests implements PostgresTestDatabase {
 
     private static final String PREFIX =
             "--race\r\n"
@@ -91,19 +84,6 @@ class UploadEndpointPostgresTests {
     @MockitoBean EncodingJobPublisher publisher;
 
     private UUID movie;
-
-    static boolean configured() {
-        return UploadPostgresTests.configured();
-    }
-
-    @DynamicPropertySource
-    static void database(DynamicPropertyRegistry registry) {
-        String url = System.getenv("ENCODING_TEST_POSTGRES_URL");
-        UploadPostgresTests.requireDisposableUrl(url);
-        registry.add("spring.datasource.url", () -> url);
-        registry.add("spring.datasource.username", () -> System.getenv("ENCODING_TEST_POSTGRES_USER"));
-        registry.add("spring.datasource.password", () -> System.getenv("ENCODING_TEST_POSTGRES_PASSWORD"));
-    }
 
     @BeforeEach
     void fixture() {

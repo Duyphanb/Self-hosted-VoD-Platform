@@ -35,9 +35,24 @@ jobs:
           java-version: "21"
           cache: maven
 
+      # #119: the Spring context tests run on a PostgreSQL 16 Testcontainers database with the Flyway
+      # migrations, so this needs Docker. -DskipPostgresTests is for machines without Docker; never set here.
       - name: Build and test all backend modules
         working-directory: backend
         run: mvn -B -ntp verify
+
+      - name: Require executed PostgreSQL context test evidence
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          suites = ['PostgresMigrationTests', 'PostgresTestDatabaseIsolationTests', 'EmailIdentityPostgresTests',
+                    'UploadPostgresTests', 'UploadEndpointPostgresTests']
+          for suite in suites:
+              report = ET.parse(f'backend/common/target/surefire-reports/TEST-com.vodplatform.common.{suite}.xml').getroot()
+              assert int(report.attrib['tests']) > 0, f'{suite} must execute tests'
+              for key in ('skipped', 'failures', 'errors'):
+                  assert int(report.attrib[key]) == 0, f'{suite} has {key}'
+          PY
 
   worker-build:
     name: Worker Maven build and test
@@ -321,22 +336,24 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Verify video asset persistence against required PostgreSQL
+      # The catalog and encoding slices cannot see the migrations, so their PostgreSQL suites run against
+      # this migrated service. The upload suites run in the backend build on its PostgreSQL container (#119).
+      - name: Verify catalog and video asset persistence against required PostgreSQL
         working-directory: backend
         env:
           ENCODING_TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/vod_upload_test
           ENCODING_TEST_POSTGRES_USER: vod
           ENCODING_TEST_POSTGRES_PASSWORD: vod
           ENCODING_TEST_POSTGRES_REQUIRED: "true"
-        run: mvn -B -ntp -pl common -am -Dtest=VideoAssetPostgresTest,UploadPostgresTests,UploadEndpointPostgresTests -Dsurefire.failIfNoSpecifiedTests=false test
+          CATALOG_TEST_POSTGRES_URL: jdbc:postgresql://localhost:5432/vod_upload_test?user=vod&password=vod
+        run: mvn -B -ntp -pl encoding -am -Dtest=VideoAssetPostgresTest,CreationOrderPostgresTest -Dsurefire.failIfNoSpecifiedTests=false test
 
       - name: Require executed PostgreSQL test evidence
         run: |
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           paths = ['backend/encoding/target/surefire-reports/TEST-com.vodplatform.encoding.persistence.VideoAssetPostgresTest.xml',
-                   'backend/common/target/surefire-reports/TEST-com.vodplatform.common.UploadPostgresTests.xml',
-                   'backend/common/target/surefire-reports/TEST-com.vodplatform.common.UploadEndpointPostgresTests.xml']
+                   'backend/catalog/target/surefire-reports/TEST-com.vodplatform.catalog.service.CreationOrderPostgresTest.xml']
           for path in paths:
               report = ET.parse(path).getroot()
               assert int(report.attrib['tests']) > 0, 'PostgreSQL suite must execute tests'

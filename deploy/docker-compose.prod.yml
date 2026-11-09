@@ -31,6 +31,9 @@ services:
       NGINX_HTTP_PORT: ${NGINX_HTTP_PORT:?Set NGINX_HTTP_PORT=80 to publish the production edge}
       MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-2048}
       MINIO_BROWSER: "off"
+      # Same expressions as backend/worker JAVA_TOOL_OPTIONS below, so the check sees what the JVMs receive.
+      BACKEND_JAVA_TOOL_OPTIONS: ${BACKEND_JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError}
+      WORKER_JAVA_TOOL_OPTIONS: ${WORKER_JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError}
     volumes:
       - ./tests/production-config-check.sh:/checks/production-config-check.sh:ro
     network_mode: none
@@ -133,6 +136,9 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_BACKEND_PASSWORD:?Set an independent production RabbitMQ backend password}
       MINIO_ACCESS_KEY: ${MINIO_BACKEND_ACCESS_KEY:?Set an independent production storage access key}
       MINIO_SECRET_KEY: ${MINIO_BACKEND_SECRET_KEY:?Set an independent production storage secret key}
+      # #124: size the heap from the memory limit below, and exit on OutOfMemoryError so the restart policy
+      # replaces the JVM instead of leaving one that still passes the TCP health check.
+      JAVA_TOOL_OPTIONS: ${BACKEND_JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError}
     restart: unless-stopped
     deploy:
       resources:
@@ -148,6 +154,8 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_WORKER_PASSWORD:?Set an independent production RabbitMQ worker password}
       MINIO_ACCESS_KEY: ${MINIO_WORKER_ACCESS_KEY:?Set an independent production storage access key}
       MINIO_SECRET_KEY: ${MINIO_WORKER_SECRET_KEY:?Set an independent production storage secret key}
+      # #124: as the backend, with a smaller share because FFmpeg runs in this container's memory limit.
+      JAVA_TOOL_OPTIONS: ${WORKER_JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError}
     restart: unless-stopped
     deploy:
       resources:

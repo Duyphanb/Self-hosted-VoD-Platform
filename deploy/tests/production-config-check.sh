@@ -75,6 +75,42 @@ require_independent() {
   done
 }
 
+# #124: each JVM sizes its heap from its container memory limit and exits on
+# OutOfMemoryError, so the restart policy replaces it instead of leaving a JVM
+# that still passes the TCP health check. The overlay supplies the defaults; an
+# override must keep both. An absolute heap, generation or RAM size, or disabled
+# container support, would let the heap ignore the memory limit: HotSpot raises
+# the maximum heap to a larger minimum, initial, new or old size. Those are
+# rejected.
+# The JVM applies options in order, so the last setting of each option decides,
+# as it does here.
+validate_jvm_options() {
+  variable_name="$1"
+  value="$2"
+  case "$value" in
+    *[\"\'\\]*) fail "$variable_name must list plain options without quotes or backslashes" ;;
+  esac
+  exit_on_out_of_memory=""
+  max_ram_percentage=""
+  set -f
+  for option in $value
+  do
+    case "$option" in
+      -XX:+ExitOnOutOfMemoryError) exit_on_out_of_memory="enabled" ;;
+      -XX:-ExitOnOutOfMemoryError) exit_on_out_of_memory="" ;;
+      -XX:MaxRAMPercentage=*) max_ram_percentage="${option#-XX:MaxRAMPercentage=}" ;;
+      -Xmx*|-Xms*|-Xmn*|-XX:MaxHeapSize=*|-XX:InitialHeapSize=*|-XX:MinHeapSize=*|-XX:NewSize=*|-XX:OldSize=*|-XX:MaxRAM=*|-XX:-UseContainerSupport)
+        fail "$variable_name must size the heap only with -XX:MaxRAMPercentage, without -Xmx, -Xms, -Xmn, -XX:MaxHeapSize, -XX:InitialHeapSize, -XX:MinHeapSize, -XX:NewSize, -XX:OldSize, -XX:MaxRAM or -XX:-UseContainerSupport" ;;
+    esac
+  done
+  set +f
+  [ -n "$exit_on_out_of_memory" ] || fail "$variable_name must enable -XX:+ExitOnOutOfMemoryError"
+  case "$max_ram_percentage" in
+    [1-9]|[1-9][0-9]|100) ;;
+    *) fail "$variable_name must set -XX:MaxRAMPercentage to a whole number from 1 to 100" ;;
+  esac
+}
+
 # The local default publishes the edge on loopback only. Production must opt in
 # explicitly, or the VPS edge would be unreachable.
 reject_unpublished_edge() {
@@ -165,5 +201,8 @@ require_independent \
 [ -n "${FLYWAY_URL:-}" ] || fail "FLYWAY_URL must be set"
 [ "${SPRING_DATASOURCE_URL:-}" = "$FLYWAY_URL" ] \
   || fail "SPRING_DATASOURCE_URL must equal the Flyway URL built from POSTGRES_HOST, POSTGRES_PORT and POSTGRES_DB"
+
+validate_jvm_options "BACKEND_JAVA_TOOL_OPTIONS" "${BACKEND_JAVA_TOOL_OPTIONS:-}"
+validate_jvm_options "WORKER_JAVA_TOOL_OPTIONS" "${WORKER_JAVA_TOOL_OPTIONS:-}"
 
 printf '%s\n' "Production configuration preflight passed"

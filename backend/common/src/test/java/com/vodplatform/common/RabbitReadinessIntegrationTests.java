@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.vodplatform.common.storage.StorageHealthIndicator;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.health.contributor.Health;
@@ -17,7 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 /** Real Rabbit contributor at the test-only closed loopback port; storage is healthy. */
 @SpringBootTest(properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes")
 @AutoConfigureMockMvc
-class RabbitReadinessIntegrationTests {
+class RabbitReadinessIntegrationTests implements PostgresTestDatabase {
     @Autowired MockMvc mvc;
     @MockitoBean StorageHealthIndicator storageHealthIndicator;
 

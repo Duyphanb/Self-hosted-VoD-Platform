@@ -159,6 +159,20 @@ Root storage keys are reserved for bootstrap and explicit operator maintenance, 
 It must also set `NGINX_HTTP_PORT=80`, as described in
 [Edge Port Binding](#edge-port-binding).
 
+The overlay passes JVM options to the backend and worker through `JAVA_TOOL_OPTIONS` (#124):
+`-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError` for the backend and
+`-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError` for the worker. Each heap then follows its container
+memory limit, and an `OutOfMemoryError` ends the JVM, so `restart: unless-stopped` replaces it. Without the
+exit, a JVM that ran out of memory could keep passing the TCP health check. The worker's share is smaller
+because FFmpeg runs inside the same memory limit. `.env.production` may override the defaults with
+`BACKEND_JAVA_TOOL_OPTIONS` and `WORKER_JAVA_TOOL_OPTIONS`. The preflight then requires
+`-XX:+ExitOnOutOfMemoryError` as the last `ExitOnOutOfMemoryError` setting, and a last `-XX:MaxRAMPercentage`
+that is a whole number from 1 to 100. It rejects `-Xmx`, `-Xms`, `-Xmn`, `-XX:MaxHeapSize`, `-XX:InitialHeapSize`,
+`-XX:MinHeapSize`, `-XX:NewSize`, `-XX:OldSize`, `-XX:MaxRAM` and `-XX:-UseContainerSupport`, which would let a
+heap ignore its memory limit, and quotes and
+backslashes, which the JVM would parse differently. The [worker encode measurement](../testing/WORKER-ENCODE-MEASUREMENT.md)
+records the resulting heaps and memory peaks, from which the owner confirms or changes these defaults.
+
 The production-only `production-config-check` service rejects the published
 development placeholders and a loopback-bound edge before PostgreSQL,
 RabbitMQ, MinIO, or Nginx can start. It reports only the rejected variable name
@@ -188,6 +202,9 @@ URL differing from Flyway's fails, and that each service receives only its own
 identity. `python3 deploy/tests/service-identity-smoke.py --project <name>`
 proves on a fresh disposable stack that each PostgreSQL role and Redis client
 can do only its own operations; see [Testing Docs](../testing/README.md#service-identity-checks-106).
+
+The smoke also checks that the JVM options reach both the preflight and the JVMs, and that the preflight rejects an
+override without the `OutOfMemoryError` exit.
 
 ## Service Identity Rotation
 

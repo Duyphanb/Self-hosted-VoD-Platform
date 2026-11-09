@@ -20,6 +20,9 @@ $credential_tokens
 EOF
 unset credential_tokens
 compose_project="vod-auth-audit-config-$run_token"
+# #124 overlay defaults. An empty override lets Compose apply them, as `${NAME:-default}` does.
+backend_java_tool_options_default="-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError"
+worker_java_tool_options_default="-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError"
 
 # Every credential the production overlay requires. Each one fails Compose
 # configuration when missing or empty, and none reaches argv: values are kept in
@@ -30,7 +33,7 @@ REDIS_PASSWORD RABBITMQ_USERNAME RABBITMQ_PASSWORD RABBITMQ_BACKEND_USERNAME RAB
 RABBITMQ_WORKER_USERNAME RABBITMQ_WORKER_PASSWORD MINIO_ACCESS_KEY MINIO_SECRET_KEY
 MINIO_BACKEND_ACCESS_KEY MINIO_BACKEND_SECRET_KEY MINIO_WORKER_ACCESS_KEY MINIO_WORKER_SECRET_KEY JWT_SECRET"
 required_names="$credential_names NGINX_HTTP_PORT"
-setting_names="$required_names MAX_UPLOAD_SIZE_MB POSTGRES_DB"
+setting_names="$required_names MAX_UPLOAD_SIZE_MB POSTGRES_DB BACKEND_JAVA_TOOL_OPTIONS WORKER_JAVA_TOOL_OPTIONS"
 
 set_value() { eval "value_$1=\$2"; }
 value_for() { eval "printf '%s' \"\${value_$1}\""; }
@@ -62,6 +65,8 @@ set_synthetic_values() {
   set_value MAX_UPLOAD_SIZE_MB "2048"
   # A non-default database proves Flyway and the applications derive the same URL.
   set_value POSTGRES_DB "ci_platform_$run_token"
+  set_value BACKEND_JAVA_TOOL_OPTIONS ""
+  set_value WORKER_JAVA_TOOL_OPTIONS ""
   spring_datasource_url_value=""
 }
 
@@ -91,6 +96,8 @@ set_published_defaults() {
   set_value NGINX_HTTP_PORT "127.0.0.1:80"
   set_value MAX_UPLOAD_SIZE_MB "2048"
   set_value POSTGRES_DB "vod_platform"
+  set_value BACKEND_JAVA_TOOL_OPTIONS ""
+  set_value WORKER_JAVA_TOOL_OPTIONS ""
   spring_datasource_url_value=""
 }
 
@@ -133,6 +140,8 @@ run_check() (
   FLYWAY_URL="jdbc:postgresql://postgres:5432/$POSTGRES_DB"
   SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-$FLYWAY_URL}"
   export FLYWAY_URL SPRING_DATASOURCE_URL
+  BACKEND_JAVA_TOOL_OPTIONS="${BACKEND_JAVA_TOOL_OPTIONS:-$backend_java_tool_options_default}"
+  WORKER_JAVA_TOOL_OPTIONS="${WORKER_JAVA_TOOL_OPTIONS:-$worker_java_tool_options_default}"
   sh "$check_script"
 )
 
@@ -492,6 +501,35 @@ do
 done
 printf '%s\n' "Production dependency gate check passed"
 
+# #124: an override reaches both the preflight and the JVM, and the preflight
+# rejects one that drops the OutOfMemoryError exit.
+set_synthetic_values
+set_value WORKER_JAVA_TOOL_OPTIONS "-XX:MaxRAMPercentage=25 -XX:+ExitOnOutOfMemoryError"
+run_production_compose config --format json > "$config_json"
+"$python_command" - "$config_json" "$(value_for WORKER_JAVA_TOOL_OPTIONS)" "$backend_java_tool_options_default" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as config_file:
+    services = json.load(config_file)["services"]
+worker_options, backend_options = sys.argv[2], sys.argv[3]
+assert services["worker"]["environment"]["JAVA_TOOL_OPTIONS"] == worker_options
+assert services["production-config-check"]["environment"]["WORKER_JAVA_TOOL_OPTIONS"] == worker_options
+assert services["backend"]["environment"]["JAVA_TOOL_OPTIONS"] == backend_options
+assert services["production-config-check"]["environment"]["BACKEND_JAVA_TOOL_OPTIONS"] == backend_options
+PY
+set_value WORKER_JAVA_TOOL_OPTIONS "-XX:MaxRAMPercentage=30"
+: > "$log_file"
+if run_production_compose run --rm --no-deps production-config-check \
+  > "$log_file" 2>&1
+then
+  printf '%s\n' "Production preflight accepted worker JVM options without the OutOfMemoryError exit" >&2
+  exit 1
+fi
+assert_log_contains \
+  "Production configuration rejected: WORKER_JAVA_TOOL_OPTIONS must enable -XX:+ExitOnOutOfMemoryError"
+printf '%s\n' "Production JVM option checks passed"
+
 set_synthetic_values
 run_production_compose config --format json > "$config_json"
 write_env_file
@@ -508,7 +546,12 @@ with open(sys.argv[2], encoding="utf-8") as credentials_file:
 
 database_url = "jdbc:postgresql://postgres:5432/" + values["POSTGRES_DB"]
 preflight = {name: values[name] for name in values if name != "POSTGRES_DB"}
-preflight.update({"FLYWAY_URL": database_url, "SPRING_DATASOURCE_URL": database_url})
+preflight.update({
+    "FLYWAY_URL": database_url,
+    "SPRING_DATASOURCE_URL": database_url,
+    "BACKEND_JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError",
+    "WORKER_JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError",
+})
 postgres_roles = {name: values[name] for name in (
     "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_OWNER_USER", "POSTGRES_OWNER_PASSWORD", "POSTGRES_BACKEND_USER",
     "POSTGRES_BACKEND_PASSWORD", "POSTGRES_WORKER_USER", "POSTGRES_WORKER_PASSWORD", "POSTGRES_DB")}
@@ -541,6 +584,7 @@ expected = {
         "RABBITMQ_PASSWORD": values["RABBITMQ_BACKEND_PASSWORD"],
         "MINIO_ACCESS_KEY": values["MINIO_BACKEND_ACCESS_KEY"],
         "MINIO_SECRET_KEY": values["MINIO_BACKEND_SECRET_KEY"],
+        "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError",
     },
     "worker": {
         "SPRING_DATASOURCE_URL": database_url,
@@ -550,6 +594,7 @@ expected = {
         "RABBITMQ_PASSWORD": values["RABBITMQ_WORKER_PASSWORD"],
         "MINIO_ACCESS_KEY": values["MINIO_WORKER_ACCESS_KEY"],
         "MINIO_SECRET_KEY": values["MINIO_WORKER_SECRET_KEY"],
+        "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError",
     },
 }
 

@@ -114,7 +114,11 @@ class UploadRehearsalTests(unittest.TestCase):
                                             if Path(path).exists()), None)
         if shell is None:
             self.skipTest("POSIX shell is required for the preflight check")
-        # The overlay hands the check the URL that Flyway and the applications derive.
+        # This invokes the script directly, so supply what Compose resolves for the preflight.
+        jvm_defaults = dict(re.findall(r"^\s+([A-Z_]+_JAVA_TOOL_OPTIONS): \$\{\1:-([^}]*)\}$", overlay, re.M))
+        self.assertEqual(set(jvm_defaults), {"BACKEND_JAVA_TOOL_OPTIONS", "WORKER_JAVA_TOOL_OPTIONS"})
+        for name, default in jvm_defaults.items():
+            environment[name] = environment.get(name) or default
         url = "jdbc:postgresql://postgres:5432/vod_platform"
         result = subprocess.run([shell, str(REHEARSAL.ROOT / "deploy/tests/production-config-check.sh")],
                                 env=dict(environment, FLYWAY_URL=url, SPRING_DATASOURCE_URL=url, LC_ALL="C"),

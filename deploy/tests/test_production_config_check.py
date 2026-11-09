@@ -1,8 +1,10 @@
-"""Validate production credential and upload-limit preflight without services."""
+"""Validate production credential, upload-limit and JVM-option preflight without services."""
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 
 
@@ -11,6 +13,18 @@ SHELL = shutil.which("sh")
 if SHELL is None:
     git_shell = Path("C:/Program Files/Git/bin/sh.exe")
     SHELL = str(git_shell) if git_shell.exists() else None
+# #124 defaults, as issue #124 specifies them.
+JVM_DEFAULTS = {"BACKEND_JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError",
+                "WORKER_JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=30 -XX:+ExitOnOutOfMemoryError"}
+
+
+def overlay_jvm_defaults():
+    """Each `${NAME:-default}` expression of the production overlay, by variable name."""
+    overlay = (REPOSITORY / "deploy/docker-compose.prod.yml").read_text(encoding="utf-8")
+    found = {}
+    for key, name, default in re.findall(r"^\s+([A-Z_]+): \$\{([A-Z_]+_JAVA_TOOL_OPTIONS):-([^}]*)\}$", overlay, re.M):
+        found.setdefault(name, []).append((key, default))
+    return found
 
 JDBC_URL = "jdbc:postgresql://postgres:5432/fixture_platform"
 BASELINE = dict(
@@ -34,12 +48,12 @@ SECRETS = ("POSTGRES_PASSWORD", "POSTGRES_OWNER_PASSWORD", "POSTGRES_BACKEND_PAS
 
 @unittest.skipUnless(SHELL, "POSIX shell is required for preflight tests")
 class ProductionPreflightTests(unittest.TestCase):
-    def execute(self, name=None, value=None, **overrides):
-        environment = dict(os.environ, **BASELINE)
+    def execute(self, name=None, value=None, *, cwd=None, **overrides):
+        environment = dict(os.environ, **BASELINE, **JVM_DEFAULTS)
         if name:
             overrides[name] = value
         environment.update(overrides)
-        result = subprocess.run([SHELL, str(REPOSITORY / "deploy/tests/production-config-check.sh")],
+        result = subprocess.run([SHELL, str(REPOSITORY / "deploy/tests/production-config-check.sh")], cwd=cwd,
                                 env=environment, capture_output=True, text=True, encoding="utf-8", timeout=10)
         for sensitive_name in SECRETS:
             if environment[sensitive_name]:
@@ -151,6 +165,96 @@ class ProductionPreflightTests(unittest.TestCase):
         self.assert_rejected(result, "SPRING_DATASOURCE_URL must equal the Flyway URL")
         self.assert_rejected(self.execute("FLYWAY_URL", ""), "FLYWAY_URL must be set")
         self.assert_rejected(self.execute("SPRING_DATASOURCE_URL", ""), "SPRING_DATASOURCE_URL must equal the Flyway URL")
+
+    def test_overlay_gives_the_check_and_each_jvm_the_issue_defaults(self):
+        expressions = overlay_jvm_defaults()
+        self.assertEqual(sorted(expressions), sorted(JVM_DEFAULTS))
+        for name, default in JVM_DEFAULTS.items():
+            with self.subTest(name=name):
+                # One expression for the preflight and one for the JVM, with the same default.
+                self.assertEqual(sorted(expressions[name]), sorted([(name, default), ("JAVA_TOOL_OPTIONS", default)]))
+                self.assertEqual(self.execute(name, default).returncode, 0)
+
+    def test_jvm_options_must_keep_the_out_of_memory_exit(self):
+        for name in JVM_DEFAULTS:
+            for value in ("", " ", "-XX:MaxRAMPercentage=65", "-XX:MaxRAMPercentage=65 -XX:-ExitOnOutOfMemoryError",
+                          "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=65 -XX:-ExitOnOutOfMemoryError",
+                          "-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryErrors",
+                          "-XX:MaxRAMPercentage=65 -XX:+CrashOnOutOfMemoryError"):
+                with self.subTest(name=name, value=value):
+                    result = self.execute(name, value)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f"Production configuration rejected: {name} must enable -XX:+ExitOnOutOfMemoryError",
+                                  result.stderr)
+
+    def test_jvm_options_must_size_the_heap_from_the_memory_limit(self):
+        for name in JVM_DEFAULTS:
+            for value in ("-XX:+ExitOnOutOfMemoryError", "-XX:+ExitOnOutOfMemoryError -XX:InitialRAMPercentage=10",
+                          "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=",
+                          "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=0",
+                          "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=101",
+                          "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=065",
+                          "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=65.5",
+                          "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=-5",
+                          "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=sixty",
+                          "-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=0"):
+                with self.subTest(name=name, value=value):
+                    result = self.execute(name, value)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f"{name} must set -XX:MaxRAMPercentage to a whole number from 1 to 100", result.stderr)
+
+    def test_jvm_options_must_not_size_the_heap_without_the_memory_limit(self):
+        # Each of these lets the heap ignore the container memory limit, even with MaxRAMPercentage set:
+        # -Xms/-XX:InitialHeapSize raise the maximum to the initial size when it is larger, and JDK 21 does the
+        # same for -XX:MinHeapSize and for a new plus old generation size above it (-Xmn, -XX:NewSize, -XX:OldSize).
+        for name in JVM_DEFAULTS:
+            for option in ("-Xmx512m", "-Xms768m", "-XX:MaxHeapSize=536870912", "-XX:InitialHeapSize=805306368",
+                           "-XX:MinHeapSize=1g", "-Xmn900m", "-XX:NewSize=900m", "-XX:OldSize=900m",
+                           "-XX:MaxRAM=4g", "-XX:-UseContainerSupport"):
+                for value in (f"-XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError {option}",
+                              f"{option} -XX:MaxRAMPercentage=65 -XX:+ExitOnOutOfMemoryError"):
+                    with self.subTest(name=name, value=value):
+                        result = self.execute(name, value)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(f"Production configuration rejected: {name} must size the heap only with "
+                                      "-XX:MaxRAMPercentage", result.stderr)
+
+    def test_jvm_options_reject_quoting_the_jvm_would_parse_differently(self):
+        for name in JVM_DEFAULTS:
+            for value in ("'-XX:+ExitOnOutOfMemoryError' -XX:MaxRAMPercentage=65",
+                          '"-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=65"',
+                          "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=65 -Dpath=C:\\temp"):
+                with self.subTest(name=name, value=value):
+                    result = self.execute(name, value)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f"{name} must list plain options without quotes or backslashes", result.stderr)
+
+    def test_jvm_options_accept_overrides_that_keep_both_properties(self):
+        for name in JVM_DEFAULTS:
+            for value in ("-XX:-ExitOnOutOfMemoryError -XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=50",
+                          "-XX:MaxRAMPercentage=1 -XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=100",
+                          "-XX:+UseSerialGC\t-XX:MaxRAMPercentage=40 -XX:+ExitOnOutOfMemoryError -Xss512k",
+                          "-XX:InitialRAMPercentage=10 -XX:MaxRAMPercentage=40 -XX:+ExitOnOutOfMemoryError "
+                          "-XX:+UseContainerSupport -XX:MaxNewSize=64m -XX:MinHeapFreeRatio=20"):
+                with self.subTest(name=name, value=value):
+                    result = self.execute(name, value)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_jvm_options_are_not_glob_expanded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            # A file named like a valid option must not turn a pattern into that option.
+            option_file = "-XX:MaxRAMPercentage=65"
+            try:
+                (Path(directory) / option_file).touch()
+            except OSError:
+                pass
+            if os.listdir(directory) != [option_file]:  # NTFS reads ':' as an alternate data stream
+                self.skipTest("this file system cannot name a file like a JVM option")
+            for name in JVM_DEFAULTS:
+                with self.subTest(name=name):
+                    result = self.execute(name, "-XX:+ExitOnOutOfMemoryError -XX:MaxRAMPercentage=6?", cwd=directory)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f"{name} must set -XX:MaxRAMPercentage", result.stderr)
 
 
 if __name__ == "__main__":
