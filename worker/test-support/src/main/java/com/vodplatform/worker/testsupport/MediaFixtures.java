@@ -100,6 +100,10 @@ public final class MediaFixtures {
             case ROTATED_45_MP4 -> rotate(target, 45);
             case ROTATE_TAG_90_MKV -> encode(target, List.of("-i", "file:" + path(MediaFixture.H264_AAC_MP4)),
                     List.of("-map", "0", "-c", "copy", "-metadata:s:v:0", "rotate=90"));
+            // The muxer writes the reflection to the Display Matrix; the coded pixels are copied unchanged.
+            case VERTICAL_REFLECTION_MP4 -> encode(target,
+                    List.of("-display_vflip:v:0", "-i", "file:" + path(MediaFixture.H264_AAC_MP4)),
+                    List.of("-map", "0", "-c", "copy"));
             case H264_AAC_1080P30_MP4 -> encode(target, inputs(shortVideo("1920x1080", "30"), SHORT_TONE),
                     List.of("-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"), STEREO_AAC,
                     List.of("-movflags", "+faststart", "-shortest"));

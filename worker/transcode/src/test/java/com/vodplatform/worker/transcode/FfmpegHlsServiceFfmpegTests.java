@@ -62,7 +62,7 @@ class FfmpegHlsServiceFfmpegTests {
         Path outside = Files.createDirectory(temp.resolve("outside"));
         Files.writeString(outside.resolve("raw.mp4"), "not media");
         Path linked = Files.createSymbolicLink(job.resolve("linked"), outside);
-        MediaMetadata metadata = new MediaMetadata(Duration.ofSeconds(13), 640, 360, 0, "h264", 1000);
+        MediaMetadata metadata = new MediaMetadata(Duration.ofSeconds(13), 640, 360, 0, false, "h264", 1000);
 
         assertThatThrownBy(() -> service(policy()).transcode(job, linked.resolve("raw.mp4"), "mp4", metadata))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -181,6 +181,18 @@ class FfmpegHlsServiceFfmpegTests {
     }
 
     @Test
+    void verticalReflectionInTheDisplayMatrixIsAppliedToOutputPixels() {
+        Encoded encoded = encoded(MediaFixture.VERTICAL_REFLECTION_MP4);
+        assertThat(encoded.metadata().rotation()).isZero();
+
+        double reflected = psnr(encoded, "vflip");
+        double unreflected = psnr(encoded, "null");
+        assertThat(reflected).as("PSNR against vertically flipped pixels (unreflected PSNR: %.2f dB)", unreflected)
+                .isGreaterThan(unreflected + 3)
+                .isGreaterThan(20);
+    }
+
+    @Test
     void theEncodedHdrSourceIsEightBitBt709() throws IOException {
         // The source keeps PQ/BT.2020 on both the frames and the stream; output options alone would keep them.
         JsonNode source = tools.probeJson(fixtures.path(HEVC_MAIN10_HDR_AC3_MKV), HEVC_MAIN10_HDR_AC3_MKV.demuxer())
@@ -227,7 +239,7 @@ class FfmpegHlsServiceFfmpegTests {
         Path input = raw(job, COVER_ART_ONLY_MP4);
         // The probe rejects this file first (UNSUPPORTED_MEDIA); here FFmpeg itself must not turn the attached
         // picture into a video: 0:V:0 matches no stream that is not an attached picture.
-        MediaMetadata metadata = new MediaMetadata(Duration.ofSeconds(13), 320, 320, 0, "png", null);
+        MediaMetadata metadata = new MediaMetadata(Duration.ofSeconds(13), 320, 320, 0, false, "png", null);
 
         assertCode(() -> service(policy()).transcode(job, input, "mp4", metadata), ENCODE_FAILED);
         assertThat(job.resolve(FfmpegHlsService.HLS_DIRECTORY).resolve("segments")).isEmptyDirectory();
@@ -269,10 +281,11 @@ class FfmpegHlsServiceFfmpegTests {
         }
     }
 
-    /** The PSNR of the first output frames against the coded source frames under {@code transform}. */
+    /** Compares coded pixels with autorotation disabled on both inputs, applying only {@code transform} to the source. */
     private static double psnr(Encoded encoded, String transform) {
         MediaTools.Result result = tools.ffmpeg(List.of("-nostdin", "-hide_banner", "-loglevel", "info",
-                "-protocol_whitelist", "file", "-f", "mpegts", "-i", "file:" + encoded.output().segments().getFirst(),
+                "-protocol_whitelist", "file", "-noautorotate", "-f", "mpegts",
+                "-i", "file:" + encoded.output().segments().getFirst(),
                 "-noautorotate", "-f", encoded.fixture().demuxer().ffmpegName(), "-i", "file:" + encoded.input(),
                 "-lavfi", "[0:v]setpts=PTS-STARTPTS[out];[1:v]" + transform + ",setpts=PTS-STARTPTS[source];"
                         + "[out][source]psnr", "-frames:v", "10", "-f", "null", "-"));

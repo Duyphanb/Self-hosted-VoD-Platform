@@ -22,6 +22,7 @@ public enum MediaFixture {
     ROTATED_MINUS_90_MKV("rotated-minus-90.mkv", Kind.VALID),
     ROTATED_180_MP4("rotated-180.mp4", Kind.VALID),
     ROTATE_TAG_90_MKV("rotate-tag-90.mkv", Kind.VALID),
+    VERTICAL_REFLECTION_MP4("vertical-reflection.mp4", Kind.VALID),
     // The Issue 5.5 encode matrix: geometry, frame-rate and scene-cut families. These are 7 s long
     // (MediaFixtures.SHORT_SOURCE_SECONDS): one full 6 s segment and a short final one keep CI fast.
     H264_AAC_1080P30_MP4("h264-aac-1080p30.mp4", Kind.VALID),

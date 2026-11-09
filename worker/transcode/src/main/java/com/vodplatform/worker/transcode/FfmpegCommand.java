@@ -4,6 +4,7 @@ import com.vodplatform.worker.probe.AllowedDecoder;
 import com.vodplatform.worker.probe.MediaMetadata;
 import com.vodplatform.worker.probe.TrustedDemuxer;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -13,10 +14,9 @@ import java.util.List;
  * <ul>
  *   <li>Input: {@code -nostdin}, the file-only protocol whitelist, the D26 decoder whitelist and stream cap,
  *       the trusted demuxer and an absolute {@code file:} input.</li>
- *   <li>Orientation: FFmpeg's autorotation stays on, fed with the D26 probed rotation through
- *       {@code -display_rotation}. FFmpeg 7.1 autorotates only from a Display Matrix and ignores the legacy
- *       {@code rotate} tag that D26 accepts as a fallback, so without it a tag-only file would keep its coded
- *       orientation while its metadata says otherwise; with it the output always has the probed orientation.</li>
+ *   <li>Orientation: FFmpeg's autorotation applies the native Display Matrix, including reflections. FFmpeg 7.1
+ *       ignores the legacy {@code rotate} tag during autorotation, so only a tag-derived rotation is supplied
+ *       through {@code -display_rotation}.</li>
  *   <li>Geometry: scaled into the box of {@code HLS_TARGET_HEIGHT} (short side) by 16/9 of it (long side) in
  *       the display orientation, never upscaled ({@code min(box, input)}), aspect kept and both sides rounded
  *       down to even.</li>
@@ -37,8 +37,8 @@ final class FfmpegCommand {
      * @param input        the absolute path of the raw copy
      * @param hlsDirectory the absolute HLS output directory; it must not contain {@code %}, which the segment
      *                     file name pattern would expand
-     * @param metadata     the probed metadata: its display size picks the box orientation, its rotation feeds
-     *                     the autorotation
+     * @param metadata     the probed metadata: display size picks the box orientation and a tag-derived rotation
+     *                     supplies the fallback for autorotation
      */
     static List<String> arguments(TranscodeSettings settings, TrustedDemuxer demuxer, Path input, Path hlsDirectory,
                                   MediaMetadata metadata) {
@@ -47,12 +47,16 @@ final class FfmpegCommand {
             throw new IllegalArgumentException("The HLS directory must be an absolute path without '%'");
         }
         String threads = String.valueOf(settings.threads());
-        return List.of(settings.ffmpegPath(), "-nostdin", "-hide_banner",
+        List<String> arguments = new ArrayList<>(List.of(settings.ffmpegPath(), "-nostdin", "-hide_banner",
                 "-xerror", "-nostats", "-loglevel", "error", "-progress", "pipe:1", "-stats_period", "1",
                 "-protocol_whitelist", "file",
                 "-codec_whitelist", AllowedDecoder.codecWhitelist(),
-                "-max_streams", String.valueOf(settings.maxStreams()),
-                "-display_rotation:V:0", String.valueOf(metadata.rotation()),
+                "-max_streams", String.valueOf(settings.maxStreams())));
+        if (metadata.rotationFromLegacyTag()) {
+            arguments.add("-display_rotation:V:0");
+            arguments.add(String.valueOf(metadata.rotation()));
+        }
+        arguments.addAll(List.of(
                 "-f", demuxer.ffmpegName(),
                 "-i", "file:" + input,
                 "-map", "0:V:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1",
@@ -68,7 +72,8 @@ final class FfmpegCommand {
                 "-hls_list_size", "0", "-hls_segment_type", "mpegts", "-hls_flags", "independent_segments",
                 "-hls_base_url", SEGMENTS + "/",
                 "-hls_segment_filename", hlsDirectory.resolve(SEGMENTS).resolve(SEGMENT_PATTERN).toString(),
-                hlsDirectory.resolve(PLAYLIST).toString());
+                hlsDirectory.resolve(PLAYLIST).toString()));
+        return List.copyOf(arguments);
     }
 
     /** Box in display orientation: landscape (and square) 1280x720, portrait 720x1280 for the 720 policy. */

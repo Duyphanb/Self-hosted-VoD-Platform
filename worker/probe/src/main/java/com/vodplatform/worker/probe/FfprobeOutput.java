@@ -61,8 +61,8 @@ final class FfprobeOutput {
         if (selected == null) throw failure(UNSUPPORTED_MEDIA, "Media has no video stream other than cover art");
         int codedWidth = positiveInt(selected.path("width"), "width");
         int codedHeight = positiveInt(selected.path("height"), "height");
-        int rotation = rotation(selected);
-        boolean quarterTurn = rotation == 90 || rotation == 270;
+        Rotation rotation = rotation(selected);
+        boolean quarterTurn = rotation.degrees() == 90 || rotation.degrees() == 270;
         int width = quarterTurn ? codedHeight : codedWidth;
         int height = quarterTurn ? codedWidth : codedHeight;
         BigDecimal seconds = durationSeconds(selected, root.path("format"));
@@ -74,8 +74,8 @@ final class FfprobeOutput {
         if (seconds.compareTo(BigDecimal.valueOf(settings.maxDurationSeconds())) > 0) {
             throw failure(MEDIA_LIMIT_EXCEEDED, "Media duration exceeds WORKER_MAX_DURATION_SECONDS");
         }
-        return new MediaMetadata(toDuration(seconds), width, height, rotation, text(selected.path("codec_name")),
-                bitrate(root.path("format").path("bit_rate")));
+        return new MediaMetadata(toDuration(seconds), width, height, rotation.degrees(), rotation.fromLegacyTag(),
+                text(selected.path("codec_name")), bitrate(root.path("format").path("bit_rate")));
     }
 
     private static JsonNode parse(byte[] json) {
@@ -95,25 +95,30 @@ final class FfprobeOutput {
      *
      * <p>The legacy tag counts clockwise: FFmpeg before 5.0 exported a Display Matrix of -90 degrees as
      * {@code rotate=90} and rotated such a file clockwise for display. The tag is therefore negated into the
-     * counterclockwise matrix convention, so {@code rotate=90} is 270. Issue 5.5 hands this one rotation to
-     * FFmpeg, whose 7.1 autorotation no longer reads the tag, so the sign decides the output orientation.
+     * counterclockwise matrix convention, so {@code rotate=90} is 270. Issue 5.5 supplies this fallback angle
+     * to FFmpeg 7.1, whose autorotation does not read the tag.
      */
-    private static int rotation(JsonNode stream) {
+    private static Rotation rotation(JsonNode stream) {
         JsonNode sideDataList = stream.path("side_data_list");
         if (sideDataList.isArray()) {
             for (JsonNode sideData : sideDataList) {
-                if ("Display Matrix".equals(text(sideData.path("side_data_type"))) && sideData.has("rotation")) {
-                    return rightAngle(finiteNumber(sideData.get("rotation"), "rotation"));
+                if ("Display Matrix".equals(text(sideData.path("side_data_type")))) {
+                    return new Rotation(rightAngle(finiteNumber(sideData.path("rotation"), "rotation")), false);
                 }
             }
         }
         JsonNode tags = stream.path("tags");
         if (tags.isObject()) {
             for (Map.Entry<String, JsonNode> tag : tags.properties()) {
-                if (tag.getKey().equalsIgnoreCase("rotate")) return rightAngle(-finiteNumber(tag.getValue(), "rotation"));
+                if (tag.getKey().equalsIgnoreCase("rotate")) {
+                    return new Rotation(rightAngle(-finiteNumber(tag.getValue(), "rotation")), true);
+                }
             }
         }
-        return 0;
+        return new Rotation(0, false);
+    }
+
+    private record Rotation(int degrees, boolean fromLegacyTag) {
     }
 
     /** {@code counterclockwise} rounded to whole degrees and normalized modulo 360; only right angles pass. */

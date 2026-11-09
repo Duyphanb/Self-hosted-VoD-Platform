@@ -23,18 +23,17 @@ class FfmpegCommandTests {
     Path directory;
 
     @Test
-    void movInputHasTheExactIssueArgumentList() {
+    void movInputWithDisplayMatrixHasTheExactIssueArgumentList() {
         Path job = directory.resolve("job-1");
         Path input = job.resolve("raw.mp4");
         Path hls = job.resolve("hls");
 
-        assertThat(FfmpegCommand.arguments(POLICY, TrustedDemuxer.MOV, input, hls, landscape(0))).containsExactly(
+        assertThat(FfmpegCommand.arguments(POLICY, TrustedDemuxer.MOV, input, hls, landscape(180))).containsExactly(
                 "ffmpeg", "-nostdin", "-hide_banner",
                 "-xerror", "-nostats", "-loglevel", "error", "-progress", "pipe:1", "-stats_period", "1",
                 "-protocol_whitelist", "file",
                 "-codec_whitelist", WHITELIST,
                 "-max_streams", "8",
-                "-display_rotation:V:0", "0",
                 "-f", "mov",
                 "-i", "file:" + input,
                 "-map", "0:V:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1",
@@ -53,13 +52,13 @@ class FfmpegCommandTests {
     }
 
     @Test
-    void matroskaPortraitInputHasTheExactIssueArgumentList() {
-        // A 1080x1920 display (a 1920x1080 frame with a -90 degree Display Matrix): the 720x1280 portrait box.
+    void matroskaPortraitInputWithLegacyRotateTagHasTheExactIssueArgumentList() {
+        // A legacy rotate=90 tag turns a 1920x1080 frame into a 1080x1920 display.
         String ffmpeg = directory.resolve("bin").resolve("ffmpeg").toString();
         TranscodeSettings settings = new TranscodeSettings(ffmpeg, 60, new BigDecimal("3"), 4, 480, 2500, 2, 3);
-        Path input = directory.resolve("job-2").resolve("raw.webm");
+        Path input = directory.resolve("job-2").resolve("raw.mkv");
         Path hls = directory.resolve("job-2").resolve("hls");
-        MediaMetadata portrait = new MediaMetadata(Duration.ofSeconds(13), 1080, 1920, 270, "vp9", null);
+        MediaMetadata portrait = new MediaMetadata(Duration.ofSeconds(13), 1080, 1920, 270, true, "vp9", null);
 
         assertThat(FfmpegCommand.arguments(settings, TrustedDemuxer.MATROSKA, input, hls, portrait)).containsExactly(
                 ffmpeg, "-nostdin", "-hide_banner",
@@ -89,21 +88,19 @@ class FfmpegCommandTests {
     @CsvSource({"640, 360, 1280, 720", "360, 640, 720, 1280", "1920, 1080, 1280, 720", "1080, 1920, 720, 1280",
             "720, 720, 1280, 720", "641, 359, 1280, 720"})
     void theBoxFollowsTheDisplayOrientation(int width, int height, int boxWidth, int boxHeight) {
-        MediaMetadata metadata = new MediaMetadata(Duration.ofSeconds(5), width, height, 0, "h264", null);
+        MediaMetadata metadata = new MediaMetadata(Duration.ofSeconds(5), width, height, 0, false, "h264", null);
 
         assertThat(FfmpegCommand.videoFilter(POLICY, metadata))
                 .startsWith("scale=w=min(" + boxWidth + "\\,iw):h=min(" + boxHeight + "\\,ih):");
     }
 
     @Test
-    void theRotationFedToAutorotationIsTheProbedOne() {
+    void inputWithoutALegacyRotateTagUsesNativeAutorotation() {
         for (int rotation : new int[] {0, 90, 180, 270}) {
             List<String> arguments = FfmpegCommand.arguments(POLICY, TrustedDemuxer.MOV, directory.resolve("raw.mp4"),
                     directory.resolve("hls"), landscape(rotation));
 
-            assertThat(arguments).containsSequence("-display_rotation:V:0", String.valueOf(rotation));
-            // Autorotation stays on: FFmpeg inserts the transpose itself.
-            assertThat(arguments).doesNotContain("-noautorotate", "-autorotate");
+            assertThat(arguments).doesNotContain("-display_rotation:V:0", "-noautorotate", "-autorotate");
         }
     }
 
@@ -113,8 +110,8 @@ class FfmpegCommandTests {
                 directory.resolve("hls"), landscape(0));
         int input = arguments.indexOf("-i");
 
-        for (String option : List.of("-protocol_whitelist", "-codec_whitelist", "-max_streams", "-display_rotation:V:0", "-f")) {
-            assertThat(arguments.indexOf(option)).as(option).isLessThan(input);
+        for (String option : List.of("-protocol_whitelist", "-codec_whitelist", "-max_streams", "-f")) {
+            assertThat(arguments.indexOf(option)).as(option).isBetween(1, input - 1);
         }
         assertThat(arguments.lastIndexOf("-f")).isGreaterThan(input);
         assertThat(arguments).doesNotContain("-", "pipe:0", "-y", "-level", "-level:v", "copy");
@@ -135,6 +132,7 @@ class FfmpegCommandTests {
 
     private static MediaMetadata landscape(int rotation) {
         boolean quarterTurn = rotation == 90 || rotation == 270;
-        return new MediaMetadata(Duration.ofSeconds(13), quarterTurn ? 360 : 640, quarterTurn ? 640 : 360, rotation, "h264", 1000);
+        return new MediaMetadata(Duration.ofSeconds(13), quarterTurn ? 360 : 640, quarterTurn ? 640 : 360, rotation,
+                false, "h264", 1000);
     }
 }

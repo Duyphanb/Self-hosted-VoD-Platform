@@ -16,7 +16,7 @@ class MediaFixtureTests {
         assertThat(names).doesNotHaveDuplicates().allMatch(name -> name.matches("[a-z0-9-]+\\.(mp4|mov|mkv|webm)"));
         assertThat(MediaFixture.VP9_OPUS_WEBM.demuxer()).isEqualTo(MediaFixture.Demuxer.MATROSKA);
         assertThat(MediaFixture.H264_AAC_MP4.demuxer()).isEqualTo(MediaFixture.Demuxer.MOV);
-        assertThat(Arrays.stream(MediaFixture.values()).filter(MediaFixture::valid)).hasSize(19);
+        assertThat(Arrays.stream(MediaFixture.values()).filter(MediaFixture::valid)).hasSize(20);
     }
 
     @Test

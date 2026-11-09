@@ -76,7 +76,7 @@ class FfprobeOutputTests {
     void readsTheD25OutputOfARotatedFile() {
         MediaMetadata metadata = metadata(ROTATED_MP4);
 
-        assertThat(metadata).isEqualTo(new MediaMetadata(Duration.ofSeconds(2), 180, 320, 90, "h264", 383_788));
+        assertThat(metadata).isEqualTo(new MediaMetadata(Duration.ofSeconds(2), 180, 320, 90, false, "h264", 383_788));
         assertThat(metadata.durationSeconds()).isEqualTo(2);
     }
 
@@ -132,6 +132,7 @@ class FfprobeOutputTests {
         MediaMetadata metadata = metadata(probe(format("5.0"), video(640, 360, displayMatrix(reported))));
 
         assertThat(List.of(metadata.rotation(), metadata.width(), metadata.height())).containsExactly(rotation, width, height);
+        assertThat(metadata.rotationFromLegacyTag()).isFalse();
     }
 
     @ParameterizedTest
@@ -146,12 +147,15 @@ class FfprobeOutputTests {
         assertThat(metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"ROTATE\":\"90\"}"))).rotation()).isEqualTo(270);
         MediaMetadata counterclockwise = metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"-90\"}")));
         assertThat(List.of(counterclockwise.rotation(), counterclockwise.width())).containsExactly(90, 360);
+        assertThat(counterclockwise.rotationFromLegacyTag()).isTrue();
         assertThat(metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"180\"}"))).rotation()).isEqualTo(180);
         assertThat(metadata(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"270\"}"))).rotation()).isEqualTo(90);
         assertFails(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"45\"}")), UNSUPPORTED_MEDIA);
         // The Display Matrix wins over the tag; other side data carries no rotation.
-        assertThat(metadata(probe(format("5.0"), video(640, 360, displayMatrix("0"), "\"tags\":{\"rotate\":\"90\"}"))).rotation())
-                .isZero();
+        MediaMetadata matrixWins = metadata(probe(format("5.0"),
+                video(640, 360, displayMatrix("0"), "\"tags\":{\"rotate\":\"90\"}")));
+        assertThat(matrixWins.rotation()).isZero();
+        assertThat(matrixWins.rotationFromLegacyTag()).isFalse();
         assertThat(metadata(probe(format("5.0"), video(640, 360, "\"side_data_list\":[{\"side_data_type\":\"Mastering display "
                 + "metadata\"},{\"side_data_type\":\"Display Matrix\",\"rotation\":-90}]"))).rotation()).isEqualTo(270);
         assertThat(metadata(probe(format("5.0"), video(640, 360,
@@ -163,6 +167,8 @@ class FfprobeOutputTests {
         assertFails(probe(format("5.0"), video(640, 360, "\"tags\":{\"rotate\":\"ninety\"}")), PROBE_FAILED);
         assertFails(probe(format("5.0"), video(640, 360, displayMatrix("\"N/A\""))), PROBE_FAILED);
         assertFails(probe(format("5.0"), video(640, 360, displayMatrix("true"))), PROBE_FAILED);
+        assertFails(probe(format("5.0"), video(640, 360, "\"side_data_list\":[{\"side_data_type\":\"Display Matrix\"}]",
+                "\"tags\":{\"rotate\":\"90\"}")), PROBE_FAILED);
     }
 
     @ParameterizedTest

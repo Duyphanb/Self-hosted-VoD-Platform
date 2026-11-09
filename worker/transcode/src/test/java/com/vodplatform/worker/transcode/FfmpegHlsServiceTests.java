@@ -23,7 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 /** Path rules, ordering and the outcome mapping; FfmpegHlsServiceFfmpegTests runs the service with the D25 binary. */
 class FfmpegHlsServiceTests {
-    private static final MediaMetadata METADATA = new MediaMetadata(Duration.ofSeconds(13), 640, 360, 0, "h264", 1000);
+    private static final MediaMetadata METADATA = new MediaMetadata(Duration.ofSeconds(13), 640, 360, 0, false, "h264", 1000);
     @TempDir
     Path directory;
 
