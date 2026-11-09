@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.exception.UploadDatabaseException;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
@@ -55,12 +56,12 @@ import java.util.UUID;
 
 /**
  * The upload operation through the assembled application (bearer chain, route gate, controller,
- * service and H2), with storage and the broker mocked. Every response is checked against the API
- * contract by the auto-configured MockMvc.
+ * service and the test PostgreSQL), with storage and the broker mocked. Every response is checked
+ * against the API contract by the auto-configured MockMvc.
  */
 @SpringBootTest(properties = {"auth.tokens.secret=test-only-secret-with-at-least-32-bytes"})
 @AutoConfigureMockMvc
-class VideoUploadApiIntegrationTests {
+class VideoUploadApiIntegrationTests implements PostgresTestDatabase {
 
     private static final byte[] MP4 = {0, 0, 0, 8, 'f', 't', 'y', 'p'};
 

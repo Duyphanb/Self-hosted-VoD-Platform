@@ -13,6 +13,7 @@ import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -25,7 +26,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -51,16 +51,13 @@ import tools.jackson.databind.ObjectMapper;
 )
 @AutoConfigureMockMvc
 @Import(JwtSecurityIntegrationTests.SecurityProbeController.class)
-class JwtSecurityIntegrationTests {
+class JwtSecurityIntegrationTests implements PostgresTestDatabase {
 
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
     private ObjectMapper objectMapper;
-
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private UserRepository userRepository;
@@ -82,7 +79,6 @@ class JwtSecurityIntegrationTests {
     @BeforeEach
     void createRegisteredUser() {
         cleanDatabase();
-        jdbcTemplate.update("INSERT INTO roles (name) VALUES (?)", "ROLE_USER");
         RoleEntity role = roleRepository.findByName("ROLE_USER").orElseThrow();
         Instant now = Instant.now();
         userId = UUID.randomUUID();
@@ -103,7 +99,6 @@ class JwtSecurityIntegrationTests {
     void cleanDatabase() {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
-        roleRepository.deleteAll();
     }
 
     @Test
