@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -34,7 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 )
 @AutoConfigureMockMvc
 @Import(AdminAuthorizationIntegrationTests.AdminAuthorizationProbeController.class)
-class AdminAuthorizationIntegrationTests {
+class AdminAuthorizationIntegrationTests implements PostgresTestDatabase {
 
     private static final RequestPostProcessor PROBE = offContract(
             "test-only probe controller for method security; /test/admin-authorization is not an API operation");

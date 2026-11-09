@@ -5,6 +5,7 @@ import static org.mockito.Mockito.when;
 
 import com.vodplatform.common.health.HealthResponse;
 import com.vodplatform.common.storage.StorageHealthIndicator;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import org.springframework.context.annotation.Import;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
 )
 @AutoConfigureRestTestClient
 @Import(RabbitReadinessStub.class)
-class VodBackendApplicationTests {
+class VodBackendApplicationTests implements PostgresTestDatabase {
 
     @MockitoBean
     private StorageHealthIndicator storageHealthIndicator;
