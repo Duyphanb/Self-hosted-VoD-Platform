@@ -37,6 +37,43 @@ The regular CI `Skeleton build checks` job runs all three checks. The manual syn
 upload headroom remain the public-deployment gate in
 [#180](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/180).
 
+## Backend PostgreSQL tests (#119)
+
+`mvn -B -ntp verify` in `backend/` needs Docker. Every Spring context test in `backend/common`
+implements `PostgresTestDatabase` (`src/test/java/com/vodplatform/common/support/`), so its context
+runs on one PostgreSQL 16 Testcontainers database that the whole test JVM shares:
+
+- The image is the digest the CI schema-migration service pins (`deploy/tests/test_migration_guards.py`
+  keeps them equal), initialised with the ICU `vi` collation like Compose and CI.
+- Flyway applies the committed migrations (V1 onward, with naming validation) when each context
+  starts, and Hibernate only validates the entity mappings (`ddl-auto=validate`).
+  `PostgresMigrationTests` checks both. Flyway is a test-scope dependency only; at runtime the
+  Flyway container still owns the schema.
+- The container's `@ServiceConnection` details replace `spring.datasource.*` and `spring.flyway.*`,
+  so an exported `SPRING_DATASOURCE_URL` cannot point a test at a developer database
+  (`PostgresTestDatabaseIsolationTests`). `PostgresTestDatabaseCoverageTests` fails when a
+  `@SpringBootTest` class does not implement the interface directly. A subclass declares it again,
+  because JUnit reads the skip condition only from directly implemented interfaces.
+- The contexts share one database: a test removes the rows it commits (or rolls back with
+  `@Transactional`) and uses the `ROLE_USER`/`ROLE_ADMIN` rows seeded by V2 and V3.
+- PostgreSQL-only behaviour now runs in the JVM: the `ux_users_email_identity` 409 for a
+  case-variant registration racing an uncommitted account (`EmailIdentityPostgresTests`, ADR-008),
+  and the upload in-flight index, lock wait and ambiguous-commit suites (`UploadPostgresTests`,
+  `UploadEndpointPostgresTests`).
+
+On a machine without Docker, `mvn -B -ntp verify -DskipPostgresTests` reports these tests as
+skipped. CI never sets the property, and the `Backend Maven build and test` job requires executed
+reports, with no skipped test, for the PostgreSQL-specific suites.
+
+The `@DataJpaTest` slices in `auth`, `catalog` and `encoding` still run on H2 with entity-generated
+schemas; those modules cannot see the migrations. Their PostgreSQL suites run against an already
+migrated database instead: `CreationOrderPostgresTest` (catalog creation order, lock waits and
+deadlock retries) with `CATALOG_TEST_POSTGRES_URL` (credentials in the URL), and
+`VideoAssetPostgresTest` with `ENCODING_TEST_POSTGRES_URL`, `_USER` and `_PASSWORD` (the exact
+loopback database `vod_upload_test`). The `Flyway schema migration` CI job runs both against its
+migrated service, with `ENCODING_TEST_POSTGRES_REQUIRED=true`, and requires their executed reports.
+Without those variables both suites are skipped.
+
 ## Worker media tests (#123)
 
 Test media is generated at test time; no media file is committed. `worker/test-support`

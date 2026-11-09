@@ -16,6 +16,7 @@ import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.catalog.persistence.Person;
 import com.vodplatform.catalog.persistence.PersonRepository;
 import com.vodplatform.catalog.service.VideoStatusLookup;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.encoding.persistence.EncodingJob;
 import com.vodplatform.encoding.persistence.EncodingJobRepository;
 import com.vodplatform.encoding.persistence.VideoAsset;
@@ -42,7 +43,7 @@ import org.springframework.context.ApplicationContext;
         }
 )
 @AutoConfigureMockMvc
-class CatalogPersistenceContextTests {
+class CatalogPersistenceContextTests implements PostgresTestDatabase {
 
     @Autowired
     private ApplicationContext applicationContext;
