@@ -3,6 +3,7 @@ package com.vodplatform.common;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.rabbitmq.client.GetResponse;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.encoding.config.EncodingQueueProperties;
 import com.vodplatform.encoding.messaging.EncodingJobMessage;
 import com.vodplatform.encoding.messaging.EncodingJobMessageCodec;
@@ -34,7 +35,7 @@ import tools.jackson.databind.json.JsonMapper;
 /** Explicit opt-in: mutates only a fresh Compose project owned by the smoke helper. */
 @SpringBootTest(properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes")
 @EnabledIf("configured")
-class EncodingPublisherBrokerTests {
+class EncodingPublisherBrokerTests implements PostgresTestDatabase {
     private static final Logger log = LoggerFactory.getLogger(EncodingPublisherBrokerTests.class);
     @Autowired EncodingJobPublisher publisher;
     @Autowired EncodingJobMessageCodec codec;

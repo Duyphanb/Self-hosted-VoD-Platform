@@ -12,6 +12,7 @@ import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.catalog.persistence.MovieSort;
 import com.vodplatform.catalog.persistence.MovieStatus;
 import com.vodplatform.catalog.service.MovieService;
+import com.vodplatform.common.support.PostgresTestDatabase;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import java.sql.Timestamp;
@@ -42,7 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
 })
 @AutoConfigureMockMvc
 @Transactional
-class VideoStatusApiIntegrationTests {
+class VideoStatusApiIntegrationTests implements PostgresTestDatabase {
 
     private static final Instant T0 = Instant.parse("2026-10-01T00:00:00Z");
     private static final String BODY = """

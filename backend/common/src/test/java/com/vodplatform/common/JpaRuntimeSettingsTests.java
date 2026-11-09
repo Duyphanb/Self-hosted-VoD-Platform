@@ -2,6 +2,7 @@ package com.vodplatform.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vodplatform.common.support.PostgresTestDatabase;
 import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +24,7 @@ import org.springframework.orm.jpa.support.OpenEntityManagerInViewInterceptor;
         }
 )
 @AutoConfigureMockMvc
-class JpaRuntimeSettingsTests {
+class JpaRuntimeSettingsTests implements PostgresTestDatabase {
 
     @Autowired
     private ApplicationContext applicationContext;

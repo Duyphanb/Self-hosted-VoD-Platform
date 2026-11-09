@@ -14,6 +14,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.encoding.messaging.EncodingJobMessage;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
 import com.vodplatform.encoding.messaging.PublishOutcome;
@@ -44,7 +45,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 @SpringBootTest(properties = {"auth.tokens.secret=test-only-secret-with-at-least-32-bytes"})
-class UploadTransactionTests {
+class UploadTransactionTests implements PostgresTestDatabase {
     @Autowired VideoUploadService upload;
 
     @Autowired EncodingJobService service;

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.exception.UploadDatabaseException;
 import com.vodplatform.encoding.exception.VideoUploadInProgressException;
@@ -18,14 +19,11 @@ import com.vodplatform.upload.VideoAssetStatusResponse;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -47,47 +45,18 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.sql.DataSource;
 
 /**
- * Uses only a freshly migrated disposable vod_upload_test database. Reusing it with leftover
- * pending jobs deliberately fails relay fixture-ownership checks before the relay can touch other
- * jobs.
+ * The upload transaction tests plus the PostgreSQL-only cases (the V5 in-flight index, its lock
+ * wait and ambiguous commits) on the shared test database ({@link PostgresTestDatabase}). The relay
+ * fixture-ownership check fails, before the relay runs, when another test left a pending job behind.
+ * The interface is repeated because JUnit reads its skip condition only from directly implemented
+ * interfaces.
  */
-@SpringBootTest(
-        properties = {
-            "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
-            "spring.jpa.hibernate.ddl-auto=validate"
-        })
-@EnabledIf("configured")
+@SpringBootTest(properties = "auth.tokens.secret=test-only-secret-with-at-least-32-bytes")
 @Import(UploadPostgresTests.Faults.class)
-class UploadPostgresTests extends UploadTransactionTests {
+class UploadPostgresTests extends UploadTransactionTests implements PostgresTestDatabase {
     static final AtomicReference<String> fault = new AtomicReference<>("");
 
     static final AtomicBoolean failReadback = new AtomicBoolean();
-
-    static boolean configured() {
-        return "true".equals(System.getenv("ENCODING_TEST_POSTGRES_REQUIRED"))
-                || System.getenv("ENCODING_TEST_POSTGRES_URL") != null;
-    }
-
-    @DynamicPropertySource
-    static void database(DynamicPropertyRegistry registry) {
-        String url = System.getenv("ENCODING_TEST_POSTGRES_URL");
-        requireDisposableUrl(url);
-        registry.add("spring.datasource.url", () -> url);
-        registry.add(
-                "spring.datasource.username", () -> System.getenv("ENCODING_TEST_POSTGRES_USER"));
-        registry.add(
-                "spring.datasource.password",
-                () -> System.getenv("ENCODING_TEST_POSTGRES_PASSWORD"));
-    }
-
-    static void requireDisposableUrl(String url) {
-        if (url == null
-                || !url.matches(
-                        "jdbc:postgresql://(localhost|127\\.0\\.0\\.1):[0-9]+/vod_upload_test")) {
-            throw new IllegalStateException(
-                    "Exact disposable loopback database vod_upload_test is required");
-        }
-    }
 
     @AfterEach
     void resetFaults() {

@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -50,7 +51,7 @@ import org.springframework.web.bind.annotation.RestController;
 )
 @AutoConfigureMockMvc
 @Import(UuidBindingIntegrationTests.UuidProbeController.class)
-class UuidBindingIntegrationTests {
+class UuidBindingIntegrationTests implements PostgresTestDatabase {
 
     private static final RequestPostProcessor PROBE = offContract(
             "test-only probe controller for UUID binding; /test/uuids is not an API operation");

@@ -105,6 +105,7 @@ Required configuration groups:
 - `FFMPEG_PATH`, `FFPROBE_PATH`, `WORKER_TEMP_DIR`, `WORKER_CONCURRENCY`, `WORKER_PREFETCH`, `HLS_SEGMENT_SECONDS`, `HLS_TARGET_HEIGHT`, `HLS_VIDEO_MAXRATE_KBPS` and `WORKER_FFMPEG_THREADS`
 - the worker media safeguards `WORKER_FFPROBE_TIMEOUT_SECONDS`, `WORKER_FFMPEG_TIMEOUT_*`, `WORKER_MAX_*`, `WORKER_OUTPUT_BUDGET_KBPS` and `WORKER_DISK_RESERVE_MB`
 - `NGINX_HTTP_PORT`, `NGINX_HTTPS_PORT`, `PUBLIC_DOMAIN`, `LETSENCRYPT_EMAIL`
+- production JVM options: optional `BACKEND_JAVA_TOOL_OPTIONS` and `WORKER_JAVA_TOOL_OPTIONS` overrides of the overlay's `JAVA_TOOL_OPTIONS` defaults (#124; see the [deployment preflight](../deployment/README.md#production-credential-preflight))
 
 Frontend public runtime values should point at Nginx paths:
 
@@ -137,7 +138,7 @@ The backend adapter accepts a caller-owned InputStream, known non-negative lengt
 
 `BoundedStorageDns` separately bounds each resolver wait by the connect budget (capped at 2000 ms for health). A JVM-wide daemon pool permits at most 16 actual DNS lookups, with direct handoff and no queued lookup tasks. When all workers are busy, callers wait for a handoff slot within their original DNS deadline, so a healthy cold-pool burst can drain instead of failing immediately. Execution then gets only that deadline's remaining budget; slot admission and lookup do not each receive a fresh timeout. A stuck/full pool eventually returns a fixed safe failure. Timed-out lookups are cancelled best effort; if native DNS ignores interruption, its worker remains occupied until that lookup ends, so repeated failures cannot create unlimited resolver threads. Idle workers expire after 30 seconds. Clients do not close the shared pool.
 
-The shared client has an explicit dispatcher with 64 global/32 per-host requests and a fair internal backstop of eight concurrent PUTs. The invariant is `active PUTs < maxRequestsPerHost`, leaving headroom for SDK abort callbacks, GET and DELETE. Raising dispatcher limits alone is insufficient: minio-java 9.0.3 synchronously joins abort from a failed multipart callback before releasing that call's slot. Eight PUTs have an estimated 64–96 MiB SDK part-buffer budget; review measured about 65 MiB of additional live heap. Budget this against the effective JVM max heap, about 185 MiB with the current 1 CPU/SerialGC production defaults, rather than the full 768 MiB container limit. This is an internal SDK/heap safeguard above expected MVP load; global upload rate/connection limits remain deferred by ADR-010. A caller waiting for a PUT permit gets at most `MINIO_CONNECT_TIMEOUT_MS` before the same safe storage IOException.
+The shared client has an explicit dispatcher with 64 global/32 per-host requests and a fair internal backstop of eight concurrent PUTs. The invariant is `active PUTs < maxRequestsPerHost`, leaving headroom for SDK abort callbacks, GET and DELETE. Raising dispatcher limits alone is insufficient: minio-java 9.0.3 synchronously joins abort from a failed multipart callback before releasing that call's slot. Eight PUTs have an estimated 64–96 MiB SDK part-buffer budget; review measured about 65 MiB of additional live heap. Budget this against the effective JVM max heap rather than the full 768 MiB container limit: about 483 MiB (`Runtime.maxMemory()`) with SerialGC on 1 CPU under the production overlay's `-XX:MaxRAMPercentage=65` (#124), up from about 185 MiB with the earlier 25% default. This is an internal SDK/heap safeguard above expected MVP load; global upload rate/connection limits remain deferred by ADR-010. A caller waiting for a PUT permit gets at most `MINIO_CONNECT_TIMEOUT_MS` before the same safe storage IOException.
 
 The shared client restores the SDK status retry policy: `Http.RETRIABLE_STATUS_CODES`, at most five attempts and 100 ms backoff. Retries execute inside the same dispatched HTTP call, so they do not consume additional dispatcher slots or change the PUT/abort headroom invariant. Persistent failures still map to the safe IOException after those attempts. Readiness disables these retries. No application retry orchestration or upload endpoint is implemented here. Issue 5.2 must carry these safeguards into the worker client.
 
@@ -190,7 +191,7 @@ Update procedure:
 1. Watch debian-security-announce for ffmpeg and openjdk-21 advisories.
 2. On an advisory, and weekly, bump the base digest and build with `--pull --no-cache`.
 3. Raise the recorded minimum ffmpeg version when the advisory requires it. CI asserts it with `dpkg --compare-versions` and asserts a non-root `id -u`.
-4. Run the #123 media tests (`sh deploy/tests/worker-ffmpeg-tests.sh`, part of the `Worker Maven build and test` CI job) on amd64 and the #124 arm64 job.
+4. Run the #123 media tests (`sh deploy/tests/worker-ffmpeg-tests.sh`, part of the `Worker Maven build and test` CI job) on amd64 and in the #124 `arm64 worker` workflow.
 5. Record the `dpkg-query -W` versions in the PR.
 6. Roll back by redeploying the previous image tag.
 
