@@ -98,23 +98,23 @@ class MediaRulesTests {
     void metadataRejectsValuesTheRulesNeverProduce() {
         assertThatThrownBy(() -> metadata(Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> metadata(Duration.ofSeconds(Integer.MAX_VALUE))).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MediaMetadata(null, 1, 1, 0, "h264", null)).isInstanceOf(NullPointerException.class);
-        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 0, 1, 0, "h264", null))
+        assertThatThrownBy(() -> new MediaMetadata(null, 1, 1, 0, false, "h264", null)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 0, 1, 0, false, "h264", null))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 45, "h264", null))
+        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 45, false, "h264", null))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 360, "h264", null))
+        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 360, false, "h264", null))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 0, " ", null))
+        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 0, false, " ", null))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 0, "x".repeat(101), null))
+        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 0, false, "x".repeat(101), null))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 0, "h264", 0))
+        assertThatThrownBy(() -> new MediaMetadata(Duration.ofSeconds(1), 1, 1, 0, false, "h264", 0))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     private static MediaMetadata metadata(Duration duration) {
-        return new MediaMetadata(duration, 640, 360, 0, "h264", null);
+        return new MediaMetadata(duration, 640, 360, 0, false, "h264", null);
     }
 
     private static List<String> codecs(AllowedDecoder.MediaType type) {

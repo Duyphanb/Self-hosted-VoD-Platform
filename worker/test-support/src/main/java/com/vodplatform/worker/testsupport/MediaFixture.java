@@ -4,7 +4,8 @@ package com.vodplatform.worker.testsupport;
  * Media generated at test time by {@link MediaFixtures} (#123); no media file is committed. The file name
  * stands in for the trusted object-key extension, and {@link #demuxer()} is the demuxer the ADR-010 D6
  * table forces for that extension. Valid sources are 13 s long, so a 6 s HLS segment target yields two
- * full segments and a short final one.
+ * full segments and a short final one; the Issue 5.5 encode-matrix sources are 7 s long
+ * ({@link MediaFixtures#sourceSeconds(MediaFixture)}).
  */
 public enum MediaFixture {
     // Valid sources: the five #123 source types, plus the HDR source that Issue 5.5 converts to 8-bit SDR.
@@ -15,11 +16,25 @@ public enum MediaFixture {
     SILENT_H264_MP4("silent-h264.mp4", Kind.VALID),
     HEVC_MAIN10_HDR_AC3_MKV("hevc-main10-hdr-ac3.mkv", Kind.VALID),
     // Rotation (ADR-010 D26), copied from H264_AAC_MP4 with a Display Matrix, or only the legacy rotate tag that
-    // the Matroska muxer writes as ROTATE. FFprobe reports the matrix in [-180, 180]: 180 degrees as -180.
+    // the Matroska muxer writes as ROTATE. FFprobe reports the matrix in [-180, 180]: 180 degrees as -180. The
+    // matrix angle counts counterclockwise, the legacy tag clockwise (rotate=90 is a matrix of -90).
     ROTATED_90_MP4("rotated-90.mp4", Kind.VALID),
     ROTATED_MINUS_90_MKV("rotated-minus-90.mkv", Kind.VALID),
     ROTATED_180_MP4("rotated-180.mp4", Kind.VALID),
     ROTATE_TAG_90_MKV("rotate-tag-90.mkv", Kind.VALID),
+    VERTICAL_REFLECTION_MP4("vertical-reflection.mp4", Kind.VALID),
+    // The Issue 5.5 encode matrix: geometry, frame-rate and scene-cut families. These are 7 s long
+    // (MediaFixtures.SHORT_SOURCE_SECONDS): one full 6 s segment and a short final one keep CI fast.
+    H264_AAC_1080P30_MP4("h264-aac-1080p30.mp4", Kind.VALID),
+    PORTRAIT_720X1280_MP4("portrait-720x1280.mp4", Kind.VALID),
+    PORTRAIT_1080X1920_MP4("portrait-1080x1920.mp4", Kind.VALID),
+    // Odd sizes: VP9 4:2:0 and H.264 4:4:4 can code an odd width or height, which the output must make even.
+    ODD_641X359_WEBM("odd-641x359.webm", Kind.VALID),
+    SD_853X480_MP4("sd-853x480.mp4", Kind.VALID),
+    FPS_60_MP4("fps-60.mp4", Kind.VALID),
+    FPS_120_MP4("fps-120.mp4", Kind.VALID),
+    FPS_29_97_MP4("fps-29-97.mp4", Kind.VALID),
+    SCENE_CUTS_MP4("scene-cuts.mp4", Kind.VALID),
 
     // Content that does not match its key: the forced demuxer must refuse it (#103, SECURITY.md).
     EBML_UNDER_MP4_KEY("ebml-under-mp4-key.mp4", Kind.INVALID),

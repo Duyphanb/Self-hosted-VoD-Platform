@@ -60,7 +60,11 @@ public record ProbeSettings(String ffprobePath, int timeoutSeconds, int maxDurat
         return Duration.ofSeconds(timeoutSeconds);
     }
 
-    private static int wholeNumber(Function<String, String> variables, String name) {
+    /**
+     * Reads the required variable {@code name} as a plain whole number; a missing, blank or non-numeric value
+     * fails, naming the variable but not echoing the value. The transcode settings (Issue 5.5) read theirs alike.
+     */
+    public static int wholeNumber(Function<String, String> variables, String name) {
         String value = variables.apply(name);
         if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " is required");
         if (!WHOLE_NUMBER.matcher(value).matches()) throw new IllegalArgumentException(name + " must be a whole number");
@@ -71,7 +75,11 @@ public record ProbeSettings(String ffprobePath, int timeoutSeconds, int maxDurat
         if (value < 1 || value > max) throw new IllegalArgumentException(name + " must be between 1 and " + max);
     }
 
-    private static boolean validExecutable(String path) {
+    /**
+     * Whether {@code path} names a media tool as these settings accept it: a bare command name resolved through
+     * PATH, or an absolute path, without surrounding blanks or control characters.
+     */
+    public static boolean validExecutable(String path) {
         if (path == null || path.isBlank() || !path.equals(path.strip())) return false;
         if (path.chars().anyMatch(Character::isISOControl)) return false;
         if (path.indexOf('/') < 0 && path.indexOf('\\') < 0) return true;

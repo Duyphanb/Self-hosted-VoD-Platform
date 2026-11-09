@@ -88,7 +88,7 @@ class FfprobeServiceTests {
     void aCleanRunIsParsedUnderTheD26Rules() {
         MediaMetadata metadata = interpret(0, VALID_JSON, "[h264 @ 0x1] unrelated warning promoted to error");
 
-        assertThat(metadata).isEqualTo(new MediaMetadata(Duration.ofSeconds(13), 640, 360, 0, "h264", null));
+        assertThat(metadata).isEqualTo(new MediaMetadata(Duration.ofSeconds(13), 640, 360, 0, false, "h264", null));
     }
 
     @Test

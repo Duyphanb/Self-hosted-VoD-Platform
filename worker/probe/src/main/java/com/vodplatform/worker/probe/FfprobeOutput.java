@@ -61,8 +61,8 @@ final class FfprobeOutput {
         if (selected == null) throw failure(UNSUPPORTED_MEDIA, "Media has no video stream other than cover art");
         int codedWidth = positiveInt(selected.path("width"), "width");
         int codedHeight = positiveInt(selected.path("height"), "height");
-        int rotation = rotation(selected);
-        boolean quarterTurn = rotation == 90 || rotation == 270;
+        Rotation rotation = rotation(selected);
+        boolean quarterTurn = rotation.degrees() == 90 || rotation.degrees() == 270;
         int width = quarterTurn ? codedHeight : codedWidth;
         int height = quarterTurn ? codedWidth : codedHeight;
         BigDecimal seconds = durationSeconds(selected, root.path("format"));
@@ -74,8 +74,8 @@ final class FfprobeOutput {
         if (seconds.compareTo(BigDecimal.valueOf(settings.maxDurationSeconds())) > 0) {
             throw failure(MEDIA_LIMIT_EXCEEDED, "Media duration exceeds WORKER_MAX_DURATION_SECONDS");
         }
-        return new MediaMetadata(toDuration(seconds), width, height, rotation, text(selected.path("codec_name")),
-                bitrate(root.path("format").path("bit_rate")));
+        return new MediaMetadata(toDuration(seconds), width, height, rotation.degrees(), rotation.fromLegacyTag(),
+                text(selected.path("codec_name")), bitrate(root.path("format").path("bit_rate")));
     }
 
     private static JsonNode parse(byte[] json) {
@@ -92,29 +92,38 @@ final class FfprobeOutput {
      * The Display Matrix rotation, or the legacy {@code rotate} tag (any case; the Matroska muxer writes
      * {@code ROTATE}) when there is none. FFprobe reports the matrix angle counterclockwise in [-180, 180]: it
      * is rounded to whole degrees and normalized modulo 360, so -90 becomes 270 and -180 becomes 180.
+     *
+     * <p>The legacy tag counts clockwise: FFmpeg before 5.0 exported a Display Matrix of -90 degrees as
+     * {@code rotate=90} and rotated such a file clockwise for display. The tag is therefore negated into the
+     * counterclockwise matrix convention, so {@code rotate=90} is 270. Issue 5.5 supplies this fallback angle
+     * to FFmpeg 7.1, whose autorotation does not read the tag.
      */
-    private static int rotation(JsonNode stream) {
-        JsonNode degrees = null;
+    private static Rotation rotation(JsonNode stream) {
         JsonNode sideDataList = stream.path("side_data_list");
         if (sideDataList.isArray()) {
             for (JsonNode sideData : sideDataList) {
-                if ("Display Matrix".equals(text(sideData.path("side_data_type"))) && sideData.has("rotation")) {
-                    degrees = sideData.get("rotation");
-                    break;
+                if ("Display Matrix".equals(text(sideData.path("side_data_type")))) {
+                    return new Rotation(rightAngle(finiteNumber(sideData.path("rotation"), "rotation")), false);
                 }
             }
         }
         JsonNode tags = stream.path("tags");
-        if (degrees == null && tags.isObject()) {
+        if (tags.isObject()) {
             for (Map.Entry<String, JsonNode> tag : tags.properties()) {
                 if (tag.getKey().equalsIgnoreCase("rotate")) {
-                    degrees = tag.getValue();
-                    break;
+                    return new Rotation(rightAngle(-finiteNumber(tag.getValue(), "rotation")), true);
                 }
             }
         }
-        if (degrees == null) return 0;
-        int normalized = (int) Math.floorMod(Math.round(finiteNumber(degrees, "rotation")), 360L);
+        return new Rotation(0, false);
+    }
+
+    private record Rotation(int degrees, boolean fromLegacyTag) {
+    }
+
+    /** {@code counterclockwise} rounded to whole degrees and normalized modulo 360; only right angles pass. */
+    private static int rightAngle(double counterclockwise) {
+        int normalized = (int) Math.floorMod(Math.round(counterclockwise), 360L);
         if (normalized % 90 != 0) throw failure(UNSUPPORTED_MEDIA, "Media rotation is not a multiple of 90 degrees");
         return normalized;
     }
