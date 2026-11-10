@@ -15,6 +15,16 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>storage</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>status</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.amqp</groupId>
             <artifactId>spring-rabbit</artifactId>
         </dependency>
