@@ -43,6 +43,7 @@ def fixture_environment():
            if not key.startswith(("COMPOSE_", "MINIO_", "POSTGRES_", "SPRING_", "WORKER_", "FLYWAY_"))}
     env.update({
         "POSTGRES_DB": "s5w6_fixture",
+        "POSTGRES_BACKEND_USER": "s5w6_backend",
         "POSTGRES_WORKER_USER": "s5w6_worker",
         "MINIO_BUCKET_RAW": "vod-raw",
         "MINIO_BUCKET_HLS": "vod-hls",
