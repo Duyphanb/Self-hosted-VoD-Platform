@@ -14,6 +14,11 @@
     <name>vod-worker-status</name>
     <dependencies>
         <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>probe</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
         </dependency>

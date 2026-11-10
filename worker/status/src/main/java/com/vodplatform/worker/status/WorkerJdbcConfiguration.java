@@ -15,6 +15,11 @@ import org.springframework.util.PlaceholderResolutionException;
 @Configuration(proxyBeanMethods = false)
 public class WorkerJdbcConfiguration {
     @Bean
+    WorkerJobStatus workerJobStatus(DataSource source) {
+        return new WorkerJobStatus(source);
+    }
+
+    @Bean
     DataSource workerDataSource(Environment env) {
         URI target = postgresTarget(required(env, "SPRING_DATASOURCE_URL"));
         String username = required(env, "SPRING_DATASOURCE_USERNAME");
