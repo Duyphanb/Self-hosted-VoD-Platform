@@ -94,9 +94,14 @@ def new_environment():
     excluded = {name.upper() for name in compose_variables()} | {"DOCKER_DEFAULT_PLATFORM"}
     env = {key: value for key, value in os.environ.items()
            if key.upper() not in excluded and not key.upper().startswith("COMPOSE_")}
-    for prefix in ("POSTGRES", "RABBITMQ"):
-        env[prefix + ("_USER" if prefix == "POSTGRES" else "_USERNAME")] = "audit_" + secrets.token_hex(8)
+    # The bootstrap identity and the #106 service identities, each independent of the others.
+    for prefix in ("POSTGRES", "POSTGRES_OWNER", "POSTGRES_BACKEND", "POSTGRES_WORKER"):
+        env[prefix + "_USER"] = "audit_" + secrets.token_hex(8)
         env[prefix + "_PASSWORD"] = secrets.token_urlsafe(32)
+    for prefix in ("RABBITMQ", "RABBITMQ_BACKEND", "RABBITMQ_WORKER"):
+        env[prefix + "_USERNAME"] = "audit_" + secrets.token_hex(8)
+        env[prefix + "_PASSWORD"] = secrets.token_urlsafe(32)
+    env["REDIS_PASSWORD"] = secrets.token_urlsafe(32)
     for prefix in ("MINIO", "MINIO_BACKEND", "MINIO_WORKER"):
         env[prefix + "_ACCESS_KEY"] = "audit_" + secrets.token_hex(12)
         env[prefix + "_SECRET_KEY"] = secrets.token_urlsafe(48)
