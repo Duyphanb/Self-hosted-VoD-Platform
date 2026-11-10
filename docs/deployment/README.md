@@ -309,18 +309,31 @@ Init creates or overwrites the configured backend/worker users, re-enables them 
    ```bash
    STORAGE_APP=backend  # use worker only when rotating MINIO_WORKER_*
    case "$STORAGE_APP" in backend|worker) ;; *) exit 1;; esac
+   previous_id=$(docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml ps -q "$STORAGE_APP") || exit 1
    docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml run --rm production-config-check || exit 1
    docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml run --rm minio-init || exit 1
    docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d "$STORAGE_APP" || exit 1
+   current_id=$(docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml ps -q "$STORAGE_APP") || exit 1
+   test -n "$current_id" && test "$current_id" != "$previous_id" || exit 1
    ```
 
    Stop if any command fails. Compose recreates the affected app because its configured credentials changed; unchanged dependencies follow their normal health/completion gates.
-3. Verify aggregate `/actuator/health` reports UP, verify the affected role's scoped read/write operations, and verify the previous secret is rejected. A secret update alone is not incident revocation: Silo STS sessions issued from the old credentials can remain valid.
+3. Verify the affected application's readiness, its scoped read/write operations and rejection of the previous secret. The aggregate `/actuator/health` through Nginx checks only the backend identity. For a worker rotation, wait for the new container to start and require HTTP 200 from the worker's internal health endpoint. The worker response includes its own authenticated raw storage check and JDBC check. Keep the worker port unpublished.
+
+   ```bash
+   docker compose -p "$PROJECT" --env-file .env.production -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml exec -T worker timeout 15 bash -c '
+     exec 3<>"/dev/tcp/127.0.0.1/${SERVER_PORT}" || exit 1
+     printf "GET /actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3
+     IFS= read -r status <&3 && [[ $status == "HTTP/1.1 200 "* ]]
+   ' || exit 1
+   ```
+
+   A secret update alone is not incident revocation. Silo STS sessions issued from the old credentials can remain valid.
 
 ### Incident Response and Retired Users
 
 1. Generate a **new access key and secret** for the affected role and replace that pair in the protected environment file. Keep the compromised/retired access key available only to the operator performing revocation.
-2. Run preflight, init and the normal `up` path for only the affected app as above. Verify the replacement identity works before deleting the old parent user. Do not fall back to a compromised key.
+2. Run preflight, init and the normal `up` path for only the affected app as above. Confirm the container ID changed, verify the affected application's readiness and check the replacement identity before deleting the old parent user. Do not fall back to a compromised key.
 3. Authenticate as root in a one-off internal container and run `mc admin user remove` on the old key. Root is required here because the scoped users cannot administer other users. This maintenance shell is the intended production `--no-deps` exception: use it only after the normal preflight/init path and target storage health have succeeded, without starting apps or rerunning provisioning. Open it with the verified project/environment (the service receives root credentials through its existing environment):
 
    ```bash
