@@ -80,6 +80,9 @@ jobs:
         working-directory: worker
         run: mvn -B -ntp verify
 
+      - name: Require worker PostgreSQL and Silo integration evidence
+        run: python3 deploy/tests/worker-dependency-smoke.py --project "s5w6-192-${{ github.run_id }}-${{ github.run_attempt }}"
+
       # #123: generated fixtures and the ADR-010 D27 reference encode, on the worker image's own
       # ffmpeg/ffprobe (the ffmpeg-test stage shares the runtime stage's layers).
       - name: Run FFmpeg-tagged tests in the worker image

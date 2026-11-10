@@ -109,6 +109,26 @@ try {
 Surefire must report one executed test with zero skips, failures or errors for
 `EncodingQueueLongHoldBrokerTests`.
 
+## Worker PostgreSQL and object storage (#192)
+
+`WorkerJdbcPostgresTest` and `WorkerObjectStorageSiloTests` are opt-in. Run them
+through the evidence launcher from the repository root with Docker Desktop and
+Maven available. Use a unique disposable project.
+
+```powershell
+$env:Path = 'F:\Docker\DockerDesktop\resources\bin;' + $env:Path
+$env:JAVA_TOOL_OPTIONS = '-Djdk.net.unixdomain.tmpdir=F:/Temp'
+$project = 's5w6-192-' + [guid]::NewGuid().ToString('N').Substring(0,12)
+python deploy/tests/worker-dependency-smoke.py --project $project --maven-repository F:/m2/repository
+```
+
+The launcher provisions the scoped identities on disposable PostgreSQL and Silo,
+publishes only loopback test ports, requires fresh unskipped Surefire results, and
+removes its Compose resources. The tests exercise the worker's JDBC role and
+statement deadline, authenticated raw metadata and reads, HLS writes verified
+through the backend identity, and scoped access denials. The worker-build job
+runs the same launcher.
+
 ## Backend PostgreSQL tests (#119)
 
 `mvn -B -ntp verify` in `backend/` needs Docker. Every Spring context test in `backend/common`
