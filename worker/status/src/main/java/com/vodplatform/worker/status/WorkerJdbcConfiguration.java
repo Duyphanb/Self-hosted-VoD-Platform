@@ -1,5 +1,7 @@
 package com.vodplatform.worker.status;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.sql.SQLException;
 import javax.sql.DataSource;
 import org.postgresql.ds.PGSimpleDataSource;
@@ -8,25 +10,24 @@ import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.util.PlaceholderResolutionException;
 
 @Configuration(proxyBeanMethods = false)
 public class WorkerJdbcConfiguration {
     @Bean
     DataSource workerDataSource(Environment env) {
-        String url = required(env, "SPRING_DATASOURCE_URL");
+        URI target = postgresTarget(required(env, "SPRING_DATASOURCE_URL"));
         String username = required(env, "SPRING_DATASOURCE_USERNAME");
         String password = required(env, "SPRING_DATASOURCE_PASSWORD");
         int connect = positiveInt(env, "WORKER_JDBC_CONNECT_TIMEOUT_SECONDS", Integer.MAX_VALUE / 1000);
         int read = positiveInt(env, "WORKER_JDBC_READ_TIMEOUT_SECONDS", Integer.MAX_VALUE / 1000);
         int statement = positiveInt(env, "WORKER_JDBC_STATEMENT_TIMEOUT_MS", Integer.MAX_VALUE);
 
-        // Configure the URL first so it cannot override the scoped identity or the explicit budgets.
+        // pgJDBC's URL parser can log a malformed URL before rejecting it.
         PGSimpleDataSource source = new PGSimpleDataSource();
-        try {
-            source.setURL(url);
-        } catch (IllegalArgumentException ignored) {
-            throw new IllegalArgumentException("SPRING_DATASOURCE_URL must be a valid PostgreSQL JDBC URL");
-        }
+        source.setServerNames(new String[] {target.getHost()});
+        if (target.getPort() != -1) source.setPortNumbers(new int[] {target.getPort()});
+        source.setDatabaseName(target.getPath().substring(1));
         source.setUser(username);
         source.setPassword(password);
         source.setLoginTimeout(connect);
@@ -34,6 +35,28 @@ public class WorkerJdbcConfiguration {
         source.setSocketTimeout(read);
         source.setOptions("-c statement_timeout=" + statement);
         return source;
+    }
+
+    private static URI postgresTarget(String url) {
+        String prefix = "jdbc:postgresql://";
+        if (!url.startsWith(prefix)) throw invalidUrl();
+        URI target;
+        try {
+            target = new URI(url.substring("jdbc:".length()));
+        } catch (URISyntaxException ignored) {
+            throw invalidUrl();
+        }
+        if (target.getHost() == null || target.getRawUserInfo() != null || target.getRawQuery() != null
+                || target.getRawFragment() != null || target.getRawAuthority().endsWith(":")
+                || target.getPort() == 0 || target.getPort() > 65_535
+                || !target.getPath().matches("/[^/\\p{Cntrl}]+")) {
+            throw invalidUrl();
+        }
+        return target;
+    }
+
+    private static IllegalArgumentException invalidUrl() {
+        return new IllegalArgumentException("SPRING_DATASOURCE_URL must be a valid PostgreSQL JDBC URL without credentials or parameters");
     }
 
     @Bean(name = "workerDatabase")
@@ -51,7 +74,12 @@ public class WorkerJdbcConfiguration {
     }
 
     private static String required(Environment env, String name) {
-        String value = env.getProperty(name);
+        String value;
+        try {
+            value = env.getProperty(name);
+        } catch (PlaceholderResolutionException ignored) {
+            throw new IllegalArgumentException(name + " could not be resolved");
+        }
         if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " must not be blank");
         return value;
     }

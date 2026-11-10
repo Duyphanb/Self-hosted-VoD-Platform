@@ -3,6 +3,7 @@ package com.vodplatform.worker.storage;
 import java.net.URI;
 import java.net.URISyntaxException;
 import org.springframework.core.env.Environment;
+import org.springframework.util.PlaceholderResolutionException;
 
 /** Settings supplied by Compose using the worker's scoped storage identity. */
 record StorageProperties(String endpoint, String accessKey, String secretKey, String rawBucket, String hlsBucket,
@@ -36,15 +37,23 @@ record StorageProperties(String endpoint, String accessKey, String secretKey, St
     }
 
     static StorageProperties fromEnvironment(Environment env) {
-        return new StorageProperties(env.getProperty("MINIO_ENDPOINT"), env.getProperty("MINIO_ACCESS_KEY"),
-                env.getProperty("MINIO_SECRET_KEY"), env.getProperty("MINIO_BUCKET_RAW"),
-                env.getProperty("MINIO_BUCKET_HLS"), timeout(env, "MINIO_CONNECT_TIMEOUT_MS"),
+        return new StorageProperties(setting(env, "MINIO_ENDPOINT"), setting(env, "MINIO_ACCESS_KEY"),
+                setting(env, "MINIO_SECRET_KEY"), setting(env, "MINIO_BUCKET_RAW"),
+                setting(env, "MINIO_BUCKET_HLS"), timeout(env, "MINIO_CONNECT_TIMEOUT_MS"),
                 timeout(env, "MINIO_READ_TIMEOUT_MS"), timeout(env, "MINIO_WRITE_TIMEOUT_MS"));
+    }
+
+    private static String setting(Environment env, String name) {
+        try {
+            return env.getProperty(name);
+        } catch (PlaceholderResolutionException ignored) {
+            throw new IllegalArgumentException(name + " could not be resolved");
+        }
     }
 
     private static int timeout(Environment env, String name) {
         try {
-            int timeout = Integer.parseInt(env.getProperty(name));
+            int timeout = Integer.parseInt(setting(env, name));
             if (timeout > 0) return timeout;
         } catch (NumberFormatException ignored) {
             // Report the variable name without its configured value.

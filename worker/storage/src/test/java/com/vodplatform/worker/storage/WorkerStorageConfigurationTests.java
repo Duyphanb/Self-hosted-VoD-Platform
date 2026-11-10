@@ -13,6 +13,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -32,6 +37,35 @@ class WorkerStorageConfigurationTests {
                 .hasMessage("MINIO_READ_TIMEOUT_MS must be a positive integer");
         assertThat(StorageProperties.fromEnvironment(environment()).toString())
                 .isEqualTo("StorageProperties[redacted]");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://worker:%s@localhost:9000",
+            "http://localhost:9000?secret=%s",
+            "http://localhost:bad-port?secret=%s"
+    })
+    @ExtendWith(OutputCaptureExtension.class)
+    void rejectsUnsafeEndpointsWithoutLeakingCredentials(String template, CapturedOutput output) {
+        String marker = "synthetic-storage-credential";
+        assertThatThrownBy(() -> new StorageConfiguration().workerStorageProperties(environment()
+                .withProperty("MINIO_ENDPOINT", template.formatted(marker))
+                .withProperty("MINIO_ACCESS_KEY", marker)
+                .withProperty("MINIO_SECRET_KEY", marker)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("MINIO_ENDPOINT must be a valid HTTP(S) origin")
+                .hasNoCause();
+        assertThat(output.getAll()).doesNotContain(marker);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"})
+    void omitsUnresolvableSettingsFromStartupDiagnostics(String name) {
+        assertThatThrownBy(() -> StorageProperties.fromEnvironment(
+                environment().withProperty(name, "synthetic-marker-${unresolved-test-property}")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(name + " could not be resolved")
+                .hasNoCause();
     }
 
     @Test
