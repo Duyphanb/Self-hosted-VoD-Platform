@@ -31,6 +31,11 @@ public class StorageConfiguration {
         return new WorkerObjectStorage(client, properties);
     }
 
+    @Bean
+    HlsUploadService hlsUploadService(WorkerObjectStorage storage, StorageProperties properties) {
+        return new HlsUploadService(storage, properties.hlsBucket());
+    }
+
     @Bean(name = "workerStorage", destroyMethod = "close")
     StorageHealthIndicator workerStorageHealth(StorageProperties properties) {
         return new StorageHealthIndicator(client(properties, HEALTH_TIMEOUT_MS), properties.rawBucket());
