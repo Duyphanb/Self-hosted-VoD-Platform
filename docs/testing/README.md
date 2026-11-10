@@ -56,6 +56,59 @@ keep the #169 checks. `sh deploy/tests/production-config-smoke.sh` and
 `deploy/tests/test_production_config_check.py`/`test_service_identities.py` cover the preflight
 and Compose wiring without Docker state. CI runs all of them.
 
+## Worker delivery hold on RabbitMQ 4.4 (#191)
+
+`EncodingQueueLongHoldBrokerTests` is opt-in. It starts a test Spring AMQP
+listener with AUTO acknowledgement, one consumer and prefetch 1. A gated handler
+holds the first delivery for three 61-second intervals. `rabbitmqctl` verifies
+the same channel and consumer, one unacknowledged delivery and one ready delivery.
+Releasing the gate lets the handler return. The container acknowledges the first
+delivery and the broker sends the second on the same channel without redelivery.
+The gate models waiting for terminal persistence. Production JDBC retry and
+startup recovery require their own integration checks.
+
+Run from the repository root in a dedicated PowerShell session with Docker
+Desktop and Maven available. The broker uses the Compose image pin, a loopback
+port, and temporary storage. The node-wide 60000 ms timeout applies only to this
+test container.
+
+```powershell
+$image = [regex]::Match((Get-Content -Raw deploy/docker-compose.yml),
+    'docker\.io/library/rabbitmq:4\.4\.\d+-alpine@sha256:[0-9a-f]{64}').Value
+if (-not $image) { throw 'RabbitMQ image pin is missing' }
+$name = 's5w6-191-hold-' + [guid]::NewGuid().ToString('N').Substring(0,12)
+$env:RABBITMQ_DEFAULT_USER = 'hold_test'
+$env:RABBITMQ_DEFAULT_PASS = [guid]::NewGuid().ToString('N')
+$broker = docker run --rm -d --name $name --label 'com.vodplatform.s5w6.consumer-hold=true' `
+    --publish '127.0.0.1::5672' --tmpfs '/var/lib/rabbitmq:rw' `
+    --env RABBITMQ_DEFAULT_USER --env RABBITMQ_DEFAULT_PASS `
+    --env 'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit consumer_timeout 60000' $image
+if ($LASTEXITCODE -or $broker -notmatch '^[a-f0-9]{64}$') { throw 'Disposable broker start failed' }
+try {
+    $deadline = (Get-Date).AddSeconds(90)
+    while (-not (docker logs $broker 2>&1 | Select-String -SimpleMatch 'Server startup complete' -Quiet)) {
+        if ((Get-Date) -ge $deadline) { throw 'Disposable broker readiness timed out' }
+        Start-Sleep -Seconds 2
+    }
+    $mapping = docker port $broker '5672/tcp'
+    if ($mapping -notmatch '^127\.0\.0\.1:(\d+)$') { throw 'Broker port is not loopback-only' }
+    $env:ENCODING_TEST_RABBITMQ_LONG_HOLD_PORT = $Matches[1]
+    $env:ENCODING_TEST_RABBITMQ_LONG_HOLD_CONTAINER = $broker
+    $env:ENCODING_TEST_RABBITMQ_LONG_HOLD_USERNAME = $env:RABBITMQ_DEFAULT_USER
+    $env:ENCODING_TEST_RABBITMQ_LONG_HOLD_PASSWORD = $env:RABBITMQ_DEFAULT_PASS
+    $env:ENCODING_TEST_RABBITMQ_LONG_HOLD = 'true'
+    $env:JAVA_TOOL_OPTIONS = '-Djdk.net.unixdomain.tmpdir=F:/Temp'
+    mvn -B -ntp -f worker/pom.xml -pl queue -am '-Dmaven.repo.local=F:/m2/repository' `
+        '-Dtest=EncodingQueueLongHoldBrokerTests' '-Dsurefire.failIfNoSpecifiedTests=false' test
+    if ($LASTEXITCODE) { throw 'Worker long-hold broker test failed' }
+} finally {
+    docker rm -f $broker | Out-Null
+}
+```
+
+Surefire must report one executed test with zero skips, failures or errors for
+`EncodingQueueLongHoldBrokerTests`.
+
 ## Backend PostgreSQL tests (#119)
 
 `mvn -B -ntp verify` in `backend/` needs Docker. Every Spring context test in `backend/common`

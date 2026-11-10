@@ -3,13 +3,17 @@ package com.vodplatform.worker.queue.messaging;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
+import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.ShutdownSignalException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
@@ -18,12 +22,14 @@ import org.springframework.amqp.core.Exchange;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
+import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Opt-in declaration on a disposable Compose broker, kept for the backend cross-declaration test.
- * This class adds no worker runtime configuration or listener; Issue 5.1 owns that wiring.
+ * Opt-in declaration and listener checks on the disposable broker used by the publisher smoke.
  */
 @EnabledIf("brokerConfigured")
 class EncodingQueueBrokerTests {
@@ -34,26 +40,13 @@ class EncodingQueueBrokerTests {
 
     @Test
     void workerDeclaresTheContractTopologyOnTheOwnedBroker() throws Exception {
-        String host = required("HOST");
-        if (!"127.0.0.1".equals(host)) throw new IllegalStateException("Broker tests require a loopback host");
-        int port;
-        try {
-            port = Integer.parseInt(required("PORT"));
-        } catch (NumberFormatException ignored) {
-            throw new IllegalStateException("Broker test port is invalid");
-        }
-        if (port < 1 || port > 65535) throw new IllegalStateException("Broker test port is invalid");
-        String username = required("USERNAME");
-        String password = required("PASSWORD");
-        String container = required("CONTAINER");
-        verifyDisposableProject(container);
-        assertThat(docker("port", container, "5672/tcp").trim()).isEqualTo("127.0.0.1:" + port);
-        String queue = System.getenv("ENCODING_TEST_RABBITMQ_QUEUE");
-        queue = EncodingQueueTopology.validateQueueName(queue == null ? "video-encoding-queue" : queue);
+        BrokerFixture broker = ownedBroker();
+        String container = broker.container();
+        String queue = broker.queue();
 
-        CachingConnectionFactory connectionFactory = new CachingConnectionFactory(host, port);
-        connectionFactory.setUsername(username);
-        connectionFactory.setPassword(password);
+        CachingConnectionFactory connectionFactory = new CachingConnectionFactory(broker.host(), broker.port());
+        connectionFactory.setUsername(required("USERNAME"));
+        connectionFactory.setPassword(required("PASSWORD"));
         connectionFactory.setConnectionTimeout(5000);
         connectionFactory.getRabbitConnectionFactory().setAutomaticRecoveryEnabled(false);
         connectionFactory.getRabbitConnectionFactory().setChannelRpcTimeout(5000);
@@ -102,6 +95,155 @@ class EncodingQueueBrokerTests {
         } finally {
             connectionFactory.destroy();
         }
+    }
+
+    @Test
+    void listenerStaysStoppedThenDeadLettersPoisonAndAcksOnlyAfterProcessingReturns() throws Exception {
+        BrokerFixture broker = ownedBroker();
+        var processed = new LinkedBlockingQueue<EncodingJobMessage>();
+        var allowReturn = new CountDownLatch(1);
+        byte[] golden = QueueFixtures.golden();
+        String jobId = JsonMapper.builder().build().readTree(golden).get("encodingJobId").asString();
+        EncodingJobMessage expected = new EncodingJobMessageCodec().decode(golden, jobId);
+        boolean ownedEmptyQueues = false;
+
+        try (var context = new AnnotationConfigApplicationContext()) {
+            context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("disposable broker", Map.of(
+                    "RABBITMQ_HOST", broker.host(), "RABBITMQ_PORT", broker.port(),
+                    "RABBITMQ_USERNAME", required("USERNAME"), "RABBITMQ_PASSWORD", required("PASSWORD"),
+                    "RABBITMQ_ENCODING_QUEUE", broker.queue(), "WORKER_CONCURRENCY", "1", "WORKER_PREFETCH", "1")));
+            context.register(WorkerQueueConfiguration.class);
+            context.registerBean(EncodingJobProcessor.class, () -> job -> {
+                processed.add(job);
+                try {
+                    if (!allowReturn.await(50, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Broker test processor gate timed out");
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Broker test processor gate was interrupted");
+                }
+            });
+            context.refresh();
+            var listener = context.getBean(SimpleMessageListenerContainer.class);
+            assertThat(listener.isAutoStartup()).isFalse();
+            assertThat(listener.isRunning()).isFalse();
+
+            var worker = context.getBean(CachingConnectionFactory.class);
+            worker.createConnection().close(); // RabbitAdmin declares the real worker topology on first connection.
+            assertBrokerMetadata(broker.container(), broker.queue());
+            QueueState empty = new QueueState(0, 0, 0);
+            awaitQueueStates(broker, empty, empty);
+            ownedEmptyQueues = true;
+            assertWorkerCannotPublish(worker, broker, golden, jobId);
+
+            var backend = new ConnectionFactory();
+            backend.setHost(broker.host());
+            backend.setPort(broker.port());
+            backend.setUsername(required("BACKEND_USERNAME"));
+            backend.setPassword(required("BACKEND_PASSWORD"));
+            backend.setAutomaticRecoveryEnabled(false);
+            backend.setConnectionTimeout(5_000);
+            backend.setHandshakeTimeout(5_000);
+            backend.setChannelRpcTimeout(5_000);
+            try (var connection = backend.newConnection(); Channel publisher = connection.createChannel()) {
+                publisher.confirmSelect();
+                publish(publisher, broker.queue(), "{invalid".getBytes(StandardCharsets.UTF_8), jobId);
+                byte[] unsupported = new String(golden, StandardCharsets.UTF_8)
+                        .replaceFirst("\"schemaVersion\"\\s*:\\s*1", "\"schemaVersion\":2").getBytes(StandardCharsets.UTF_8);
+                assertThat(unsupported).isNotEqualTo(golden);
+                publish(publisher, broker.queue(), unsupported, jobId);
+                publish(publisher, broker.queue(), golden, "00000000-0000-0000-0000-000000000000");
+                publish(publisher, broker.queue(), golden, jobId);
+                publisher.waitForConfirmsOrDie(5_000);
+            }
+            awaitQueueStates(broker, new QueueState(4, 0, 0), empty);
+            assertThat(processed).isEmpty();
+
+            try {
+                listener.start();
+                assertThat(processed.poll(15, TimeUnit.SECONDS)).isEqualTo(expected);
+                QueueState poison = new QueueState(3, 0, 0);
+                awaitQueueStates(broker, new QueueState(0, 1, 1), poison);
+                allowReturn.countDown();
+                awaitQueueStates(broker, new QueueState(0, 0, 1), poison);
+                assertThat(processed).isEmpty();
+            } finally {
+                allowReturn.countDown();
+                listener.stop();
+            }
+        } catch (Exception failure) {
+            throw new AssertionError("Worker listener broker check failed: " + failure.getClass().getSimpleName());
+        } finally {
+            if (ownedEmptyQueues) {
+                docker("exec", broker.container(), "rabbitmqctl", "--quiet", "purge_queue", broker.queue());
+                docker("exec", broker.container(), "rabbitmqctl", "--quiet", "purge_queue", broker.queue() + ".dlq");
+            }
+        }
+    }
+
+    private static void assertWorkerCannotPublish(CachingConnectionFactory worker, BrokerFixture broker,
+            byte[] body, String messageId) throws Exception {
+        try (var connection = worker.getRabbitConnectionFactory().newConnection()) {
+            Channel channel = connection.createChannel();
+            channel.confirmSelect();
+            assertThat(catchThrowable(() -> {
+                publish(channel, broker.queue(), body, messageId);
+                channel.waitForConfirmsOrDie(5_000);
+            })).isNotNull();
+            assertThat(channel.getCloseReason()).isNotNull();
+            assertThat(channel.getCloseReason().getReason()).isInstanceOfSatisfying(AMQP.Channel.Close.class,
+                    close -> assertThat(close.getReplyCode()).isEqualTo(403));
+        }
+    }
+
+    private static void publish(Channel channel, String queue, byte[] body, String messageId) throws Exception {
+        channel.basicPublish("", queue, true, new AMQP.BasicProperties.Builder()
+                .contentType("application/json").deliveryMode(2).messageId(messageId).build(), body);
+    }
+
+    private record QueueState(int ready, int unacknowledged, int consumers) {
+        static QueueState from(JsonNode row) {
+            return new QueueState(row.get("messages_ready").intValue(),
+                    row.get("messages_unacknowledged").intValue(), row.get("consumers").intValue());
+        }
+    }
+
+    private static void awaitQueueStates(BrokerFixture broker, QueueState expectedSource, QueueState expectedDlq)
+            throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        QueueState source;
+        QueueState dlq;
+        do {
+            JsonNode rows = ctl(broker.container(), "list_queues", "name", "messages_ready",
+                    "messages_unacknowledged", "consumers", "--formatter", "json");
+            source = QueueState.from(named(rows, "name", broker.queue()));
+            dlq = QueueState.from(named(rows, "name", broker.queue() + ".dlq"));
+            if (source.equals(expectedSource) && dlq.equals(expectedDlq)) return;
+            Thread.sleep(200);
+        } while (System.nanoTime() < deadline);
+        assertThat(source).as("encoding source queue").isEqualTo(expectedSource);
+        assertThat(dlq).as("encoding dead-letter queue").isEqualTo(expectedDlq);
+    }
+
+    private record BrokerFixture(String host, int port, String container, String queue) { }
+
+    private static BrokerFixture ownedBroker() throws Exception {
+        String host = required("HOST");
+        if (!"127.0.0.1".equals(host)) throw new IllegalStateException("Broker tests require a loopback host");
+        int port;
+        try {
+            port = Integer.parseInt(required("PORT"));
+        } catch (NumberFormatException ignored) {
+            throw new IllegalStateException("Broker test port is invalid");
+        }
+        if (port < 1 || port > 65535) throw new IllegalStateException("Broker test port is invalid");
+        String container = required("CONTAINER");
+        verifyDisposableProject(container);
+        assertThat(docker("port", container, "5672/tcp").trim()).isEqualTo("127.0.0.1:" + port);
+        String queue = System.getenv("ENCODING_TEST_RABBITMQ_QUEUE");
+        return new BrokerFixture(host, port, container,
+                EncodingQueueTopology.validateQueueName(queue == null ? "video-encoding-queue" : queue));
     }
 
     private static String required(String key) {
@@ -206,7 +348,9 @@ class EncodingQueueBrokerTests {
             throw new IllegalStateException("Broker ownership labels are invalid (details withheld)");
         }
         JsonNode project = labels == null ? null : labels.get("com.docker.compose.project");
-        if (project == null || !project.isString() || !project.asString().matches("vod-auth-audit-[a-z0-9][a-z0-9_-]*")) {
+        if (project == null || !project.isString()
+                || !project.asString().matches("(?:vod-auth-audit|s5w6-191-short)-[a-z0-9][a-z0-9_-]*")
+                || !"rabbitmq".equals(labels.path("com.docker.compose.service").asString())) {
             throw new IllegalStateException("Broker tests require an owned disposable Compose project");
         }
     }
