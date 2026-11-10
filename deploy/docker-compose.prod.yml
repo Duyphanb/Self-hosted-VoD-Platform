@@ -152,6 +152,7 @@ services:
 
   worker:
     environment:
+      WORKER_PREFETCH: ${WORKER_PREFETCH:-1}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_WORKER_USER:?Set an independent production PostgreSQL worker username}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_WORKER_PASSWORD:?Set an independent production PostgreSQL worker password}
       RABBITMQ_USERNAME: ${RABBITMQ_WORKER_USERNAME:?Set an independent production RabbitMQ worker username}
