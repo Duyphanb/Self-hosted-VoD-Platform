@@ -54,7 +54,7 @@ class EncodingPublisherBrokerTests implements PostgresTestDatabase {
         assertThat(env("HOST")).isEqualTo("127.0.0.1");
         assertThat(JsonMapper.builder().build().readTree(command("inspect", "--format",
                 "{{json .Config.Labels}}", env("CONTAINER"))).get("com.docker.compose.project").asString())
-                .matches("vod-auth-audit-[a-z0-9][a-z0-9_-]*");
+                .matches("(?:vod-auth-audit|s5w7)-[a-z0-9][a-z0-9_-]*");
         assertThat(command("port", env("CONTAINER"), "5672/tcp").trim())
                 .isEqualTo("127.0.0.1:" + env("PORT"));
         registry.add("spring.rabbitmq.host", () -> env("HOST"));

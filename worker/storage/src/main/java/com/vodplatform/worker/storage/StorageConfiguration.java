@@ -15,6 +15,8 @@ public class StorageConfiguration {
     static final int MAX_REQUESTS_PER_HOST = 32;
     static final int MAX_CONCURRENT_PUTS = 8;
     static final long HEALTH_TIMEOUT_MS = 2_000;
+    private final Dispatcher workerDispatcher = new Dispatcher();
+    private final HlsWriteGuard hlsWrites = new HlsWriteGuard(workerDispatcher);
 
     @Bean
     StorageProperties workerStorageProperties(Environment env) {
@@ -23,7 +25,7 @@ public class StorageConfiguration {
 
     @Bean(destroyMethod = "close")
     MinioClient workerMinioClient(StorageProperties properties) {
-        return client(properties, Long.MAX_VALUE);
+        return client(properties, Long.MAX_VALUE, workerDispatcher, hlsWrites);
     }
 
     @Bean
@@ -33,30 +35,31 @@ public class StorageConfiguration {
 
     @Bean
     HlsUploadService hlsUploadService(WorkerObjectStorage storage, StorageProperties properties) {
-        return new HlsUploadService(storage, properties.hlsBucket());
+        return new HlsUploadService(storage, properties.hlsBucket(), hlsWrites);
     }
 
     @Bean(name = "workerStorage", destroyMethod = "close")
     StorageHealthIndicator workerStorageHealth(StorageProperties properties) {
-        return new StorageHealthIndicator(client(properties, HEALTH_TIMEOUT_MS), properties.rawBucket());
+        return new StorageHealthIndicator(client(properties, HEALTH_TIMEOUT_MS, new Dispatcher(), null), properties.rawBucket());
     }
 
-    static MinioClient client(StorageProperties properties, long timeoutCap) {
-        Dispatcher dispatcher = new Dispatcher();
+    private static MinioClient client(StorageProperties properties, long timeoutCap, Dispatcher dispatcher,
+                                      HlsWriteGuard hlsWrites) {
         dispatcher.setMaxRequests(64);
         dispatcher.setMaxRequestsPerHost(MAX_REQUESTS_PER_HOST);
         long connect = Math.min(properties.connectTimeoutMs(), timeoutCap);
         long read = Math.min(properties.readTimeoutMs(), timeoutCap);
         long write = Math.min(properties.writeTimeoutMs(), timeoutCap);
         boolean readiness = timeoutCap != Long.MAX_VALUE;
-        OkHttpClient httpClient = new OkHttpClient.Builder().dispatcher(dispatcher)
+        var builder = new OkHttpClient.Builder().dispatcher(dispatcher)
                 .dns(new BoundedStorageDns(connect))
                 .connectTimeout(connect, TimeUnit.MILLISECONDS)
                 .readTimeout(read, TimeUnit.MILLISECONDS)
                 .writeTimeout(write, TimeUnit.MILLISECONDS)
                 // Steady raw downloads can outlast each stall budget.
-                .callTimeout(readiness ? HEALTH_TIMEOUT_MS : 0, TimeUnit.MILLISECONDS)
-                .build();
+                .callTimeout(readiness ? HEALTH_TIMEOUT_MS : 0, TimeUnit.MILLISECONDS);
+        if (hlsWrites != null) builder.addInterceptor(hlsWrites);
+        OkHttpClient httpClient = builder.build();
         MinioClient client = MinioClient.builder().endpoint(properties.endpoint())
                 .credentials(properties.accessKey(), properties.secretKey()).region("us-east-1")
                 .httpClient(httpClient, true).build();

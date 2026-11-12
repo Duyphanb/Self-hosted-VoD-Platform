@@ -15,13 +15,14 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import okhttp3.Dispatcher;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class HlsUploadServiceTests {
     private static final UUID ASSET = UUID.fromString("ABABABAB-BBBB-CCCC-DDDD-ABCDEFABCDEF");
     private final WorkerObjectStorage storage = mock(WorkerObjectStorage.class);
-    private final HlsUploadService uploader = new HlsUploadService(storage, "vod-hls");
+    private final HlsUploadService uploader = new HlsUploadService(storage, "vod-hls", new HlsWriteGuard(new Dispatcher()));
 
     @TempDir
     Path outputDir;

@@ -16,6 +16,27 @@
     <dependencies>
         <dependency>
             <groupId>com.vodplatform.worker</groupId>
+            <artifactId>cleanup</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>probe</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>transcode</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>test-support</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.vodplatform.worker</groupId>
             <artifactId>storage</artifactId>
             <version>${project.version}</version>
         </dependency>

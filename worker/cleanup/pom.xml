@@ -12,4 +12,25 @@
 
     <artifactId>cleanup</artifactId>
     <name>vod-worker-cleanup</name>
+    <dependencies>
+        <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>status</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.vodplatform.worker</groupId>
+            <artifactId>storage</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

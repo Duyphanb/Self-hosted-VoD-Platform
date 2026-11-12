@@ -1,5 +1,6 @@
 package com.vodplatform.common.support;
 
+import java.util.Map;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.TestPropertySource;
@@ -49,8 +50,20 @@ public interface PostgresTestDatabase {
     String IMAGE = "postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab";
 
     @ServiceConnection
-    PostgreSQLContainer POSTGRES = new PostgreSQLContainer(DockerImageName.parse(IMAGE))
-            .withDatabaseName("vod_test")
-            // Same cluster collation as Compose and CI (ADR-009 addendum).
-            .withEnv("POSTGRES_INITDB_ARGS", "--locale-provider=icu --icu-locale=vi");
+    PostgreSQLContainer POSTGRES = postgres();
+
+    private static PostgreSQLContainer postgres() {
+        var container = new PostgreSQLContainer(DockerImageName.parse(IMAGE))
+                .withDatabaseName("vod_test")
+                // Same cluster collation as Compose and CI (ADR-009 addendum).
+                .withEnv("POSTGRES_INITDB_ARGS", "--locale-provider=icu --icu-locale=vi");
+        String project = System.getenv("ENCODING_TEST_RABBITMQ_PROJECT");
+        if (project != null && project.matches("s5w7-[a-z0-9][a-z0-9_-]*")) {
+            // The broker smoke owns and cleans this single named fixture without Ryuk.
+            container.withLabel("com.vodplatform.broker-smoke.project", project)
+                    .withTmpFs(Map.of("/var/lib/postgresql/data", "rw"))
+                    .withCreateContainerCmdModifier(command -> command.withName(project + "-test-postgres"));
+        }
+        return container;
+    }
 }

@@ -3,6 +3,7 @@
 # runtime image's own ffmpeg/ffprobe (ADR-010 D25), then requires evidence that every *FfmpegTests class
 # executed with no skipped, failed or errored test.
 #   WORKER_FFMPEG_TEST_IMAGE  image tag to build (default vod-worker-ffmpeg-test)
+#   WORKER_FFMPEG_TEST_CONTAINER  explicit name for the disposable test container (optional)
 #   WORKER_FFMPEG_TEST_M2     host Maven cache to mount (default ~/.m2)
 set -eu
 
@@ -27,7 +28,11 @@ fi
 rm -f "$root"/worker/*/target/surefire-reports/TEST-*FfmpegTests.xml
 
 docker build --target ffmpeg-test -t "$image" "$worker_mount"
-docker run --rm --user "$user" -e HOME=/tmp -e MAVEN_OPTS=-Duser.home=/tmp \
+set --
+if [ -n "${WORKER_FFMPEG_TEST_CONTAINER:-}" ]; then
+    set -- --name "$WORKER_FFMPEG_TEST_CONTAINER"
+fi
+docker run --rm "$@" --user "$user" -e HOME=/tmp -e MAVEN_OPTS=-Duser.home=/tmp \
     -v "$worker_mount:/workspace" -v "$m2_mount:/m2" -w /workspace "$image" \
     mvn -B -ntp -Dmaven.repo.local=/m2/repository -Pffmpeg-tests test
 

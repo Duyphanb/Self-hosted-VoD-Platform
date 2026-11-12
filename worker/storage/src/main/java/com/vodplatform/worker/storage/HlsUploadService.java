@@ -4,6 +4,7 @@ import static java.nio.file.LinkOption.NOFOLLOW_LINKS;
 import static java.nio.file.StandardOpenOption.READ;
 
 import com.vodplatform.worker.transcode.HlsOutput;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.nio.channels.Channels;
 import java.nio.file.Files;
@@ -13,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 
 /** Publishes the validated D27 output to one private attempt prefix. */
@@ -23,16 +25,36 @@ public final class HlsUploadService {
 
     private final WorkerObjectStorage storage;
     private final String hlsBucket;
+    private final HlsWriteGuard writes;
 
-    HlsUploadService(WorkerObjectStorage storage, String hlsBucket) {
+    HlsUploadService(WorkerObjectStorage storage, String hlsBucket, HlsWriteGuard writes) {
         this.storage = storage;
         this.hlsBucket = hlsBucket;
+        this.writes = writes;
     }
 
     public record UploadedHls(String bucket, String masterObjectKey) {}
 
     /** The caller persists the returned location only in its conditional READY transaction. */
     public UploadedHls upload(UUID assetId, int attempt, HlsOutput output) throws IOException {
+        return uploadFiles(assetId, attempt, output, () -> false);
+    }
+
+    public UploadedHls upload(UUID assetId, int attempt, HlsOutput output, BooleanSupplier cancelled) throws IOException {
+        writes.begin(cancelled);
+        try {
+            return uploadFiles(assetId, attempt, output, cancelled);
+        } finally {
+            writes.end();
+        }
+    }
+
+    public void cancelActiveUpload() {
+        writes.cancelActiveWrites();
+    }
+
+    private UploadedHls uploadFiles(UUID assetId, int attempt, HlsOutput output, BooleanSupplier cancelled)
+            throws IOException {
         String prefix = attemptPrefix(assetId, attempt);
         Path directory = output.directory().toAbsolutePath().normalize();
         Path segmentsDirectory = directory.resolve(SEGMENTS);
@@ -55,10 +77,11 @@ public final class HlsUploadService {
             }
             // Publish the playlist only after every referenced segment has been written.
             for (Path segment : segments) {
-                put(segment, prefix + SEGMENTS + "/" + segment.getFileName(), "video/mp2t");
+                put(segment, prefix + SEGMENTS + "/" + segment.getFileName(), "video/mp2t", cancelled);
             }
             String masterKey = prefix + PLAYLIST;
-            put(playlist, masterKey, "application/vnd.apple.mpegurl");
+            put(playlist, masterKey, "application/vnd.apple.mpegurl", cancelled);
+            HlsWriteGuard.check(cancelled);
             return new UploadedHls(hlsBucket, masterKey);
         } catch (IOException ignored) {
             throw new IOException("HLS upload failed");
@@ -71,11 +94,25 @@ public final class HlsUploadService {
         return "video-assets/" + assetId + "/attempt-" + attempt + "/";
     }
 
-    private void put(Path file, String key, String contentType) throws IOException {
+    private void put(Path file, String key, String contentType, BooleanSupplier cancelled) throws IOException {
+        HlsWriteGuard.check(cancelled);
         try (var channel = Files.newByteChannel(file, READ, NOFOLLOW_LINKS)) {
             long size = channel.size();
             if (size == 0) throw invalidOutput();
-            storage.putHls(key, Channels.newInputStream(channel), size, contentType);
+            var input = new FilterInputStream(Channels.newInputStream(channel)) {
+                @Override
+                public int read() throws IOException {
+                    HlsWriteGuard.check(cancelled);
+                    return in.read();
+                }
+
+                @Override
+                public int read(byte[] bytes, int offset, int length) throws IOException {
+                    HlsWriteGuard.check(cancelled);
+                    return in.read(bytes, offset, length);
+                }
+            };
+            storage.putHls(key, input, size, contentType);
         }
     }
 

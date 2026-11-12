@@ -88,7 +88,7 @@ def compose_variables():
 
 
 def new_environment():
-    """Generated credentials and overlay defaults only: no variable either Compose file reads is inherited,
+    """Generated credentials, test deadlines and overlay defaults: no variable either Compose file reads is inherited,
     so a developer's deployment settings or JVM overrides cannot leak in. Tool variables (PATH, the Docker
     CLI's plugin and config locations) are kept."""
     excluded = {name.upper() for name in compose_variables()} | {"DOCKER_DEFAULT_PLATFORM"}
@@ -108,6 +108,9 @@ def new_environment():
     # Nginx is not started; the preflight still requires a non-loopback edge setting.
     env.update({"JWT_SECRET": secrets.token_urlsafe(48), "NGINX_HTTP_PORT": "0.0.0.0:18089",
                 "MAX_UPLOAD_SIZE_MB": "2048", "CORS_ALLOWED_ORIGINS": ""})
+    # Disposable JVM fixture only. Production media deadlines await #124.
+    env.update({"WORKER_FFPROBE_TIMEOUT_SECONDS": "15", "WORKER_FFMPEG_TIMEOUT_MIN_SECONDS": "60",
+                "WORKER_FFMPEG_TIMEOUT_FACTOR": "8"})
     return env
 
 

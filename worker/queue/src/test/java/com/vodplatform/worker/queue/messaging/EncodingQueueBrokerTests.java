@@ -349,7 +349,7 @@ class EncodingQueueBrokerTests {
         }
         JsonNode project = labels == null ? null : labels.get("com.docker.compose.project");
         if (project == null || !project.isString()
-                || !project.asString().matches("(?:vod-auth-audit|s5w6-191-short)-[a-z0-9][a-z0-9_-]*")
+                || !project.asString().matches("(?:vod-auth-audit|s5w6-191-short|s5w7)-[a-z0-9][a-z0-9_-]*")
                 || !"rabbitmq".equals(labels.path("com.docker.compose.service").asString())) {
             throw new IllegalStateException("Broker tests require an owned disposable Compose project");
         }

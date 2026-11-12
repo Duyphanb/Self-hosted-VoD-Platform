@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.minio.MinioClient;
@@ -22,6 +23,19 @@ import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class WorkerStorageConfigurationTests {
+    @Test
+    void forceDeleteRejectsBroadOrMalformedPrefixesBeforeCallingStorage() {
+        var client = mock(MinioClient.class);
+        var storage = new WorkerObjectStorage(client, StorageProperties.fromEnvironment(environment()));
+        String asset = "video-assets/12345678-1234-1234-1234-123456789012/";
+        for (String prefix : new String[]{"", "video-assets/", asset, asset + "attempt-1",
+                asset + "attempt-0/", asset + "attempt-1/master.m3u8", asset + "attempt-1/../"}) {
+            assertThatThrownBy(() -> storage.deleteHlsAttemptPrefix(prefix))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessage("Invalid HLS attempt prefix");
+        }
+        verifyNoInteractions(client);
+    }
+
     @Test
     void storageSettingsHaveNoCredentialOrTimeoutDefaults() {
         assertThatThrownBy(() -> StorageProperties.fromEnvironment(new MockEnvironment()))

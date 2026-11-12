@@ -190,14 +190,15 @@ class EncodingBrokerPermissionTests {
         return new String(output, StandardCharsets.UTF_8).strip();
     }
 
-    /** Must pass before connecting: only a loopback port of an owned vod-auth-audit-* broker. */
+    /** Must pass before connecting: only a loopback port of an owned disposable broker. */
     private static void verifyDisposableBroker(String container) throws Exception {
         if (!container.matches("[a-f0-9]{12,64}")) throw new IllegalStateException("Broker container id is invalid");
         if (!"127.0.0.1".equals(env("HOST"))) throw new IllegalStateException("Broker tests require a loopback host");
         JsonNode labels = JsonMapper.builder().build().readTree(docker("inspect", "--format",
                 "{{json .Config.Labels}}", container));
         JsonNode project = labels == null ? null : labels.get("com.docker.compose.project");
-        if (project == null || !project.isString() || !project.asString().matches("vod-auth-audit-[a-z0-9][a-z0-9_-]*")) {
+        if (project == null || !project.isString()
+                || !project.asString().matches("(?:vod-auth-audit|s5w7)-[a-z0-9][a-z0-9_-]*")) {
             throw new IllegalStateException("Broker tests require an owned disposable Compose project");
         }
         assertThat(docker("port", container, "5672/tcp").trim()).isEqualTo("127.0.0.1:" + env("PORT"));

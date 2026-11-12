@@ -6,6 +6,7 @@ import struct
 import tempfile
 import threading
 import unittest
+from unittest.mock import Mock
 
 
 SPEC = importlib.util.spec_from_file_location("rabbitmq_smoke", Path(__file__).with_name("rabbitmq-publisher-smoke.py"))
@@ -56,10 +57,12 @@ def run_fake_broker(publish_reply):
 
 class RabbitmqPublisherSmokeTests(unittest.TestCase):
     def test_project_name_cannot_target_normal_or_empty_project(self):
-        for name in ("", "vod-platform", "vod-auth-audit-", "vod-auth-audit-X", "vod-auth-audit-../other"):
+        for name in ("", "vod-platform", "vod-auth-audit-", "vod-auth-audit-X", "vod-auth-audit-../other",
+                     "s5w7-", "s5w7-../other"):
             with self.subTest(name=name), self.assertRaisesRegex(AssertionError, "Disposable audit project"):
                 SMOKE.require_disposable_project(name)
         SMOKE.require_disposable_project("vod-auth-audit-170-ci_1")
+        SMOKE.require_disposable_project("s5w7-broker-1")
 
     def test_any_existing_resource_prevents_project_reuse(self):
         for existing_at in range(3):
@@ -72,6 +75,25 @@ class RabbitmqPublisherSmokeTests(unittest.TestCase):
             self.assertEqual(len(calls), existing_at + 1)
             self.assertTrue(all(command[-1] == "label=com.docker.compose.project=vod-auth-audit-170"
                                 for command in calls))
+
+    def test_s5w7_never_reuses_an_existing_named_postgres(self):
+        project = "s5w7-broker-test"
+        run = Mock(side_effect=["", "", "", "a" * 12])
+        with self.assertRaisesRegex(AssertionError, "PostgreSQL fixture already exists"):
+            SMOKE.require_fresh_project(run, project)
+        self.assertEqual(run.call_args.args[0][-1], f"label={SMOKE.TEST_POSTGRES_LABEL}={project}")
+
+    def test_s5w7_cleanup_requires_an_exact_postgres_name_and_label(self):
+        project = "s5w7-broker-test"
+        identifier = "a" * 12
+        for owner in (f"/another-postgres {project}", f"/{project}-test-postgres another"):
+            run = Mock(side_effect=[identifier, owner])
+            with self.assertRaisesRegex(AssertionError, "ownership mismatch"):
+                SMOKE.cleanup_named_postgres(run, project)
+            self.assertEqual(run.call_count, 2)
+        run = Mock(side_effect=[identifier, f"/{project}-test-postgres {project}", ""])
+        SMOKE.cleanup_named_postgres(run, project)
+        run.assert_called_with(["docker", "container", "rm", "-f", "-v", identifier])
 
     def test_only_executed_unskipped_successful_suite_is_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
