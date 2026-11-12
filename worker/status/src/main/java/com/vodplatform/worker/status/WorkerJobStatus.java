@@ -5,6 +5,8 @@ import com.vodplatform.worker.probe.WorkerFailureCode;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import javax.sql.DataSource;
@@ -67,11 +69,39 @@ public final class WorkerJobStatus {
         }
     }
 
+    /** Find the latest paired PROCESSING attempts before the one worker starts consumption. */
+    public List<Attempt> processingAttempts() throws SQLException {
+        return read(connection -> {
+            var attempts = new ArrayList<Attempt>();
+            try (var statement = connection.prepareStatement("""
+                    SELECT asset.id AS asset_id, asset.status AS asset_status, job.id AS job_id, job.attempt,
+                           EXISTS (
+                               SELECT FROM encoding_jobs newer WHERE newer.video_asset_id = asset.id
+                               AND newer.attempt > job.attempt
+                           ) AS superseded
+                    FROM video_assets asset
+                    LEFT JOIN encoding_jobs job ON job.video_asset_id = asset.id AND job.status = 'PROCESSING'
+                    WHERE asset.status = 'PROCESSING' OR job.id IS NOT NULL
+                    ORDER BY asset.id, job.attempt
+                    """); var rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    UUID jobId = rows.getObject("job_id", UUID.class);
+                    if (jobId == null || !"PROCESSING".equals(rows.getString("asset_status"))
+                            || rows.getBoolean("superseded")) {
+                        throw new SQLException("Worker startup found an inconsistent processing pair");
+                    }
+                    attempts.add(new Attempt(jobId, rows.getObject("asset_id", UUID.class), rows.getInt("attempt")));
+                }
+            }
+            return List.copyOf(attempts);
+        });
+    }
+
     public Claim claim(Attempt attempt) throws SQLException {
         return transaction(connection -> {
             Pair pair = lockPair(connection, attempt);
             Claim observed = classifyClaim(pair, false);
-            if (observed.outcome() != ClaimOutcome.RETRY) return observed;
+            if (observed.outcome() != ClaimOutcome.RETRY) return new WorkResult<>(observed, false);
 
             requireOne(update(connection, """
                     UPDATE video_assets SET status = 'PROCESSING', updated_at = CURRENT_TIMESTAMP
@@ -81,13 +111,13 @@ public final class WorkerJobStatus {
                     UPDATE encoding_jobs SET status = 'PROCESSING', started_at = CURRENT_TIMESTAMP
                     WHERE id = ? AND video_asset_id = ? AND attempt = ? AND status = 'QUEUED'
                     """, attempt.jobId(), attempt.assetId(), attempt.number()));
-            return new Claim(ClaimOutcome.ACQUIRED, pair.asset().raw());
+            return new WorkResult<>(new Claim(ClaimOutcome.ACQUIRED, pair.asset().raw()), true);
         });
     }
 
     /** Call only when this delivery's claim COMMIT outcome is unknown. */
     public Claim readClaimAfterUnknownCommit(Attempt attempt) throws SQLException {
-        return transaction(connection -> classifyClaim(lockPair(connection, attempt), true));
+        return read(connection -> classifyClaim(lockPair(connection, attempt), true));
     }
 
     public Finish finish(Attempt attempt, Completion completion) throws SQLException {
@@ -95,7 +125,7 @@ public final class WorkerJobStatus {
         return transaction(connection -> {
             Pair pair = lockPair(connection, attempt);
             Finish observed = classifyFinish(pair, completion);
-            if (observed.outcome() != FinishOutcome.RETRY) return observed;
+            if (observed.outcome() != FinishOutcome.RETRY) return new WorkResult<>(observed, false);
 
             String status;
             String error = null;
@@ -127,13 +157,13 @@ public final class WorkerJobStatus {
                     UPDATE encoding_jobs SET status = ?, error_message = ?, finished_at = CURRENT_TIMESTAMP
                     WHERE id = ? AND video_asset_id = ? AND attempt = ? AND status = 'PROCESSING'
                     """, status, error, attempt.jobId(), attempt.assetId(), attempt.number()));
-            return new Finish(FinishOutcome.COMPLETED, hls);
+            return new WorkResult<>(new Finish(FinishOutcome.COMPLETED, hls), true);
         });
     }
 
     public Finish readFinishAfterUnknownCommit(Attempt attempt, Completion completion) throws SQLException {
         Objects.requireNonNull(completion, "completion");
-        return transaction(connection -> classifyFinish(lockPair(connection, attempt), completion));
+        return read(connection -> classifyFinish(lockPair(connection, attempt), completion));
     }
 
     private static Claim classifyClaim(Pair pair, boolean recoveringOwnClaim) {
@@ -194,11 +224,15 @@ public final class WorkerJobStatus {
         }
     }
 
-    private <T> T transaction(SqlWork<T> work) throws SQLException {
+    private <T> T read(SqlWork<T> work) throws SQLException {
+        return transaction(connection -> new WorkResult<>(work.execute(connection), false));
+    }
+
+    private <T> T transaction(SqlWork<WorkResult<T>> work) throws SQLException {
         boolean commitAttempted = false;
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
-            T result;
+            WorkResult<T> result;
             try {
                 result = work.execute(connection);
             } catch (SQLException | RuntimeException failure) {
@@ -209,9 +243,14 @@ public final class WorkerJobStatus {
                 }
                 throw failure;
             }
-            commitAttempted = true;
-            connection.commit();
-            return result;
+            if (result.wrotePair()) {
+                commitAttempted = true;
+                connection.commit();
+            } else {
+                // A lost response to a read-only observation must never be treated as our own claim.
+                connection.rollback();
+            }
+            return result.value();
         } catch (SQLException failure) {
             if (commitAttempted) throw new CommitOutcomeUnknownException();
             throw new SQLException("Worker status transaction failed", failure.getSQLState());
@@ -248,6 +287,8 @@ public final class WorkerJobStatus {
     private interface SqlWork<T> {
         T execute(Connection connection) throws SQLException;
     }
+
+    private record WorkResult<T>(T value, boolean wrotePair) {}
 
     private record Asset(String status, RawObject raw, HlsObject hls, String failure) {}
     private record Job(String status, String error, boolean superseded) {}

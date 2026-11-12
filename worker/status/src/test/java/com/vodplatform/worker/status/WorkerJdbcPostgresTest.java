@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.vodplatform.worker.probe.MediaMetadata;
@@ -23,6 +25,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -120,6 +123,41 @@ class WorkerJdbcPostgresTest {
             assertEquals(FinishOutcome.UNRESOLVED, service.finish(attempt, fixture.ready()).outcome());
             assertEquals("QUEUED", fixture.snapshot().assetState());
             assertEquals("PROCESSING", fixture.snapshot().jobState());
+        }
+    }
+
+    @Test
+    void startupFindsOnlyPairedProcessingAttemptsAndRefusesInconsistentRows() throws SQLException {
+        try (var processing = fixture("PROCESSING", "PROCESSING"); var queued = fixture("QUEUED", "QUEUED")) {
+            var status = new WorkerJobStatus(processing.worker());
+            assertEquals(List.of(processing.attempt()), status.processingAttempts());
+            try (var inconsistent = fixture("PROCESSING", "QUEUED")) {
+                assertThrows(SQLException.class, status::processingAttempts);
+            }
+            assertEquals(List.of(processing.attempt()), status.processingAttempts());
+        }
+    }
+
+    @Test
+    void readOnlyClaimCannotBecomeAnUnknownWriteWhenClosingItsConnectionFails() throws SQLException {
+        try (var processing = fixture("PROCESSING", "PROCESSING");
+                var connection = processing.worker().getConnection()) {
+            var fault = mock(Connection.class, delegatesTo(connection));
+            doAnswer(invocation -> {
+                connection.close();
+                throw new SQLException("synthetic close failure", "08006");
+            }).when(fault).close();
+            var source = mock(DataSource.class);
+            when(source.getConnection()).thenReturn(fault);
+
+            var failure = assertThrows(SQLException.class,
+                    () -> new WorkerJobStatus(source).claim(processing.attempt()));
+            assertEquals(SQLException.class, failure.getClass());
+            assertEquals("08006", failure.getSQLState());
+            assertEquals("Worker status transaction failed", failure.getMessage());
+            verify(fault, never()).commit();
+            assertEquals("PROCESSING", processing.snapshot().assetState());
+            assertEquals("PROCESSING", processing.snapshot().jobState());
         }
     }
 

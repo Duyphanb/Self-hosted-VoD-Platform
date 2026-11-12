@@ -15,6 +15,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -117,6 +118,38 @@ class WorkerObjectStorageSiloTests {
             assertObject(backend, bucket, ten + "segments/seg_00001.ts", "attempt ten", "video/mp2t");
             assertObject(backend, bucket, one + "segments/seg_00002.ts", "second segment", "video/mp2t");
             assertObject(backend, bucket, ten + "segments/seg_00002.ts", "second segment", "video/mp2t");
+        }
+    }
+
+    @Test
+    void scopedWorkerDeletesExactlyTheAttemptPrefixIncludingNestedSegments() throws Exception {
+        UUID asset = UUID.randomUUID();
+        String prefix = HlsUploadService.attemptPrefix(asset, 1);
+        String playlist = prefix + "master.m3u8";
+        String segment = prefix + "segments/seg_00001.ts";
+        String sibling = HlsUploadService.attemptPrefix(asset, 10) + "master.m3u8";
+        String otherAsset = HlsUploadService.attemptPrefix(UUID.randomUUID(), 1) + "master.m3u8";
+        byte[] bytes = "synthetic segment payload".getBytes(UTF_8);
+        try (var backend = MinioClient.builder().endpoint(System.getenv("MINIO_ENDPOINT"))
+                     .credentials(System.getenv("MINIO_BACKEND_ACCESS_KEY"), System.getenv("MINIO_BACKEND_SECRET_KEY"))
+                     .region("us-east-1").build();
+                var context = new AnnotationConfigApplicationContext(StorageConfiguration.class)) {
+            var storage = context.getBean(WorkerObjectStorage.class);
+            for (String key : List.of(playlist, segment, sibling, otherAsset)) {
+                storage.putHls(key, new ByteArrayInputStream(bytes), bytes.length, "application/octet-stream");
+            }
+
+            storage.deleteHlsAttemptPrefix(prefix);
+            storage.deleteHlsAttemptPrefix(prefix);
+
+            String bucket = System.getenv("MINIO_BUCKET_HLS");
+            for (String key : List.of(playlist, segment)) {
+                var get = GetObjectArgs.builder().bucket(bucket).object(key).build();
+                assertEquals("NoSuchKey", assertThrows(ErrorResponseException.class,
+                        () -> backend.getObject(get).close()).errorResponse().code());
+            }
+            assertObject(backend, bucket, sibling, "synthetic segment payload", "application/octet-stream");
+            assertObject(backend, bucket, otherAsset, "synthetic segment payload", "application/octet-stream");
         }
     }
 

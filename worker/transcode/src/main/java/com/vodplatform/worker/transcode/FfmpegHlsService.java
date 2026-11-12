@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,6 +60,12 @@ public final class FfmpegHlsService {
      *                                interrupted, after the process tree was killed and with the interrupt status kept
      */
     public HlsOutput transcode(Path jobDirectory, Path input, String keyExtension, MediaMetadata metadata) {
+        return transcode(jobDirectory, input, keyExtension, metadata, () -> false);
+    }
+
+    /** Run with a cancellation signal from the worker's disk watchdog or shutdown. */
+    public HlsOutput transcode(Path jobDirectory, Path input, String keyExtension, MediaMetadata metadata,
+                               BooleanSupplier cancelled) {
         TrustedDemuxer demuxer = TrustedDemuxer.forKeyExtension(keyExtension);
         Objects.requireNonNull(metadata, "metadata");
         requireJobPaths(jobDirectory, input);
@@ -76,7 +83,8 @@ public final class FfmpegHlsService {
         MediaProcessRunner.Result result;
         try {
             result = runner.run(FfmpegCommand.arguments(settings, demuxer, input, hls, metadata), deadline,
-                    new LineOutput(MAX_LINE_BYTES, progress), new LineOutput(MAX_LINE_BYTES, line -> errorLines.incrementAndGet()));
+                    new LineOutput(MAX_LINE_BYTES, progress),
+                    new LineOutput(MAX_LINE_BYTES, line -> errorLines.incrementAndGet()), cancelled);
         } catch (IOException e) {
             throw new WorkerFailureException(INTERNAL_ERROR, "FFmpeg could not be started", e);
         } catch (InterruptedException e) {

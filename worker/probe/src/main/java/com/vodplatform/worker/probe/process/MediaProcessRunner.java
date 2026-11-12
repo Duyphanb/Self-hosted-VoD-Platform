@@ -9,7 +9,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.SequencedSet;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,12 +64,20 @@ public final class MediaProcessRunner {
      */
     public Result run(List<String> command, Duration timeout, OutputSink stdout, OutputSink stderr)
             throws IOException, InterruptedException {
+        return run(command, timeout, stdout, stderr, () -> false);
+    }
+
+    /** The cancellation signal is checked while waiting. The same tree cleanup runs on cancellation. */
+    public Result run(List<String> command, Duration timeout, OutputSink stdout, OutputSink stderr,
+                      BooleanSupplier cancelled) throws IOException, InterruptedException {
         List<String> arguments = checked(command);
         if (timeout == null || timeout.isNegative() || timeout.isZero()) {
             throw new IllegalArgumentException("Timeout must be positive");
         }
         Objects.requireNonNull(stdout, "stdout");
         Objects.requireNonNull(stderr, "stderr");
+        Objects.requireNonNull(cancelled, "cancelled");
+        if (cancelled.getAsBoolean()) throw new CancellationException("Media process cancelled");
         ProcessBuilder builder = new ProcessBuilder(arguments);
         builder.environment().clear();
         builder.environment().putAll(environment);
@@ -78,7 +88,7 @@ public final class MediaProcessRunner {
             closeStdin(process);
             Drain out = Drain.start(process.getInputStream(), stdout, "media-stdout-" + process.pid());
             Drain err = Drain.start(process.getErrorStream(), stderr, "media-stderr-" + process.pid());
-            if (!tree.waitFor(deadline)) {
+            if (!tree.waitFor(deadline, cancelled)) {
                 tree.kill();
                 out.await(DRAIN_GRACE);
                 err.await(DRAIN_GRACE);
@@ -86,7 +96,7 @@ public final class MediaProcessRunner {
             }
             // The deadline covers draining too: a descendant that outlived the tool may hold the pipes open.
             long drainDeadline = Math.max(deadline, System.nanoTime() + DRAIN_GRACE.toNanos());
-            if (!out.await(until(drainDeadline)) || !err.await(until(drainDeadline))) {
+            if (!awaitDrain(out, drainDeadline, cancelled) || !awaitDrain(err, drainDeadline, cancelled)) {
                 log.warn("Media process {} exited but its output stayed open past the deadline", process.pid());
                 tree.kill();
                 out.await(DRAIN_GRACE);
@@ -115,6 +125,17 @@ public final class MediaProcessRunner {
 
     private static Duration until(long deadline) {
         return Duration.ofNanos(Math.max(deadline - System.nanoTime(), 0));
+    }
+
+    private static boolean awaitDrain(Drain drain, long deadline, BooleanSupplier cancelled)
+            throws InterruptedException {
+        while (true) {
+            if (cancelled.getAsBoolean()) throw new CancellationException("Media process cancelled");
+            Duration remaining = until(deadline);
+            Duration poll = remaining.compareTo(TREE_POLL) < 0 ? remaining : TREE_POLL;
+            if (drain.await(poll)) return true;
+            if (remaining.isZero()) return false;
+        }
     }
 
     private static void closeStdin(Process process) {
@@ -161,8 +182,9 @@ public final class MediaProcessRunner {
         }
 
         /** Waits for the tool to exit until {@code deadline}, listing its descendants every {@link #TREE_POLL}. */
-        boolean waitFor(long deadline) throws InterruptedException {
+        boolean waitFor(long deadline, BooleanSupplier cancelled) throws InterruptedException {
             while (true) {
+                if (cancelled.getAsBoolean()) throw new CancellationException("Media process cancelled");
                 long remaining = deadline - System.nanoTime();
                 if (remaining <= 0) return !process.isAlive();
                 if (process.waitFor(Math.min(remaining, TREE_POLL.toNanos()), TimeUnit.NANOSECONDS)) return true;

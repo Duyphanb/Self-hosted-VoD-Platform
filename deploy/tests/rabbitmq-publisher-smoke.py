@@ -26,10 +26,11 @@ SUITES = (
     ("backend", "common", "com.vodplatform.common.EncodingBrokerPermissionTests", None),
     ("backend", "common", "com.vodplatform.common.EncodingPublisherBrokerTests", "ADMIN"),
 )
+TEST_POSTGRES_LABEL = "com.vodplatform.broker-smoke.project"
 
 
 def require_disposable_project(project):
-    if not re.fullmatch(r"vod-auth-audit-[a-z0-9][a-z0-9_-]*", project):
+    if not re.fullmatch(r"(?:vod-auth-audit|s5w7)-[a-z0-9][a-z0-9_-]*", project):
         raise AssertionError("Disposable audit project required")
 
 
@@ -41,6 +42,27 @@ def require_fresh_project(run, project):
                        + ["--filter", "label=com.docker.compose.project=" + project])
         if existing.strip():
             raise AssertionError("Audit project already exists; refusing reuse")
+    if project.startswith("s5w7-") and named_postgres_containers(run, project):
+        raise AssertionError("Audit PostgreSQL fixture already exists; refusing reuse")
+
+
+def named_postgres_containers(run, project):
+    return run(["docker", "ps", "-aq", "--filter", "label=" + TEST_POSTGRES_LABEL + "=" + project]).split()
+
+
+def cleanup_named_postgres(run, project):
+    """The s5w7 publisher suite replaces Ryuk with exact fixture ownership checks."""
+    require_disposable_project(project)
+    if not project.startswith("s5w7-"):
+        raise AssertionError("Named PostgreSQL fixture requires an s5w7 project")
+    for container in named_postgres_containers(run, project):
+        if not re.fullmatch(r"[a-f0-9]{12,64}", container):
+            raise AssertionError("Audit PostgreSQL container id is invalid")
+        owner = run(["docker", "container", "inspect", "--format",
+                     '{{.Name}} {{index .Config.Labels "' + TEST_POSTGRES_LABEL + '"}}', container])
+        if owner.split() != ["/" + project + "-test-postgres", project]:
+            raise AssertionError("Audit PostgreSQL fixture ownership mismatch")
+        run(["docker", "container", "rm", "-f", "-v", container])
 
 
 def port_overlay(port):
@@ -215,11 +237,19 @@ def publish_persistent(address, username, password, queue, body, timeout=10):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", required=True)
+    parser.add_argument("--maven-repository")
     args = parser.parse_args()
     require_disposable_project(args.project)
     root = Path(__file__).resolve().parents[2]
     os.chdir(root)
     env = os.environ.copy()
+    env.pop("ENCODING_TEST_RABBITMQ_PROJECT", None)
+    named_test_postgres = args.project.startswith("s5w7-")
+    if named_test_postgres:
+        env["ENCODING_TEST_RABBITMQ_PROJECT"] = args.project
+        # The broker and its PostgreSQL test fixture are cleaned by this launcher.
+        env["TESTCONTAINERS_RYUK_DISABLED"] = "true"
+        env["TESTCONTAINERS_CHECKS_DISABLE"] = "true"
     for role in ("", "BACKEND_", "WORKER_"):
         env["RABBITMQ_" + role + "USERNAME"] = "audit_" + secrets.token_hex(16)
         env["RABBITMQ_" + role + "PASSWORD"] = secrets.token_urlsafe(40)
@@ -333,9 +363,12 @@ def main():
                     else:
                         prefix = "RABBITMQ_" if identity == "ADMIN" else "RABBITMQ_" + identity + "_"
                         env["ENCODING_TEST_RABBITMQ_" + field] = env[prefix + field]
-                run([mvn, "-f", reactor + "/pom.xml", "-B", "-ntp", "-pl", module, "-am", "test",
-                     "-Dtest=" + suite.rsplit(".", 1)[1], "-Dsurefire.failIfNoSpecifiedTests=false",
-                     "-DargLine=-Xmx384m"], timeout=900, log=suite.rsplit(".", 1)[1] + "-test.log")
+                maven = [mvn, "-f", reactor + "/pom.xml", "-B", "-ntp", "-pl", module, "-am", "test",
+                         "-Dtest=" + suite.rsplit(".", 1)[1], "-Dsurefire.failIfNoSpecifiedTests=false",
+                         "-DargLine=-Xmx384m"]
+                if args.maven_repository:
+                    maven.insert(5, "-Dmaven.repo.local=" + args.maven_repository)
+                run(maven, timeout=900, log=suite.rsplit(".", 1)[1] + "-test.log")
                 require_executed_tests(report_path(root, reactor, module, suite))
 
         def record_failure(error):
@@ -345,9 +378,14 @@ def main():
                                     env=env, capture_output=True, timeout=30)
             save("broker.log", result.stdout + result.stderr)
 
-        preserve_first_failure(check,
-                               lambda: run(compose + ["down", "--volumes", "--remove-orphans"]),
-                               record_failure)
+        def cleanup():
+            try:
+                run(compose + ["down", "--volumes", "--remove-orphans"])
+            finally:
+                if named_test_postgres:
+                    cleanup_named_postgres(run, args.project)
+
+        preserve_first_failure(check, cleanup, record_failure)
         print("PASS RabbitMQ pinned version, data across recreation, scoped worker/backend declarations and permissions, "
               "wire properties, persistence, confirms, returns, nack, timeout and DLQ routing", flush=True)
 

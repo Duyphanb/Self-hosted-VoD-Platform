@@ -148,6 +148,8 @@ class JvmLimitsSmokeTests(unittest.TestCase):
         ambient = {"POSTGRES_HOST": "production.invalid", "JWT_SECRET": "old-secret",
                    "BACKEND_JAVA_TOOL_OPTIONS": "-Xmx64m", "WORKER_JAVA_TOOL_OPTIONS": "-Xmx64m",
                    "COMPOSE_FILE": "other.yml", "DOCKER_DEFAULT_PLATFORM": "linux/amd64",
+                   "WORKER_FFPROBE_TIMEOUT_SECONDS": "999", "WORKER_FFMPEG_TIMEOUT_MIN_SECONDS": "999",
+                   "WORKER_FFMPEG_TIMEOUT_FACTOR": "999",
                    "MINIO_ENDPOINT": "http://production.invalid", "PATH": os.environ.get("PATH", "")}
         with patch.dict(os.environ, ambient):
             environment = SMOKE.new_environment()
@@ -157,6 +159,9 @@ class JvmLimitsSmokeTests(unittest.TestCase):
         self.assertNotEqual(environment["JWT_SECRET"], "old-secret")
         self.assertEqual(environment["PATH"], ambient["PATH"])
         self.assertEqual(environment["MAX_UPLOAD_SIZE_MB"], "2048")
+        self.assertEqual(environment["WORKER_FFPROBE_TIMEOUT_SECONDS"], "15")
+        self.assertEqual(environment["WORKER_FFMPEG_TIMEOUT_MIN_SECONDS"], "60")
+        self.assertEqual(environment["WORKER_FFMPEG_TIMEOUT_FACTOR"], "8")
         self.assertFalse(environment["NGINX_HTTP_PORT"].startswith("127."))
         self.assertEqual(len({environment[name] for name in ("MINIO_ACCESS_KEY", "MINIO_BACKEND_ACCESS_KEY",
                                                               "MINIO_WORKER_ACCESS_KEY")}), 3)

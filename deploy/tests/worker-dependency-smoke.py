@@ -64,8 +64,8 @@ def main():
     parser.add_argument("--project", required=True)
     parser.add_argument("--maven-repository")
     args = parser.parse_args()
-    if not re.fullmatch(r"s5w6-[a-z0-9][a-z0-9-]*", args.project):
-        raise SmokeError("Use a disposable s5w6-* project")
+    if not re.fullmatch(r"s5w[67]-[a-z0-9][a-z0-9-]*", args.project):
+        raise SmokeError("Use a disposable s5w6-* or s5w7-* project")
     mvn = shutil.which("mvn.cmd" if os.name == "nt" else "mvn")
     if mvn is None:
         raise SmokeError("Maven is required")

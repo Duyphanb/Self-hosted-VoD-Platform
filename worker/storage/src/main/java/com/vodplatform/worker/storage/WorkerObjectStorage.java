@@ -3,18 +3,23 @@ package com.vodplatform.worker.storage;
 import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
 import io.minio.StatObjectArgs;
 import io.minio.errors.MinioException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /** Only the operations the worker needs for raw input and HLS output. */
 public final class WorkerObjectStorage {
     private static final long PART_SIZE = 5L * 1024 * 1024;
+    private static final Pattern ATTEMPT_PREFIX = Pattern.compile(
+            "video-assets/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/attempt-[1-9][0-9]*/");
     private final MinioClient client;
     private final StorageProperties properties;
     private final Semaphore putPermits = new Semaphore(StorageConfiguration.MAX_CONCURRENT_PUTS, true);
@@ -71,6 +76,26 @@ public final class WorkerObjectStorage {
             throw new IOException("Object storage PUT failed");
         } finally {
             if (acquired) putPermits.release();
+        }
+    }
+
+    public String hlsBucket() {
+        return properties.hlsBucket();
+    }
+
+    /** Silo extension. A successful response means a delete was requested, not confirmed. */
+    public void deleteHlsAttemptPrefix(String prefix) throws IOException {
+        if (prefix == null || !ATTEMPT_PREFIX.matcher(prefix).matches()) {
+            throw new IllegalArgumentException("Invalid HLS attempt prefix");
+        }
+        try {
+            client.removeObject(RemoveObjectArgs.builder().bucket(properties.hlsBucket()).object(prefix)
+                    .extraHeaders(Map.of("x-minio-force-delete", "true")).build());
+        } catch (MinioException ignored) {
+            throw new IOException("Object storage attempt-prefix delete failed");
+        } catch (IllegalStateException failure) {
+            if (!isTransportFailure(failure)) throw failure;
+            throw new IOException("Object storage attempt-prefix delete failed");
         }
     }
 
