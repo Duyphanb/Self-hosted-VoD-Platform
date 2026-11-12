@@ -204,7 +204,12 @@ class WorkerOrchestrationIntegrationTests {
         Path stallingProbe = script("stall-ffprobe", "printf reached > " + quote(gate) + "\nexec /bin/sleep 60\n");
         int initialDlq = ready(QUEUE + ".dlq");
 
-        Process child = startChild(settings(stallingProbe.toString(), reserve()));
+        // A cold JVM cannot always finish its first SCRAM login within the 1 s budget of the outage tests.
+        var childSettings = settings(stallingProbe.toString(), reserve());
+        childSettings.put("WORKER_JDBC_CONNECT_TIMEOUT_SECONDS", "5");
+        childSettings.put("WORKER_JDBC_READ_TIMEOUT_SECONDS", "10");
+        childSettings.put("WORKER_JDBC_STATEMENT_TIMEOUT_MS", "5000");
+        Process child = startChild(childSettings);
         try {
             await("child worker completed startup and subscribed", Duration.ofSeconds(90), () -> {
                 assertThat(child.isAlive()).as("fixture worker has not exited during startup").isTrue();
@@ -225,7 +230,9 @@ class WorkerOrchestrationIntegrationTests {
             throw new AssertionError("Child startup reached Spring="
                     + log.contains("Started VodWorkerApplication") + ", recovery="
                     + log.contains("Worker database recovery completed") + ", broker="
-                    + log.contains("Created new connection"), failure);
+                    + log.contains("Created new connection") + ", cause="
+                    + log.lines().filter(line -> line.contains("Exception") || line.contains("SQLState")).map(line -> line.replaceAll("\s+", " "))
+                            .limit(6).toList(), failure);
         } finally {
             killChild(child);
         }

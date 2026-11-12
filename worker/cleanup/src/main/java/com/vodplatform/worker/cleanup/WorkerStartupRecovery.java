@@ -46,7 +46,9 @@ public final class WorkerStartupRecovery {
                 throw new IllegalStateException("Worker startup found unresolved processing jobs");
             }
             log.info("Worker database recovery completed for {} orphaned job pairs", attempts.size());
-        } catch (SQLException ignored) {
+        } catch (SQLException failure) {
+            // The SQLState is a fixed code; the message could carry connection details.
+            log.warn("Worker startup database recovery failed with SQLState {}", failure.getSQLState());
             throw new IllegalStateException("Worker startup database recovery could not complete");
         }
     }
