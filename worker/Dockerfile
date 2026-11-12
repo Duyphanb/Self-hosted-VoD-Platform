@@ -16,9 +16,15 @@ RUN apt-get update \
 ENV FFMPEG_PATH=ffmpeg
 ENV FFPROBE_PATH=ffprobe
 
+# Issue 5.8: the recorded ffmpeg version floor. Raise it when a Debian advisory requires it. Every build,
+# the arm64 one included, fails below it; deploy/tests/worker-image-check.sh asserts it again in CI.
+ARG FFMPEG_MIN_VERSION=7:7.1.5-0+deb13u1
+
 RUN ffmpeg -version >/dev/null \
     && ffprobe -version >/dev/null \
-    && java -version
+    && java -version \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ffmpeg)" ge "${FFMPEG_MIN_VERSION}" \
+    && dpkg-query -W ffmpeg openjdk-21-jre-headless
 
 # #123: FFmpeg-tagged tests run in this stage, on the runtime ffmpeg/ffprobe layer above.
 # Callers mount the worker sources; this stage is never deployed.
@@ -38,9 +44,20 @@ ENV WORKER_CONCURRENCY=1
 ENV WORKER_TEMP_DIR=/tmp/vod-worker
 ENV SERVER_PORT=8081
 
-RUN mkdir -p "${WORKER_TEMP_DIR}"
+# Issue 5.8: a fixed non-root runtime identity without a login shell or home. Compose runs the container
+# with a read-only root and mounts the disk-backed worker_temp volume on /tmp, which then holds both
+# WORKER_TEMP_DIR and the JVM's java.io.tmpdir. A new volume copies this /tmp (mode 1777 and the owned
+# temp root) on first use.
+RUN groupadd --system --gid 10001 vodworker \
+    && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent \
+        --shell /usr/sbin/nologin vodworker \
+    && mkdir -p "${WORKER_TEMP_DIR}" \
+    && chown 10001:10001 "${WORKER_TEMP_DIR}" \
+    && chmod 0700 "${WORKER_TEMP_DIR}"
 
 COPY --from=build /workspace/queue/target/queue-0.1.0-SNAPSHOT.jar /opt/worker/worker.jar
+
+USER 10001:10001
 
 EXPOSE 8081
 

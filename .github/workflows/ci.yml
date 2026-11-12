@@ -125,8 +125,9 @@ jobs:
       - name: Build worker image
         run: docker build -t vod-worker-skeleton ./worker
 
-      - name: Verify worker media tools
-        run: docker run --rm vod-worker-skeleton sh -c "ffmpeg -version >/dev/null && ffprobe -version >/dev/null"
+      # Issue 5.8 (ADR-010 D25): non-root default user, the recorded ffmpeg floor and the installed versions.
+      - name: Verify worker image user and media package floor
+        run: sh deploy/tests/worker-image-check.sh vod-worker-skeleton
 
       - name: Build frontend image
         run: docker build -t vod-frontend-skeleton ./frontend
@@ -146,7 +147,7 @@ jobs:
       - name: Verify least-privilege service identities on a disposable stack
         run: python3 deploy/tests/service-identity-smoke.py --project "${COMPOSE_PROJECT_NAME}-identity"
 
-      - name: Verify auth, catalog and upload against PostgreSQL and Nginx
+      - name: Verify auth, catalog, upload and encoding against PostgreSQL and Nginx
         env:
           GH_TOKEN: ${{ github.token }}
           NGINX_HTTP_PORT: 127.0.0.1:18087
@@ -225,6 +226,9 @@ jobs:
             echo "FAIL Newman Sprint 4 upload collection (response details withheld)"
             exit 1
           fi
+          # Issue 5.8: the hardened worker container (non-root, read-only root, no capabilities, pids limit,
+          # disk-backed /tmp volume) encodes a generated clip uploaded through Nginx to READY HLS.
+          python3 deploy/tests/worker-stack-smoke.py --project "$COMPOSE_PROJECT_NAME" --base-url http://127.0.0.1:18087
 
       - name: Preserve redacted storage SDK diagnostics
         if: ${{ failure() }}
