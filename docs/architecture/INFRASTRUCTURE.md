@@ -72,10 +72,11 @@ Required named volumes:
 - `postgres_data`
 - `rabbitmq_data`
 - `minio_data`
+- `worker_temp` (Issue 5.8)
 
 Redis persistence is not required for MVP because Redis is a cache/progress buffer. Durable playback progress belongs in PostgreSQL.
 
-Issue 5.8 adds and documents a disk-backed writable volume/mount for `WORKER_TEMP_DIR` under the worker's read-only root. It must not use tmpfs; the two-step free-disk check and watchdog of ADR-010 D27 guard capacity for the raw copy plus generated HLS, with a reserve that also protects the co-located PostgreSQL and Silo data. Keep this separate from backend `TEMP_UPLOAD_DIR`, which stays in the container layer. The volume/mount wiring is future Sprint 5 work, not added by this docs change.
+`worker_temp` is the worker's only configured writable volume under its read-only root (Issue 5.8). Compose mounts this named, disk-backed volume (never tmpfs) on `/tmp`, so it holds `WORKER_TEMP_DIR` (`/tmp/vod-worker`, owned by the worker's uid 10001) and the JVM's `java.io.tmpdir` (`/tmp`, where embedded Tomcat keeps its base directory). A new volume copies the image's `/tmp` on first use. Keeping `WORKER_TEMP_DIR` below `/tmp` is an operator requirement. Most other paths are on the read-only root, where the worker refuses to start, but Docker keeps its implicit writable `/dev/shm` tmpfs even with `read_only: true`, and the worker does not reject a path there; that path would put job files in memory instead of on disk. `worker-stack-smoke.py` asserts the deployed value is below `/tmp`. The volume shares the Docker data root's filesystem, so the two-step free-disk check and watchdog of ADR-010 D27 measure the real free space, and the reserve also protects the co-located PostgreSQL and Silo data. The volume needs no backup: it holds only owned `job-*` working copies, which the startup sweep removes, plus JVM scratch files. Backend `TEMP_UPLOAD_DIR` is separate and stays in the backend container layer.
 
 ## MinIO Buckets
 
@@ -189,7 +190,7 @@ These are the approved settings to wire into `.env.example`, application configu
 | `ENCODING_RELAY_INTERVAL_SECONDS` | 10; relay ignores jobs younger than twice confirm timeout |
 | `RABBITMQ_ENCODING_QUEUE` | `video-encoding-queue`; direct DLX `<queue>.dlx`, DLQ/routing key `<queue>.dlq` |
 | `WORKER_CONCURRENCY`, `WORKER_PREFETCH` | 1 each; exactly one non-overlapping worker replica |
-| `WORKER_TEMP_DIR` | `/tmp/vod-worker`; disk-backed writable volume, not tmpfs, added/documented in 5.8; two-step free-disk check; owned `job-*` children swept before listener startup |
+| `WORKER_TEMP_DIR` | `/tmp/vod-worker`, on the disk-backed `worker_temp` volume mounted on `/tmp` ([Persistent Volumes](#persistent-volumes)); must stay below `/tmp`; two-step free-disk check; owned `job-*` children swept before listener startup |
 | `WORKER_FFPROBE_TIMEOUT_SECONDS` | Positive bound, to be measured using #124 |
 | `WORKER_FFMPEG_TIMEOUT_MIN_SECONDS`, `WORKER_FFMPEG_TIMEOUT_FACTOR` | Deadline `max(min, factor * duration)`; values to be measured using #124 |
 | `WORKER_MAX_DURATION_SECONDS`, `WORKER_MAX_WIDTH`, `WORKER_MAX_HEIGHT`, `WORKER_MAX_STREAMS` | 10800, 1920, 1080 and 8 (owner policy, ADR-010 D26). Width and height cap the long and short side in either orientation; no 4K sources |
@@ -218,7 +219,21 @@ Update procedure:
 
 ### Worker runtime image
 
-[ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28) selects the worker image: `debian:trixie-slim` pinned by digest, Debian `ffmpeg` and `openjdk-21-jre-headless` from trixie and trixie-security, a non-root runtime user, for amd64 and arm64. The base and packages landed first, with the #123 harness: `worker/Dockerfile` pins the trixie-slim index digest in a `runtime-base` stage, so the 5.4/5.5 command tests and the #124 arm64 measurement all run the D25 binary. On 2026-11-03 it installed ffmpeg `7:7.1.5-0+deb13u1` and openjdk-21-jre-headless `21.0.13+9-1~deb13u2`. Its `ffmpeg-test` stage adds a JDK and Maven on top of `runtime-base` for the FFmpeg-tagged tests (`deploy/tests/worker-ffmpeg-tests.sh`) and is never deployed. Issue 5.8 then adds the non-root, read-only and volume hardening, the version-floor assertion and the weekly rebuild.
+[ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28) selects the worker image: `debian:trixie-slim` pinned by digest, Debian `ffmpeg` and `openjdk-21-jre-headless` from trixie and trixie-security, a non-root runtime user, for amd64 and arm64. The base and packages landed first, with the #123 harness: `worker/Dockerfile` pins the trixie-slim index digest in a `runtime-base` stage, so the 5.4/5.5 command tests and the #124 arm64 measurement all run the D25 binary. On 2026-11-03 it installed ffmpeg `7:7.1.5-0+deb13u1` and openjdk-21-jre-headless `21.0.13+9-1~deb13u2`. Its `ffmpeg-test` stage adds a JDK and Maven on top of `runtime-base` for the FFmpeg-tagged tests (`deploy/tests/worker-ffmpeg-tests.sh`) and is never deployed.
+
+Issue 5.8 hardening:
+
+- **User:** the deployed stage runs as `USER 10001:10001` (`vodworker`, `/usr/sbin/nologin`, no home). The `ffmpeg-test` stage keeps its own callers' user.
+- **Version floor:** `ARG FFMPEG_MIN_VERSION` in `worker/Dockerfile` is the recorded ffmpeg floor, `7:7.1.5-0+deb13u1` (the trixie-security build installed on 2026-11-03 and again on 2026-11-12, with openjdk-21-jre-headless `21.0.13+9-1~deb13u2`). Any build, amd64 or arm64, fails below it.
+- **Image check:** `deploy/tests/worker-image-check.sh <image>` asserts a non-root `id -u`/`id -g` and the floor with `dpkg --compare-versions`, then logs `dpkg-query -W` and the ffmpeg/ffprobe versions. It runs in the CI Skeleton job, the #124 arm64 workflow and the weekly rebuild.
+- **Compose:** `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges:true` and `deploy.resources.limits.pids: 256`. The pids limit sits under `deploy` because the production overlay extends those limits with CPU and memory, and Compose rejects a service-level `pids_limit` next to them. The only configured writable volume is `worker_temp` on `/tmp` ([Persistent Volumes](#persistent-volumes)). `deploy/tests/test_worker_hardening.py` renders both files and asserts each setting.
+- **Running stack:** `deploy/tests/worker-stack-smoke.py`, in the CI full-stack step, inspects the running container. It checks the controls, that writes to image paths fail and writes to both temp paths succeed, and that `/tmp` is not tmpfs. It then uploads a generated clip through Nginx and requires READY HLS in `vod-hls`.
+- **pids sizing:** the limit counts threads.
+  - Measured on 2026-11-12 (amd64, Docker Desktop): the idle worker container holds 59 tasks. The running stack peaked at 83 while encoding a 320×180 clip at `WORKER_FFMPEG_THREADS=1`.
+  - A standalone ffmpeg 7.1.5 encode with the D27 shape (1080p source scaled to 720p, libx264, AAC, HLS) peaked at 34 threads with `-threads 1 -filter_threads 1` and at 101 threads with `16`, the setting's maximum.
+  - The worst case is therefore about 59 + 101 plus a few job threads (process drainers, disk watchdog, upload), roughly 175, which leaves about 80 of headroom at 256.
+  - Embedded Tomcat can add request threads only under concurrent requests to the unpublished health port.
+  - Recheck the peak (`/sys/fs/cgroup/pids.peak` in the container) if FFmpeg's threading changes or `WORKER_FFMPEG_THREADS` rises above 1 in production. A failed thread start ends the JVM through `-XX:+ExitOnOutOfMemoryError` in production, and `restart: unless-stopped` brings it back with startup recovery.
 
 Update procedure:
 1. Watch debian-security-announce for ffmpeg and openjdk-21 advisories.
@@ -228,7 +243,7 @@ Update procedure:
 5. Record the `dpkg-query -W` versions in the PR.
 6. Roll back by redeploying the previous image tag.
 
-The weekly rebuild and the version-floor assertion are new CI work for Issue 5.8. Compose `pids_limit` counts threads, so size it for the JVM threads plus the FFmpeg threads.
+`.github/workflows/worker-image-weekly.yml` is the weekly rebuild. Every Tuesday, and on manual dispatch, it builds the image with `--pull --no-cache` on amd64 and natively on arm64, runs `worker-image-check.sh` and the FFmpeg-tagged tests, and fails the run when a new package breaks them. Production images are still rebuilt and deployed through the procedure above.
 
 ## Nginx Responsibilities
 

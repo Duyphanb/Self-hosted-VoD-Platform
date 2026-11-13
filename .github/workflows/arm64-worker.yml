@@ -76,10 +76,10 @@ jobs:
           docker build -t vod-frontend-arm64 ./frontend
           docker image inspect --format '{{.RepoTags}} {{.Os}}/{{.Architecture}}' vod-backend-arm64 vod-worker-arm64 vod-frontend-arm64
 
-      - name: Record the worker media packages (ADR-010 D25)
+      - name: Record the worker media packages and check the image user and floor (ADR-010 D25, Issue 5.8)
         run: |
-          docker run --rm vod-worker-arm64 sh -c 'ffmpeg -version | head -n 1 && ffprobe -version | head -n 1'
-          docker run --rm vod-worker-arm64 dpkg-query -W ffmpeg openjdk-21-jre-headless libx264-164
+          sh deploy/tests/worker-image-check.sh vod-worker-arm64
+          docker run --rm --entrypoint dpkg-query vod-worker-arm64 -W libx264-164
 
       # The checks below are independent evidence: each runs once the images exist, even if an earlier one
       # failed, and the job still fails if any of them does.

@@ -160,7 +160,7 @@ The owner adds the margin; none is chosen here.
 | `WORKER_OUTPUT_BUDGET_KBPS=5000` | Steady output rate and short-clip bursts against B | _pending_ | _pending_ |
 | `WORKER_DISK_RESERVE_MB=5120` | Temp-disk peaks; the VPS disk size comes from #180 | _pending_ | _pending_ |
 | `WORKER_FFMPEG_THREADS` (1 or 2) | Encode speed of 1 against 2 under the 1-CPU limit | _pending_ | _pending_ |
-| Worker memory limit and JVM share | Worker JVM idle memory plus the FFmpeg MemUsage peak against 1024 MiB (`memory.peak` as an upper bound with page cache); PIDs for the 5.8 `pids_limit` | _pending_ | _pending_ |
+| Worker memory limit and JVM share | Worker JVM idle memory plus the FFmpeg MemUsage peak against 1024 MiB (`memory.peak` as an upper bound with page cache); PIDs against the 5.8 pids limit of 256 (amd64 sizing in INFRASTRUCTURE "Worker runtime image"; recheck `pids.peak` on A1) | _pending_ | _pending_ |
 | Head-of-line blocking | Predicted cap-length encode duration with one worker at concurrency 1 | n/a | Owner accepts or rejects |
 
 ## Not covered here

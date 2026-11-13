@@ -225,7 +225,10 @@ affected `POSTGRES_OWNER_PASSWORD`, `POSTGRES_BACKEND_PASSWORD` or
 every run, so run `$C run --rm production-config-check`, then
 `$C run --rm postgres-init`, and stop if either fails. Then recreate only the
 consumer: `$C run --rm flyway` for the owner, `$C up -d backend` or
-`$C up -d worker` for an application role. Verify aggregate `/actuator/health`.
+`$C up -d worker` for an application role. Verify aggregate `/actuator/health`
+for the backend; it does not check the worker. After a worker rotation, require
+HTTP 200 from the worker's internal health endpoint, as in step 3 of
+[Storage Identity Rotation and Revocation](#storage-identity-rotation-and-revocation).
 
 **PostgreSQL bootstrap superuser.** `POSTGRES_PASSWORD` is applied only when the
 volume is first initialized, and the user name cannot change afterwards. Set the
@@ -243,6 +246,8 @@ a broker restart. After preflight, run `$C up -d rabbitmq` and then `$C up -d`
 for the affected application. Restarting the broker interrupts both applications
 briefly; the durable queue keeps its persistent jobs, and the relay retries jobs
 whose publication was not confirmed ([Encoding Recovery](#encoding-recovery)).
+Verify the backend through aggregate `/actuator/health` and the worker through
+its internal health endpoint (step 3 of the storage rotation).
 
 **Redis.** After preflight, `$C up -d redis backend` recreates the server with
 the new `requirepass` and the backend with the new password.

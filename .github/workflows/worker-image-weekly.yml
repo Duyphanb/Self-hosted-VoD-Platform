@@ -1,0 +1,60 @@
+name: Worker image weekly rebuild
+
+# Issue 5.8 (ADR-010 D25): the worker installs Debian ffmpeg and OpenJDK 21 without exact apt pins, so a
+# fresh build picks up each trixie-security update. Every week this rebuilds the image from scratch on amd64
+# and natively on arm64, checks the non-root user and the recorded ffmpeg floor, logs the installed versions
+# and runs the FFmpeg-tagged tests on that build. A failure means the next deployment build would fail or
+# regress; fix it before the next advisory rebuild. Advisory rebuilds and base digest bumps follow the
+# INFRASTRUCTURE "Worker runtime image" procedure.
+"on":
+  schedule:
+    - cron: "41 3 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-image-weekly
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    name: Worker image rebuild (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The FFmpeg-tagged tests mount ~/.m2; the cache keeps them from downloading every dependency.
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          verify-signature: true
+          java-version: "21"
+          cache: maven
+
+      - name: Rebuild the worker image without cache
+        run: docker build --pull --no-cache -t vod-worker-weekly ./worker
+
+      - name: Verify the image user and media package floor
+        run: sh deploy/tests/worker-image-check.sh vod-worker-weekly
+
+      # The ffmpeg-test stage reuses the runtime-base layers just rebuilt above.
+      - name: Run FFmpeg-tagged tests on the rebuilt packages
+        env:
+          WORKER_FFMPEG_TEST_IMAGE: vod-worker-weekly-ffmpeg-test
+        run: sh deploy/tests/worker-ffmpeg-tests.sh
