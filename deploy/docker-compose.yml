@@ -225,6 +225,24 @@ services:
     build:
       context: ../worker
       dockerfile: Dockerfile
+    # Issue 5.8 (ADR-010 D10): the image runs as uid 10001. The root filesystem is read-only; the only
+    # writable path is the disk-backed worker_temp volume on /tmp, which holds WORKER_TEMP_DIR and
+    # java.io.tmpdir. The pids limit counts threads; see INFRASTRUCTURE "Worker runtime image" for its
+    # sizing. It lives under deploy.resources.limits, which the production overlay extends with CPU and
+    # memory: Compose rejects a service-level pids_limit next to deploy limits.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          pids: 256
+    volumes:
+      - type: volume
+        source: worker_temp
+        target: /tmp
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
@@ -328,3 +346,4 @@ volumes:
   postgres_data:
   rabbitmq_data:
   minio_data:
+  worker_temp:
