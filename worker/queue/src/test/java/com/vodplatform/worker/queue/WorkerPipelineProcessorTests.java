@@ -94,8 +94,8 @@ class WorkerPipelineProcessorTests {
         verify(upload).upload(eq(attempt.assetId()), eq(1), eq(hls), any());
         verify(status, times(2)).finish(attempt, expected);
         verifyNoInteractions(cleanup);
-        assertThat(output.getOut()).contains("Encoding job " + attempt.jobId() + " attempt 1 claimed")
-                .contains("Encoding job " + attempt.jobId() + " attempt 1 persisted as READY")
+        String subject = "Encoding job " + attempt.jobId() + " for video asset " + attempt.assetId() + " attempt 1";
+        assertThat(output.getOut()).contains(subject + " claimed").contains(subject + " persisted as READY")
                 .doesNotContain(raw.objectKey()).doesNotContain(key);
         try (var children = Files.list(workspace.root())) {
             assertThat(children.count()).isZero();
@@ -153,7 +153,8 @@ class WorkerPipelineProcessorTests {
         order.verify(status).finish(attempt, expected);
         order.verify(cleanup).deleteUnreferenced(attempt, newer);
         assertWorkspaceEmpty(workspace);
-        assertThat(output.getOut()).contains("attempt 1 lost its conditional finish to a newer state")
+        assertThat(output.getOut()).contains("Encoding job " + attempt.jobId() + " for video asset "
+                        + attempt.assetId() + " attempt 1 lost its conditional finish to a newer state")
                 .doesNotContain("persisted as READY");
     }
 
@@ -177,7 +178,9 @@ class WorkerPipelineProcessorTests {
         order.verify(status).finish(attempt, failed);
         order.verify(cleanup).deleteUnreferenced(attempt, null);
         assertWorkspaceEmpty(workspace);
-        assertThat(output.getOut()).contains("attempt 1 persisted as FAILED with STORAGE_ERROR")
+        assertThat(output.getOut()).contains("Encoding job " + attempt.jobId() + " for video asset "
+                        + attempt.assetId() + " attempt 1 persisted as FAILED with STORAGE_ERROR")
+                .contains("for video asset " + attempt.assetId() + " attempt 1 failed as STORAGE_ERROR")
                 .doesNotContain("fixture: no such key").doesNotContain(raw.objectKey());
     }
 
@@ -234,8 +237,8 @@ class WorkerPipelineProcessorTests {
 
         verifyNoInteractions(storage, probe, transcode, upload, cleanup);
         verify(status, times(0)).finish(any(), any());
-        assertThat(output.getOut()).contains("Encoding job " + attempt.jobId()
-                + " attempt 1 is finished or superseded; acknowledged without media work");
+        assertThat(output.getOut()).contains("Encoding job " + attempt.jobId() + " for video asset "
+                + attempt.assetId() + " attempt 1 is finished or superseded; acknowledged without media work");
         assertWorkspaceEmpty(workspace);
     }
 

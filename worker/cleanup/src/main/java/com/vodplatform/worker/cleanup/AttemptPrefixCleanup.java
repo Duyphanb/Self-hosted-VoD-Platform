@@ -24,9 +24,11 @@ public final class AttemptPrefixCleanup {
                 && referenced.masterKey().startsWith(prefix)) return;
         try {
             storage.deleteHlsAttemptPrefix(prefix);
-            log.info("HLS attempt prefix delete requested for job {} attempt {}", attempt.jobId(), attempt.number());
+            log.info("HLS attempt prefix delete requested for job {} video asset {} attempt {}", attempt.jobId(),
+                    attempt.assetId(), attempt.number());
         } catch (IOException | RuntimeException ignored) {
-            log.warn("Could not request HLS attempt prefix deletion for job {} attempt {}", attempt.jobId(), attempt.number());
+            log.warn("Could not request HLS attempt prefix deletion for job {} video asset {} attempt {}",
+                    attempt.jobId(), attempt.assetId(), attempt.number());
         }
     }
 }

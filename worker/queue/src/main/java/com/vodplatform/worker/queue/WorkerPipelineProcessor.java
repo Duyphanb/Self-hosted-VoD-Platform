@@ -76,13 +76,14 @@ final class WorkerPipelineProcessor implements EncodingJobProcessor {
         Completion completion = processMedia(attempt, raw);
         Finish finished = finish(attempt, completion);
         if (finished.outcome() == FinishOutcome.LOST) {
-            log.warn("Encoding job {} attempt {} lost its conditional finish to a newer state",
-                    attempt.jobId(), attempt.number());
+            log.warn("Encoding job {} for video asset {} attempt {} lost its conditional finish to a newer state",
+                    attempt.jobId(), attempt.assetId(), attempt.number());
         } else if (completion instanceof Failed failed) {
-            log.info("Encoding job {} attempt {} persisted as FAILED with {}", attempt.jobId(), attempt.number(),
-                    failed.code());
+            log.info("Encoding job {} for video asset {} attempt {} persisted as FAILED with {}", attempt.jobId(),
+                    attempt.assetId(), attempt.number(), failed.code());
         } else {
-            log.info("Encoding job {} attempt {} persisted as READY", attempt.jobId(), attempt.number());
+            log.info("Encoding job {} for video asset {} attempt {} persisted as READY", attempt.jobId(),
+                    attempt.assetId(), attempt.number());
         }
         if (completion instanceof Failed || finished.outcome() == FinishOutcome.LOST) {
             cleanup.deleteUnreferenced(attempt, finished.referencedHls());
@@ -98,12 +99,14 @@ final class WorkerPipelineProcessor implements EncodingJobProcessor {
                 var claim = readback ? status.readClaimAfterUnknownCommit(attempt) : status.claim(attempt);
                 switch (claim.outcome()) {
                     case ACQUIRED -> {
-                        log.info("Encoding job {} attempt {} claimed", attempt.jobId(), attempt.number());
+                        log.info("Encoding job {} for video asset {} attempt {} claimed", attempt.jobId(),
+                                attempt.assetId(), attempt.number());
                         return claim.raw();
                     }
                     case STALE -> {
-                        log.info("Encoding job {} attempt {} is finished or superseded; acknowledged without "
-                                + "media work", attempt.jobId(), attempt.number());
+                        log.info("Encoding job {} for video asset {} attempt {} is finished or superseded; "
+                                + "acknowledged without media work", attempt.jobId(), attempt.assetId(),
+                                attempt.number());
                         return null;
                     }
                     case INVALID -> throw new AmqpRejectAndDontRequeueException("Encoding job identifiers do not match");
@@ -179,18 +182,21 @@ final class WorkerPipelineProcessor implements EncodingJobProcessor {
             return new Ready(new HlsObject(result.bucket(), result.masterObjectKey()), metadata);
         } catch (WorkerFailureException failure) {
             requireRunning();
-            log.warn("Encoding job {} failed as {}", attempt.jobId(), failure.code());
+            log.warn("Encoding job {} for video asset {} attempt {} failed as {}", attempt.jobId(),
+                    attempt.assetId(), attempt.number(), failure.code());
             return new Failed(failure.code());
         } catch (IOException | RuntimeException ignored) {
             requireRunning();
-            log.warn("Encoding job {} failed as {}", attempt.jobId(), INTERNAL_ERROR);
+            log.warn("Encoding job {} for video asset {} attempt {} failed as {}", attempt.jobId(),
+                    attempt.assetId(), attempt.number(), INTERNAL_ERROR);
             return new Failed(INTERNAL_ERROR);
         } finally {
             if (job != null) {
                 try {
                     workspace.removeJobDirectory(job);
                 } catch (IOException ignored) {
-                    log.warn("Could not remove the local workspace for encoding job {}", attempt.jobId());
+                    log.warn("Could not remove the local workspace for encoding job {} for video asset {}",
+                            attempt.jobId(), attempt.assetId());
                 }
             }
         }
@@ -240,7 +246,10 @@ final class WorkerPipelineProcessor implements EncodingJobProcessor {
         }
 
         private void pause() {
-            if (millis == 100) log.warn("Encoding job {} is waiting for database {}", attempt.jobId(), phase);
+            if (millis == 100) {
+                log.warn("Encoding job {} for video asset {} is waiting for database {}", attempt.jobId(),
+                        attempt.assetId(), phase);
+            }
             requireRunning();
             try {
                 Thread.sleep(millis);
