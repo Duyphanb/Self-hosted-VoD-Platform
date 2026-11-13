@@ -1651,7 +1651,7 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 - **R-002 (FFmpeg behavior):** Issue 5.5 pins the HLS output profile and the output validation (ADR-010 D27); #123 verifies them against generated fixtures with the worker image binary, and #124 encodes on arm64, before dependent features.
 - **R-003 (VPS resources):** Sprint 1 production Compose includes resource limits; NFR-002 validated before VPS deployment.
 - **R-004 (API contract drift):** Sprint 10 reviews OpenAPI vs. implementation; Postman collection serves as contract test.
-- **R-006 (Storage leaks):** 4.4 compensates uncommitted raw PUTs; 5.7 cleans failed/orphan/lost-finish prefixes and temp; deployment runbook owns manual superseded purge and orphan audit. Keep Open until failure-path tests exist.
+- **R-006 (Storage leaks):** 4.4 compensates uncommitted raw PUTs; 5.7 cleans failed/orphan/lost-finish prefixes and temp; deployment runbook owns manual superseded purge and orphan audit. Watching since the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md) verified the 5.7 failure-path tests.
 - **R-007 (Queue failures):** 4.5 commits job-row outbox before publish and relays pending publication; 5.3/5.7 conditionally claim/finish and recover startup orphans with deadlines; Sprint 9 retries only newest FAILED. Never time out QUEUED by age.
 - **R-008 (Auth/RBAC):** Sprint 2 completed before catalog and upload features; authorization tests required.
 - **R-012 (Tests lag):** Definition of Done includes tests for every sprint; traceability matrix tracks coverage.
