@@ -243,7 +243,7 @@ Update procedure:
 5. Record the `dpkg-query -W` versions in the PR.
 6. Roll back by redeploying the previous image tag.
 
-`.github/workflows/worker-image-weekly.yml` is the weekly rebuild. Every Tuesday, and on manual dispatch, it builds the image with `--pull --no-cache` on amd64 and natively on arm64, runs `worker-image-check.sh` and the FFmpeg-tagged tests, and fails the run when a new package breaks them. Production images are still rebuilt and deployed through the procedure above.
+`.github/workflows/worker-image-weekly.yml` is the weekly rebuild. Every Tuesday, and on manual dispatch, it builds the image with `--pull --no-cache` on amd64 and natively on arm64, runs `worker-image-check.sh` and the FFmpeg-tagged tests, and fails the run when a new package breaks them. It detects regressions and available package updates only: it never pushes, tags or deploys an image. Production images are rebuilt, verified and deployed explicitly through the procedure above.
 
 ## Nginx Responsibilities
 

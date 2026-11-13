@@ -40,7 +40,10 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 class WorkerPipelineProcessorTests {
     private final WorkerJobStatus status = mock(WorkerJobStatus.class);
@@ -58,7 +61,8 @@ class WorkerPipelineProcessorTests {
     Path temp;
 
     @Test
-    void removesRawBeforeUploadAndDoesNotRepeatMediaWhenFinishMustRetry() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void removesRawBeforeUploadAndDoesNotRepeatMediaWhenFinishMustRetry(CapturedOutput output) throws Exception {
         var workspace = new JobWorkspace(temp.toRealPath().resolve("workspace"));
         var hls = mock(HlsOutput.class);
         String key = HlsUploadService.attemptPrefix(attempt.assetId(), 1) + "master.m3u8";
@@ -90,6 +94,9 @@ class WorkerPipelineProcessorTests {
         verify(upload).upload(eq(attempt.assetId()), eq(1), eq(hls), any());
         verify(status, times(2)).finish(attempt, expected);
         verifyNoInteractions(cleanup);
+        String subject = "Encoding job " + attempt.jobId() + " for video asset " + attempt.assetId() + " attempt 1";
+        assertThat(output.getOut()).contains(subject + " claimed").contains(subject + " persisted as READY")
+                .doesNotContain(raw.objectKey()).doesNotContain(key);
         try (var children = Files.list(workspace.root())) {
             assertThat(children.count()).isZero();
         }
@@ -120,7 +127,8 @@ class WorkerPipelineProcessorTests {
     }
 
     @Test
-    void aLostFinishKeepsTheMediaResultButDeletesTheUnreferencedAttemptPrefix() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void aLostFinishKeepsTheMediaResultButDeletesTheUnreferencedAttemptPrefix(CapturedOutput output) throws Exception {
         var workspace = new JobWorkspace(temp.toRealPath().resolve("workspace"));
         var hls = mock(HlsOutput.class);
         String key = HlsUploadService.attemptPrefix(attempt.assetId(), 1) + "master.m3u8";
@@ -145,10 +153,14 @@ class WorkerPipelineProcessorTests {
         order.verify(status).finish(attempt, expected);
         order.verify(cleanup).deleteUnreferenced(attempt, newer);
         assertWorkspaceEmpty(workspace);
+        assertThat(output.getOut()).contains("Encoding job " + attempt.jobId() + " for video asset "
+                        + attempt.assetId() + " attempt 1 lost its conditional finish to a newer state")
+                .doesNotContain("persisted as READY");
     }
 
     @Test
-    void aMissingRawObjectFailsAsStorageErrorBeforeAnyMediaWork() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void aMissingRawObjectFailsAsStorageErrorBeforeAnyMediaWork(CapturedOutput output) throws Exception {
         var workspace = new JobWorkspace(temp.toRealPath().resolve("workspace"));
         var failed = new Failed(STORAGE_ERROR);
         when(status.claim(attempt)).thenReturn(new Claim(ClaimOutcome.ACQUIRED, raw));
@@ -166,6 +178,10 @@ class WorkerPipelineProcessorTests {
         order.verify(status).finish(attempt, failed);
         order.verify(cleanup).deleteUnreferenced(attempt, null);
         assertWorkspaceEmpty(workspace);
+        assertThat(output.getOut()).contains("Encoding job " + attempt.jobId() + " for video asset "
+                        + attempt.assetId() + " attempt 1 persisted as FAILED with STORAGE_ERROR")
+                .contains("for video asset " + attempt.assetId() + " attempt 1 failed as STORAGE_ERROR")
+                .doesNotContain("fixture: no such key").doesNotContain(raw.objectKey());
     }
 
     @Test
@@ -206,6 +222,23 @@ class WorkerPipelineProcessorTests {
         var order = inOrder(status, cleanup);
         order.verify(status).finish(attempt, failed);
         order.verify(cleanup).deleteUnreferenced(attempt, null);
+        assertWorkspaceEmpty(workspace);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aStaleDeliveryIsAcknowledgedWithoutMediaWorkAndLogged(CapturedOutput output) throws Exception {
+        var workspace = new JobWorkspace(temp.toRealPath().resolve("workspace"));
+        when(status.claim(attempt)).thenReturn(new Claim(ClaimOutcome.STALE, null));
+
+        try (var disk = new WorkerDiskBudget(5000, 1, ignored -> Long.MAX_VALUE)) {
+            processor(workspace, disk).process(message);
+        }
+
+        verifyNoInteractions(storage, probe, transcode, upload, cleanup);
+        verify(status, times(0)).finish(any(), any());
+        assertThat(output.getOut()).contains("Encoding job " + attempt.jobId() + " for video asset "
+                + attempt.assetId() + " attempt 1 is finished or superseded; acknowledged without media work");
         assertWorkspaceEmpty(workspace);
     }
 

@@ -228,11 +228,11 @@ One new row per upload, never an upsert. Raw key: `{movieId}/{videoAssetId}.{ext
 | `hls_bucket` | varchar(100) | null | MinIO HLS bucket |
 | `hls_master_object_key` | varchar(512) | null | Master playlist object key |
 | `status` | varchar(20) | not null, check | `UPLOADED`, `QUEUED`, `PROCESSING`, `READY`, `FAILED` |
-| `duration_seconds` | int | null | FFprobe duration |
-| `width` | int | null | Source or output width |
-| `height` | int | null | Source or output height |
-| `codec` | varchar(100) | null | Primary video codec |
-| `bitrate` | int | null | Bitrate if available |
+| `duration_seconds` | int | null | Source media duration from FFprobe (ADR-010 D26) |
+| `width` | int | null | Source display width from FFprobe (coded size swapped for a 90/270-degree rotation); not the HLS output size |
+| `height` | int | null | Source display height from FFprobe (coded size swapped for a 90/270-degree rotation); not the HLS output size |
+| `codec` | varchar(100) | null | Source primary video codec from FFprobe; the HLS output is always H.264 (ADR-010 D27) |
+| `bitrate` | int | null | Source container bitrate (FFprobe `format.bit_rate`), if available; not the HLS output bitrate |
 | `failure_reason` | text | null | Safe diagnostic summary |
 | `created_at` | timestamptz | not null | Creation timestamp |
 | `updated_at` | timestamptz | not null | Last update timestamp |

@@ -2,7 +2,7 @@
 
 ## Status
 
-Updated 2026-11-02 for the Sprint 4 closeout; the design follows [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md), and Sprint 4 (F-008 and F-009) in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; Sprint 4 supplies no encoding, playback or VPS evidence.
+Updated 2026-11-13 for the Sprint 5 closeout; the design follows [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md), Sprint 4 (F-008 and F-009) in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md), and Sprint 5 (F-010 to F-012) in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; Sprint 5 supplies encoding evidence but no playback or VPS evidence.
 
 ## Feature Traceability
 
@@ -17,9 +17,9 @@ Updated 2026-11-02 for the Sprint 4 closeout; the design follows [ADR-010](../ar
 | F-007 | Movie metadata management | US-007 | backend, frontend | Movie, genre, and people service unit tests; admin authorization tests; catalog PostgreSQL runtime smoke; catalog Newman collection (admin CRUD); admin form tests. Related video asset metadata is delivered with F-008 and F-020. Verified: [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md) |
 | F-008 | Admin video upload | US-008 | backend, frontend, MinIO | Upload validation tests; MinIO integration test or manual evidence; admin upload flow test. Verified: [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md) |
 | F-009 | Queue publishing | US-008 | backend, RabbitMQ | Queue publisher unit test; API-to-queue integration evidence. Verified: [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md) |
-| F-010 | Encoding worker | US-009 | worker, RabbitMQ, MinIO | Worker command construction tests; job status transition tests; failed-job test |
-| F-011 | FFprobe metadata extraction | US-009 | worker | FFprobe parser unit tests; #123 generated-fixture probe tests with the worker image binary |
-| F-012 | FFmpeg HLS transcoding | US-009, US-010 | worker, MinIO | HLS output smoke test; generated playlist and segments verification; #123 generated fixtures through the worker image binary with output validation |
+| F-010 | Encoding worker | US-009 | worker, RabbitMQ, MinIO | Worker command construction tests; job status transition tests; failed-job test. Verified: [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md) |
+| F-011 | FFprobe metadata extraction | US-009 | worker | FFprobe parser unit tests; #123 generated-fixture probe tests with the worker image binary. Verified: [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md) |
+| F-012 | FFmpeg HLS transcoding | US-009, US-010 | worker, MinIO | HLS output smoke test; generated playlist and segments verification; #123 generated fixtures through the worker image binary with output validation. Encoding to `vod-hls` verified in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md); playback (US-010) remains Sprint 6 |
 | F-013 | HLS playback | US-010 | backend, frontend, nginx | Playback API Postman test; browser playback smoke test; HLS MIME check |
 | F-014 | Playback progress and resume | US-011 | backend, frontend, Redis, PostgreSQL | Progress API tests; Redis flush test; resume manual E2E evidence |
 | F-015 | Continue watching | US-011 | backend, frontend | Continue-watching API tests; UI list test |

@@ -707,6 +707,8 @@ Verified against `main` at `e164c39` on 2026-11-02; see the [Sprint 4 closeout e
 
 ### Issue 5.1: Worker RabbitMQ Consumer Configuration
 
+**GitHub:** [#191](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/191), delivered by [PR #208](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/208) and [PR #213](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/213)
+
 **Description:**  
 Configure worker to consume from `video-encoding-queue`. Set concurrency to 1. Implement message listener that receives encoding job messages and delegates to processing service.
 
@@ -726,6 +728,8 @@ Configure worker to consume from `video-encoding-queue`. Set concurrency to 1. I
 
 ### Issue 5.2: Worker MinIO Client and PostgreSQL Configuration
 
+**GitHub:** [#192](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/192), delivered by [PR #209](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/209) and [PR #213](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/213)
+
 **Description:**  
 Configure worker MinIO client for reading from `vod-raw` and writing to `vod-hls`. Configure JDBC or JPA for direct status updates to PostgreSQL (worker does not use full ORM for status writes).
 
@@ -743,6 +747,8 @@ Configure worker MinIO client for reading from `vod-raw` and writing to `vod-hls
 ---
 
 ### Issue 5.3: Worker Status Update Service
+
+**GitHub:** [#193](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/193), delivered by [PR #210](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/210) and [PR #213](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/213)
 
 **Description:**  
 Implement service that updates `video_assets.status` and `encoding_jobs.status` using direct JDBC writes. Support transitions: `QUEUED` → `PROCESSING`, `PROCESSING` → `READY`, `PROCESSING` → `FAILED`. Store failure reason for failed jobs.
@@ -762,6 +768,8 @@ Implement service that updates `video_assets.status` and `encoding_jobs.status` 
 ---
 
 ### Issue 5.4: Worker FFprobe Service
+
+**GitHub:** [#194](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/194), delivered by [PR #203](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/203)
 
 **Description:**  
 Implement FFprobe service that executes `ffprobe` command to extract duration, width, height, codec, bitrate from raw video. Parse JSON output. Return a metadata DTO; Issue 5.7 persists it in the conditional finish transaction.
@@ -787,6 +795,8 @@ Implement FFprobe service that executes `ffprobe` command to extract duration, w
 
 ### Issue 5.5: Worker FFmpeg HLS Transcoding Service
 
+**GitHub:** [#195](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/195), delivered by [PR #207](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/207)
+
 **Description:**  
 Implement the FFmpeg service that turns the probed raw copy into single-quality VOD HLS in the job temp directory, with the ADR-010 D27 profile (#122): H.264 High 8-bit 4:2:0 video, optional AAC-LC stereo audio, MPEG-TS segments and one media playlist named `master.m3u8` with relative `segments/` URIs.
 
@@ -811,6 +821,8 @@ Implement the FFmpeg service that turns the probed raw copy into single-quality 
 
 ### Issue 5.6: Worker HLS Upload Service
 
+**GitHub:** [#196](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/196), delivered by [PR #211](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/211)
+
 **Description:**  
 Upload HLS artifacts to private `vod-hls` under attempt-scoped keys: `video-assets/{videoAssetId}/attempt-{n}/master.m3u8` and sibling `segments/*.ts`. Public API HLS paths remain unchanged and are resolved through the stored master key.
 
@@ -826,6 +838,8 @@ Upload HLS artifacts to private `vod-hls` under attempt-scoped keys: `video-asse
 ---
 
 ### Issue 5.7: Worker Job Processing Orchestration
+
+**GitHub:** [#197](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/197), delivered by [PR #213](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/213) and [PR #215](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/215)
 
 **Description:**  
 Implement main processing orchestrator that coordinates: mark status `PROCESSING` → download raw video → run FFprobe → run FFmpeg → upload HLS → mark status `READY` or `FAILED`. Handle failures at each step.
@@ -852,6 +866,8 @@ Implement main processing orchestrator that coordinates: mark status `PROCESSING
 
 ### Issue 5.8: Worker Dockerfile and Environment Config
 
+**GitHub:** [#198](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/198), delivered by [PR #214](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/214)
+
 **Description:**  
 Harden the worker Dockerfile that Issue 5.4 moved to the ADR-010 D25 base (FFmpeg and FFprobe from Debian). Document required environment variables in `.env.example`: RabbitMQ credentials, MinIO credentials and bucket names, PostgreSQL connection, FFmpeg/FFprobe paths.
 
@@ -870,24 +886,26 @@ Harden the worker Dockerfile that Issue 5.4 moved to the ADR-010 D25 base (FFmpe
 
 ### Sprint 5 Definition of Done
 
-- [ ] Worker consumes encoding jobs from RabbitMQ queue
-- [ ] Worker concurrency is 1 (sequential processing)
-- [ ] One non-overlapping replica, prefetch 1, startup sweep/orphan failure before listener, 30s stop grace and long-job consumer-timeout evidence
-- [ ] Worker downloads raw video from MinIO
-- [ ] FFprobe extracts metadata, persisted with the paired READY/FAILED finish
-- [ ] FFmpeg generates single-quality HLS output with the ADR-010 D27 profile, validated before READY
-- [ ] Worker uploads HLS artifacts to MinIO `vod-hls` bucket
-- [ ] Video asset status transitions: `QUEUED` → `PROCESSING` → `READY` or `FAILED`
-- [ ] Encoding job status matches video asset status
-- [ ] Failed jobs store safe diagnostic information
-- [ ] Worker cleans up temp files after processing
-- [ ] Restricted media commands, metadata caps, bounded diagnostics, process-tree deadlines/disk check and hardened container verified against #123/#124 fixtures
-- [ ] Redelivery/poison/DB-outage/lost-finish/crash recovery and failed-attempt-prefix cleanup tested; R-006 remains Open until the 5.7 failure-path evidence exists (4.4 is verified in the Sprint 4 closeout)
-- [ ] Worker logs job lifecycle events
-- [ ] Unit and integration tests cover worker modules
-- [ ] End-to-end test: upload → queue → worker → HLS output verified
-- [ ] Worker Dockerfile includes FFmpeg/FFprobe
-- [ ] `.env.example` documents worker environment variables
+- [x] Worker consumes encoding jobs from RabbitMQ queue
+- [x] Worker concurrency is 1 (sequential processing)
+- [x] One non-overlapping replica, prefetch 1, startup sweep/orphan failure before listener, 30s stop grace and long-job consumer-timeout evidence
+- [x] Worker downloads raw video from MinIO
+- [x] FFprobe extracts metadata, persisted with the paired READY/FAILED finish
+- [x] FFmpeg generates single-quality HLS output with the ADR-010 D27 profile, validated before READY
+- [x] Worker uploads HLS artifacts to MinIO `vod-hls` bucket
+- [x] Video asset status transitions: `QUEUED` → `PROCESSING` → `READY` or `FAILED`
+- [x] Encoding job status matches video asset status
+- [x] Failed jobs store safe diagnostic information
+- [x] Worker cleans up temp files after processing
+- [x] Restricted media commands, metadata caps, bounded diagnostics, process-tree deadlines/disk check and hardened container verified against #123/#124 fixtures
+- [x] Redelivery/poison/DB-outage/lost-finish/crash recovery and failed-attempt-prefix cleanup tested; R-006 remains Open until the 5.7 failure-path evidence exists (4.4 is verified in the Sprint 4 closeout)
+- [x] Worker logs job lifecycle events
+- [x] Unit and integration tests cover worker modules
+- [x] End-to-end test: upload → queue → worker → HLS output verified
+- [x] Worker Dockerfile includes FFmpeg/FFprobe
+- [x] `.env.example` documents worker environment variables
+
+Verified against `main` at `f83f576` on 2026-11-13, plus the job lifecycle logs added with the closeout; see the [Sprint 5 closeout evidence](../testing/SPRINT-5-CLOSEOUT.md) for the mapping of each item to its issue, tests, CI smokes and limits. The real-worker fault flows and the long-hold broker test are local-only evidence; production deadline values and A1 capacity remain with #124, and upload -> transcode -> HLS playback remains #125 (Sprint 6).
 
 ---
 
@@ -1633,7 +1651,7 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 - **R-002 (FFmpeg behavior):** Issue 5.5 pins the HLS output profile and the output validation (ADR-010 D27); #123 verifies them against generated fixtures with the worker image binary, and #124 encodes on arm64, before dependent features.
 - **R-003 (VPS resources):** Sprint 1 production Compose includes resource limits; NFR-002 validated before VPS deployment.
 - **R-004 (API contract drift):** Sprint 10 reviews OpenAPI vs. implementation; Postman collection serves as contract test.
-- **R-006 (Storage leaks):** 4.4 compensates uncommitted raw PUTs; 5.7 cleans failed/orphan/lost-finish prefixes and temp; deployment runbook owns manual superseded purge and orphan audit. Keep Open until failure-path tests exist.
+- **R-006 (Storage leaks):** 4.4 compensates uncommitted raw PUTs; 5.7 cleans failed/orphan/lost-finish prefixes and temp; deployment runbook owns manual superseded purge and orphan audit. Watching since the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md) verified the 5.7 failure-path tests.
 - **R-007 (Queue failures):** 4.5 commits job-row outbox before publish and relays pending publication; 5.3/5.7 conditionally claim/finish and recover startup orphans with deadlines; Sprint 9 retries only newest FAILED. Never time out QUEUED by age.
 - **R-008 (Auth/RBAC):** Sprint 2 completed before catalog and upload features; authorization tests required.
 - **R-012 (Tests lag):** Definition of Done includes tests for every sprint; traceability matrix tracks coverage.
