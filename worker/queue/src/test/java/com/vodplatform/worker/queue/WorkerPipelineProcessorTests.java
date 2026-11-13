@@ -5,6 +5,7 @@ import static com.vodplatform.worker.probe.WorkerFailureCode.STORAGE_ERROR;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -136,8 +137,13 @@ class WorkerPipelineProcessorTests {
             processor(workspace, disk).process(message);
         }
 
-        verify(status).finish(attempt, expected);
-        verify(cleanup).deleteUnreferenced(attempt, newer);
+        verify(storage).downloadRaw(eq(raw.objectKey()), any());
+        verify(probe).probe(any(), eq("mp4"));
+        verify(transcode).transcode(any(), any(), eq("mp4"), eq(metadata), any());
+        verify(upload).upload(eq(attempt.assetId()), eq(1), eq(hls), any());
+        var order = inOrder(status, cleanup);
+        order.verify(status).finish(attempt, expected);
+        order.verify(cleanup).deleteUnreferenced(attempt, newer);
         assertWorkspaceEmpty(workspace);
     }
 
@@ -156,8 +162,9 @@ class WorkerPipelineProcessorTests {
         verify(storage).rawSize(raw.objectKey());
         verify(storage, times(0)).downloadRaw(any(), any());
         verifyNoInteractions(probe, transcode, upload);
-        verify(status).finish(attempt, failed);
-        verify(cleanup).deleteUnreferenced(attempt, null);
+        var order = inOrder(status, cleanup);
+        order.verify(status).finish(attempt, failed);
+        order.verify(cleanup).deleteUnreferenced(attempt, null);
         assertWorkspaceEmpty(workspace);
     }
 
@@ -177,8 +184,9 @@ class WorkerPipelineProcessorTests {
             processor(workspace, disk).process(message);
         }
 
-        verify(status).finish(attempt, failed);
-        verify(cleanup).deleteUnreferenced(attempt, null);
+        var order = inOrder(status, cleanup);
+        order.verify(status).finish(attempt, failed);
+        order.verify(cleanup).deleteUnreferenced(attempt, null);
         assertWorkspaceEmpty(workspace);
     }
 
@@ -195,8 +203,9 @@ class WorkerPipelineProcessorTests {
         }
 
         verifyNoInteractions(transcode, upload);
-        verify(status).finish(attempt, failed);
-        verify(cleanup).deleteUnreferenced(attempt, null);
+        var order = inOrder(status, cleanup);
+        order.verify(status).finish(attempt, failed);
+        order.verify(cleanup).deleteUnreferenced(attempt, null);
         assertWorkspaceEmpty(workspace);
     }
 
