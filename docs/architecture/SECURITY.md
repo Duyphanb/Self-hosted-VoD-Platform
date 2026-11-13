@@ -124,7 +124,7 @@ Sprint 5 must enforce the following before passing uploaded bytes to FFprobe/FFm
 - Container hardening (Issue 5.8):
   - The worker image runs as the fixed non-root uid/gid 10001 (`vodworker`, no login shell or home).
   - Both Compose files run it with `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges:true`, a pids limit of 256 under `deploy.resources.limits` (the limit counts threads), `scale: 1` and `stop_grace_period: 30s`.
-  - Its only writable path is the disk-backed `worker_temp` volume on `/tmp` ([Persistent Volumes](INFRASTRUCTURE.md#persistent-volumes)), which holds `WORKER_TEMP_DIR` and `java.io.tmpdir`, guarded by the raw-size free-disk check. No tmpfs is used.
+  - Its only configured writable volume is the disk-backed `worker_temp` on `/tmp` ([Persistent Volumes](INFRASTRUCTURE.md#persistent-volumes)), which holds `WORKER_TEMP_DIR` and `java.io.tmpdir`, guarded by the raw-size free-disk check. No tmpfs is configured. Docker's implicit `/dev/shm` stays writable, so `WORKER_TEMP_DIR` must stay below `/tmp` (an operator requirement that the stack smoke checks).
   - The FFmpeg source is [ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28): Debian trixie packages covered by Debian security advisories, rebuilt on each advisory and weekly.
   - `worker/Dockerfile` records the ffmpeg version floor (`FFMPEG_MIN_VERSION`). Every build fails below it, and `deploy/tests/worker-image-check.sh` asserts the floor and the non-root uid in CI and logs the installed versions.
   - [Worker runtime image](INFRASTRUCTURE.md#worker-runtime-image) has the versions, the pids sizing and the update procedure.
