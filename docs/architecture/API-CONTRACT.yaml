@@ -1653,15 +1653,19 @@ components:
         durationSeconds:
           type: integer
           nullable: true
+          description: Source media duration from FFprobe.
         width:
           type: integer
           nullable: true
+          description: Source video width from FFprobe (rotation-corrected), not the HLS output size.
         height:
           type: integer
           nullable: true
+          description: Source video height from FFprobe (rotation-corrected), not the HLS output size.
         codec:
           type: string
           nullable: true
+          description: Source primary video codec from FFprobe; the HLS output is always H.264.
         failureReason:
           type: string
           nullable: true

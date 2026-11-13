@@ -75,6 +75,15 @@ final class WorkerPipelineProcessor implements EncodingJobProcessor {
 
         Completion completion = processMedia(attempt, raw);
         Finish finished = finish(attempt, completion);
+        if (finished.outcome() == FinishOutcome.LOST) {
+            log.warn("Encoding job {} attempt {} lost its conditional finish to a newer state",
+                    attempt.jobId(), attempt.number());
+        } else if (completion instanceof Failed failed) {
+            log.info("Encoding job {} attempt {} persisted as FAILED with {}", attempt.jobId(), attempt.number(),
+                    failed.code());
+        } else {
+            log.info("Encoding job {} attempt {} persisted as READY", attempt.jobId(), attempt.number());
+        }
         if (completion instanceof Failed || finished.outcome() == FinishOutcome.LOST) {
             cleanup.deleteUnreferenced(attempt, finished.referencedHls());
         }
@@ -88,8 +97,15 @@ final class WorkerPipelineProcessor implements EncodingJobProcessor {
             try {
                 var claim = readback ? status.readClaimAfterUnknownCommit(attempt) : status.claim(attempt);
                 switch (claim.outcome()) {
-                    case ACQUIRED -> { return claim.raw(); }
-                    case STALE -> { return null; }
+                    case ACQUIRED -> {
+                        log.info("Encoding job {} attempt {} claimed", attempt.jobId(), attempt.number());
+                        return claim.raw();
+                    }
+                    case STALE -> {
+                        log.info("Encoding job {} attempt {} is finished or superseded; acknowledged without "
+                                + "media work", attempt.jobId(), attempt.number());
+                        return null;
+                    }
                     case INVALID -> throw new AmqpRejectAndDontRequeueException("Encoding job identifiers do not match");
                     case RETRY -> readback = false;
                     case UNRESOLVED -> { /* Hold the delivery while the DB outcome is unknown. */ }
