@@ -1,5 +1,6 @@
 package com.vodplatform.worker.queue;
 
+import static com.vodplatform.worker.probe.WorkerFailureCode.INTERNAL_ERROR;
 import static com.vodplatform.worker.probe.WorkerFailureCode.STORAGE_ERROR;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -30,6 +31,7 @@ import com.vodplatform.worker.storage.HlsUploadService.UploadedHls;
 import com.vodplatform.worker.storage.WorkerObjectStorage;
 import com.vodplatform.worker.transcode.FfmpegHlsService;
 import com.vodplatform.worker.transcode.HlsOutput;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -111,6 +113,103 @@ class WorkerPipelineProcessorTests {
         verifyNoInteractions(probe, transcode, upload);
         verify(status).finish(attempt, failed);
         verify(cleanup).deleteUnreferenced(attempt, null);
+        try (var children = Files.list(workspace.root())) {
+            assertThat(children.count()).isZero();
+        }
+    }
+
+    @Test
+    void aLostFinishKeepsTheMediaResultButDeletesTheUnreferencedAttemptPrefix() throws Exception {
+        var workspace = new JobWorkspace(temp.toRealPath().resolve("workspace"));
+        var hls = mock(HlsOutput.class);
+        String key = HlsUploadService.attemptPrefix(attempt.assetId(), 1) + "master.m3u8";
+        var expected = new Ready(new HlsObject("vod-hls", key), metadata);
+        var newer = new HlsObject("vod-hls", HlsUploadService.attemptPrefix(attempt.assetId(), 2) + "master.m3u8");
+        downloadsThreeRawBytes();
+        when(probe.probe(any(), eq("mp4"))).thenReturn(metadata);
+        when(transcode.transcode(any(), any(), eq("mp4"), eq(metadata), any())).thenReturn(hls);
+        when(upload.upload(eq(attempt.assetId()), eq(1), eq(hls), any()))
+                .thenReturn(new UploadedHls("vod-hls", key));
+        when(status.finish(attempt, expected)).thenReturn(new Finish(FinishOutcome.LOST, newer));
+
+        try (var disk = new WorkerDiskBudget(5000, 1, ignored -> Long.MAX_VALUE)) {
+            processor(workspace, disk).process(message);
+        }
+
+        verify(status).finish(attempt, expected);
+        verify(cleanup).deleteUnreferenced(attempt, newer);
+        assertWorkspaceEmpty(workspace);
+    }
+
+    @Test
+    void aMissingRawObjectFailsAsStorageErrorBeforeAnyMediaWork() throws Exception {
+        var workspace = new JobWorkspace(temp.toRealPath().resolve("workspace"));
+        var failed = new Failed(STORAGE_ERROR);
+        when(status.claim(attempt)).thenReturn(new Claim(ClaimOutcome.ACQUIRED, raw));
+        when(storage.rawSize(raw.objectKey())).thenThrow(new IOException("fixture: no such key"));
+        when(status.finish(attempt, failed)).thenReturn(new Finish(FinishOutcome.COMPLETED, null));
+
+        try (var disk = new WorkerDiskBudget(5000, 1, ignored -> Long.MAX_VALUE)) {
+            processor(workspace, disk).process(message);
+        }
+
+        verify(storage).rawSize(raw.objectKey());
+        verify(storage, times(0)).downloadRaw(any(), any());
+        verifyNoInteractions(probe, transcode, upload);
+        verify(status).finish(attempt, failed);
+        verify(cleanup).deleteUnreferenced(attempt, null);
+        assertWorkspaceEmpty(workspace);
+    }
+
+    @Test
+    void anHlsUploadFailureFailsAsStorageErrorAndDeletesThePrefix() throws Exception {
+        var workspace = new JobWorkspace(temp.toRealPath().resolve("workspace"));
+        var hls = mock(HlsOutput.class);
+        var failed = new Failed(STORAGE_ERROR);
+        downloadsThreeRawBytes();
+        when(probe.probe(any(), eq("mp4"))).thenReturn(metadata);
+        when(transcode.transcode(any(), any(), eq("mp4"), eq(metadata), any())).thenReturn(hls);
+        when(upload.upload(eq(attempt.assetId()), eq(1), eq(hls), any()))
+                .thenThrow(new IOException("fixture: retries exhausted"));
+        when(status.finish(attempt, failed)).thenReturn(new Finish(FinishOutcome.COMPLETED, null));
+
+        try (var disk = new WorkerDiskBudget(5000, 1, ignored -> Long.MAX_VALUE)) {
+            processor(workspace, disk).process(message);
+        }
+
+        verify(status).finish(attempt, failed);
+        verify(cleanup).deleteUnreferenced(attempt, null);
+        assertWorkspaceEmpty(workspace);
+    }
+
+    @Test
+    void anUnexpectedErrorFailsAsInternalErrorWithoutLaterMediaWork() throws Exception {
+        var workspace = new JobWorkspace(temp.toRealPath().resolve("workspace"));
+        var failed = new Failed(INTERNAL_ERROR);
+        downloadsThreeRawBytes();
+        when(probe.probe(any(), eq("mp4"))).thenThrow(new IllegalStateException("fixture: unexpected"));
+        when(status.finish(attempt, failed)).thenReturn(new Finish(FinishOutcome.COMPLETED, null));
+
+        try (var disk = new WorkerDiskBudget(5000, 1, ignored -> Long.MAX_VALUE)) {
+            processor(workspace, disk).process(message);
+        }
+
+        verifyNoInteractions(transcode, upload);
+        verify(status).finish(attempt, failed);
+        verify(cleanup).deleteUnreferenced(attempt, null);
+        assertWorkspaceEmpty(workspace);
+    }
+
+    private void downloadsThreeRawBytes() throws Exception {
+        when(status.claim(attempt)).thenReturn(new Claim(ClaimOutcome.ACQUIRED, raw));
+        when(storage.rawSize(raw.objectKey())).thenReturn(3L);
+        when(storage.downloadRaw(eq(raw.objectKey()), any())).thenAnswer(call -> {
+            call.<OutputStream>getArgument(1).write(new byte[3]);
+            return 3L;
+        });
+    }
+
+    private static void assertWorkspaceEmpty(JobWorkspace workspace) throws IOException {
         try (var children = Files.list(workspace.root())) {
             assertThat(children.count()).isZero();
         }
