@@ -76,9 +76,12 @@ Browser -> Nginx /hls/* -> backend HLS proxy -> MinIO
 Rules:
 
 - HLS playlist and segment requests require the bearer access token.
+- The token is accepted only in the `Authorization` header, on `/hls/*` and `/api/v1/*` alike. An `access_token` query or form parameter is never accepted and no cookie carries a token, so tokens never reach URLs, logs or browser history ([ADR-011 D3](adr/ADR-011.md#player-transport-and-authentication-d1-d4)).
 - Nginx forwards `Authorization` to backend for `/hls/*`.
 - Backend validates JWT, movie visibility, and current READY asset before reading from MinIO. Current is the READY asset with greatest `(created_at, id)` for the movie ([ADR-010](adr/ADR-010.md)).
 - Backend streams only objects of that current asset. Missing, hidden, non-ready and superseded assets return 404 on both playlist and segment requests. A switch may interrupt an old stream; the player reopens playback. Derive the attempt prefix from the stored master key and validate segment names; never accept an arbitrary storage key from the client.
+- HLS responses carry `Cache-Control: no-store`, and Nginx does not cache them: a shared browser must not serve media from its cache after logout, and a current-asset switch takes effect at once. Every not-found case returns the same 404 `VIDEO_ASSET_NOT_FOUND`, including a malformed asset ID or segment name.
+- Native HLS playback (`video.src`), AirPlay and casting cannot send the header and are unsupported; supporting them needs a new ADR, not a URL token.
 - MinIO remains private; HLS is not served through direct MinIO or presigned playback URLs.
 
 ## Upload Validation
@@ -141,7 +144,7 @@ Planned negative fixtures (#123) cover:
 - deadline and process-tree kill, including a fake binary that spawns a grandchild;
 - insufficient disk.
 
-The worker failure codes are fixed in ADR-010 D28: `PROBE_FAILED`, `PROBE_TIMEOUT`, `UNSUPPORTED_MEDIA`, `MEDIA_LIMIT_EXCEEDED`, `ENCODE_FAILED`, `ENCODE_TIMEOUT`, `INSUFFICIENT_DISK`, `STORAGE_ERROR`, `WORKER_INTERRUPTED` and `INTERNAL_ERROR`. #107 adopts this enum and owns the safe messages, redaction and length cap.
+The worker failure codes are fixed in ADR-010 D28: `PROBE_FAILED`, `PROBE_TIMEOUT`, `UNSUPPORTED_MEDIA`, `MEDIA_LIMIT_EXCEEDED`, `ENCODE_FAILED`, `ENCODE_TIMEOUT`, `INSUFFICIENT_DISK`, `STORAGE_ERROR`, `WORKER_INTERRUPTED` and `INTERNAL_ERROR`. [ADR-011 D18](adr/ADR-011.md#contract-reconciliation-d15-d18) adopts this enum (#107): the database stores only the code, admin responses carry a fixed safe message from [OBSERVABILITY.md](OBSERVABILITY.md#failure-visibility), and viewers never see either.
 
 ## Object Storage Security
 
@@ -207,6 +210,9 @@ Frontend must:
 
 - clear auth state on logout or refresh failure
 - attach bearer tokens to API and HLS requests
+- play HLS only through hls.js: check `Hls.isSupported()` first, never assign the manifest to `video.src`, and show an unsupported-browser state otherwise ([ADR-011 D1](adr/ADR-011.md#player-transport-and-authentication-d1-d4))
+- read the current token for every HLS request; on a 401, run the shared single-flight refresh once and retry that request once; treat a second 401 or a failed refresh as an expired session; destroy the player when the signed-in identity changes (ADR-011 D2)
+- never put a token in a URL and never use `navigator.sendBeacon` for an authenticated call; progress saves at unload use `fetch` with `keepalive` and the header
 - avoid rendering unsafe HTML
 - treat API authorization failures as expected states
 - hide admin UI for non-admin users while relying on backend for enforcement
@@ -240,6 +246,9 @@ Minimum security evidence:
 - non-admin requests for a non-published movie return the same 404 as a missing movie
 - user-owned resources cannot be accessed by another user
 - HLS requests without bearer token are rejected
+- a valid token sent only as an `access_token` query parameter is rejected with 401 on HLS and API paths
+- HLS requests for a superseded, non-READY or hidden movie's asset, a malformed asset ID and an unsafe segment name all return the same 404
+- a user cannot read or write another user's playback progress or watch history
 - upload rejects invalid MIME type, signature-family mismatch (renamed text, HLS/ffconcat playlists, legacy MOV without `ftyp`) and oversize files
 - worker negative fixtures (#123) fail safely with the ADR-010 D28 codes, open no referenced file, never reach READY with partial or cover-art-only output, and leave no process or job directory behind after a deadline kill
 - auth failures do not reveal whether email or password was wrong

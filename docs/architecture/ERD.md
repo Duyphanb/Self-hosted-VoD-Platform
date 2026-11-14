@@ -233,7 +233,7 @@ One new row per upload, never an upsert. Raw key: `{movieId}/{videoAssetId}.{ext
 | `height` | int | null | Source display height from FFprobe (coded size swapped for a 90/270-degree rotation); not the HLS output size |
 | `codec` | varchar(100) | null | Source primary video codec from FFprobe; the HLS output is always H.264 (ADR-010 D27) |
 | `bitrate` | int | null | Source container bitrate (FFprobe `format.bit_rate`), if available; not the HLS output bitrate |
-| `failure_reason` | text | null | Safe diagnostic summary |
+| `failure_reason` | text | null | ADR-010 D28 failure code name only (at most 32 ASCII characters), never free text; safe messages are in [OBSERVABILITY.md](OBSERVABILITY.md#failure-visibility) |
 | `created_at` | timestamptz | not null | Creation timestamp |
 | `updated_at` | timestamptz | not null | Last update timestamp |
 
@@ -253,7 +253,7 @@ Indexes:
 | `video_asset_id` | uuid | FK -> `video_assets.id` on delete cascade, not null | Target asset |
 | `status` | varchar(20) | not null, check | `QUEUED`, `PROCESSING`, `READY`, `FAILED` |
 | `attempt` | int | not null, check `attempt >= 1` | Starts at 1 per asset; increments on retry |
-| `error_message` | text | null | Safe diagnostic summary |
+| `error_message` | text | null | ADR-010 D28 failure code name only, as `video_assets.failure_reason` |
 | `queued_at` | timestamptz | not null | Queue timestamp |
 | `published_at` | timestamptz | null, no default | V5: confirmed broker publication; NULL means pending for a QUEUED job |
 | `started_at` | timestamptz | null | Worker start timestamp |
@@ -273,16 +273,18 @@ Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specific
 |---|---|---|---|
 | `user_id` | uuid | PK, FK -> `users.id` on delete cascade | User |
 | `movie_id` | uuid | PK, FK -> `movies.id` on delete cascade | Movie |
-| `current_seconds` | int | not null, check `current_seconds >= 0` | Last saved position |
-| `duration_seconds` | int | null, check `duration_seconds >= 0` | Known duration |
-| `finished` | boolean | not null default false | Completion flag |
-| `last_played_at` | timestamptz | not null | Last progress timestamp |
+| `current_seconds` | int | not null, check `current_seconds >= 0` | Last saved position, clamped by the server to the current asset's duration |
+| `duration_seconds` | int | null, check `duration_seconds >= 0` | Duration of the movie's current asset when the row was saved; never the client's value |
+| `finished` | boolean | not null default false | Server-derived completion flag: the player reported the end, or the position reached 90% of the duration |
+| `last_played_at` | timestamptz | not null | Server time of the last accepted update; updates are forward-only on this column |
 | `created_at` | timestamptz | not null | Creation timestamp |
 | `updated_at` | timestamptz | not null | Last update timestamp |
 
 Indexes:
 
 - `ix_playback_progress_user_last_played` on (`user_id`, `last_played_at`)
+
+The progress API writes this table directly in one transaction with `watch_history`; there is no buffer ([ADR-011 D9-D12](adr/ADR-011.md#playback-progress-d9-d14)). One row per user and movie survives a video replacement. No migration is added by this decision.
 
 ### `watchlist_items`
 
@@ -305,9 +307,9 @@ Constraints and indexes:
 | `id` | uuid | PK | History item ID |
 | `user_id` | uuid | FK -> `users.id` on delete cascade, not null | Owner |
 | `movie_id` | uuid | FK -> `movies.id` on delete cascade, not null | Watched movie |
-| `started_at` | timestamptz | not null | First watch timestamp |
-| `last_watched_at` | timestamptz | not null | Last watch timestamp |
-| `completed_at` | timestamptz | null | Completion timestamp |
+| `started_at` | timestamptz | not null | First accepted progress update |
+| `last_watched_at` | timestamptz | not null | Latest accepted progress update |
+| `completed_at` | timestamptz | null | First time a stored progress update was finished; never cleared |
 
 Indexes:
 

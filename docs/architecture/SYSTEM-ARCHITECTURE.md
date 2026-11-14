@@ -10,7 +10,7 @@ The VoD Platform is a modular monolith plus worker system.
 - `worker` is a separate runtime for media processing only.
 - `frontend` is the React web client served through Nginx in the MVP runtime.
 - PostgreSQL is the source of truth for domain data.
-- Redis is used only for cache and playback-progress buffering.
+- Redis is used only as a cache. It holds no durable state and no playback progress ([ADR-011 D9](adr/ADR-011.md#playback-progress-d9-d14)); no component uses it before a cache feature is added.
 - RabbitMQ is used only for asynchronous video encoding jobs.
 - MinIO is private object storage for raw video and generated HLS artifacts.
 - Nginx is the single public edge for local Compose and VPS runtime traffic.
@@ -33,7 +33,7 @@ Rules:
 - Nginx is the public edge for HLS requests and forwards them to backend.
 - Backend validates the JWT and movie/video access for HLS playlist and segment requests.
 - Backend reads the HLS object from MinIO and streams it back through Nginx.
-- The frontend HLS player must send the same bearer access token on HLS requests.
+- The frontend HLS player must send the same bearer access token on HLS requests, in the `Authorization` header only. It is hls.js only, with no native HLS playback; [ADR-011](adr/ADR-011.md) defines token refresh during playback and the player behaviour.
 - No public MinIO, direct object-storage, signed URL, or presigned playback path exists in MVP.
 
 This path favors security and clarity over maximum streaming throughput. It is acceptable for the single-quality MVP and single VPS target.
@@ -51,7 +51,7 @@ Nginx
 
 backend
   |-- PostgreSQL         -> users, movies, playback, jobs, ratings
-  |-- Redis              -> cache and progress buffer
+  |-- Redis              -> cache (reserved; no consumer yet)
   |-- RabbitMQ           -> encoding job publish
   |-- MinIO              -> raw upload and HLS read proxy
 
@@ -84,7 +84,7 @@ Planned backend modules:
 - `encoding`: video asset status, job publish, admin retry
 - `playback`: playback info and access checks
 - `stream`: authenticated HLS playlist/segment proxy
-- `progress`: progress buffering and persistence orchestration
+- `progress`: playback progress save and read, completion rule, continue watching, and the watch-history write
 - `library`: watchlist, watch history, rating
 - `search`: PostgreSQL full-text search and suggestions
 - `shared`: API error model and `ApiException`, generic API exception handling, the single app-wide `Clock`, reusable validation constraints; no JPA or security; feature modules may depend on it, and it depends on no feature module
@@ -135,13 +135,13 @@ Exactly one worker replica may run, with no overlap on recreation. Listener star
 3. Backend returns playback metadata, resume position, and canonical HLS manifest path under `/hls/*`.
 4. Frontend player requests the manifest and segments through Nginx, sending the bearer token.
 5. Backend authorizes each HLS request against the visible movie and current READY asset, returning 404 for non-current IDs, and derives storage keys from the stored attempt master key. A replacement may interrupt an old stream.
-6. Frontend sends progress to `/api/v1/movies/{movieId}/progress` every 5 to 10 seconds.
-7. Backend buffers progress in Redis and periodically flushes it to PostgreSQL.
+6. Frontend sends progress to `/api/v1/movies/{movieId}/progress` every 10 seconds while playing, and on pause, seek, end and page hide.
+7. Backend commits each update to PostgreSQL before responding: a forward-only upsert of `playback_progress` plus the `watch_history` write, with the position clamped to the current asset and `finished` derived by the server ([ADR-011 D9-D12](adr/ADR-011.md#playback-progress-d9-d14)).
 
 ## Consistency Model
 
 - PostgreSQL is authoritative for users, roles, catalog data, playback progress, watchlist, history, ratings, video assets, and encoding jobs.
-- Redis is a temporary buffer/cache only; any durable user state must be flushed to PostgreSQL.
+- Redis is a cache only; durable user state, including playback progress, is written directly to PostgreSQL and never to Redis.
 - RabbitMQ is the only encoding job handoff between backend and worker.
 - MinIO stores raw and HLS media objects; object keys are referenced from PostgreSQL.
 - Encoding is asynchronous; an uploaded video is not playable until status is `READY`.

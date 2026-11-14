@@ -13,7 +13,7 @@ Required visibility:
 - upload lifecycle
 - encoding lifecycle
 - HLS access failures
-- playback-progress flush
+- playback-progress saves
 - deployment smoke status
 
 ## Health Checks
@@ -28,7 +28,7 @@ Required visibility:
 | RabbitMQ | broker health check |
 | MinIO | MinIO health endpoint |
 
-Backend readiness must verify PostgreSQL, Redis, RabbitMQ, and MinIO after those integrations exist.
+Backend readiness must verify PostgreSQL, Redis, RabbitMQ, and MinIO after those integrations exist. The backend has no Redis integration while Redis is only the reserved cache ([ADR-011 D9](adr/ADR-011.md#playback-progress-d9-d14)), so readiness does not check Redis yet.
 
 The deployment readiness signal is the aggregate `/actuator/health`, including storage and the other dependency contributors as their integrations exist. Nginx proxies that endpoint; CI checks it through the edge after full-stack startup. `/api/v1/health` remains a lightweight process smoke signal. Spring's availability-only `/actuator/health/readiness` group is not the deployment readiness signal: its default membership omits dependency contributors such as storage and DB.
 
@@ -57,9 +57,8 @@ Important backend events:
 - encoding job published
 - publication confirm/return/timeout and relay republish with job/asset IDs; distinguish committed QUEUED pending publication from a rejected upload
 - raw compensation success/failure (WARN on failure), without secret-bearing diagnostics
-- HLS authorization failure
-- progress accepted
-- progress flush success/failure
+- HLS authorization failure (request ID and asset ID, never the token) and HLS storage read failure
+- progress save failure (a successful save is not logged per request; it would be one line every 10 seconds per viewer)
 - admin retry requested
 
 Important worker events:
@@ -89,7 +88,7 @@ Required metric categories:
 - encoding job `READY`/`FAILED` count
 - encoding duration
 - worker active job count
-- progress flush count and failure count
+- progress save count and failure count (the HTTP request metrics of the progress endpoint)
 - search latency
 
 Metrics do not require Prometheus in MVP.
@@ -105,13 +104,32 @@ Required failure fields:
 - video asset ID
 - current status
 - latest job attempt
-- safe failure reason
+- failure code and safe failure reason
 - queued, started, and finished timestamps
 - retry eligibility: newest `(created_at, id)` asset of its movie and FAILED only; superseded rows are historical, may reference purged objects, and must be labelled accordingly in the admin view
 
+`VideoAssetAdmin` carries these as `id`, `status`, `latestAttempt`, `failureCode`, `failureReason`, `queuedAt`, `startedAt`, `finishedAt`, `retryEligible` and `superseded` ([ADR-011 D17](adr/ADR-011.md#contract-reconciliation-d15-d18), implemented in Sprint 9). The server computes `retryEligible` and `superseded` for each row from the movie-wide state, never from the returned page.
+
 Failure messages shown in UI must be safe summaries. Stack traces stay in server logs only.
 
-Sprint 5 fixes the worker failure-code enum ([ADR-010 D28](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28)): `PROBE_FAILED`, `PROBE_TIMEOUT`, `UNSUPPORTED_MEDIA`, `MEDIA_LIMIT_EXCEEDED`, `ENCODE_FAILED`, `ENCODE_TIMEOUT`, `INSUFFICIENT_DISK`, `STORAGE_ERROR`, `WORKER_INTERRUPTED` and `INTERNAL_ERROR`. #107 adopts it and owns the safe messages, redaction and length cap. A DB outage at claim/finish keeps retrying in-process with capped backoff delays regardless of outage duration; it is never a media FAILED or DLQ reason. QUEUED age alone is not evidence of a stuck job. `published_at NULL` on QUEUED means relay pending; queued/started/finished times and publication outcomes support diagnosis. Do not log uncapped FFmpeg output, tokens, storage credentials or sensitive request bodies.
+Redaction rule (ADR-011 D18): `video_assets.failure_reason` and `encoding_jobs.error_message` store only the failure code name, at most 32 ASCII characters. They never store free text, local paths, object keys, host names or FFmpeg/FFprobe output. The backend maps the code to the fixed message below when it builds an admin response and reports an unknown stored value as `INTERNAL_ERROR`. Viewer-facing screens show neither the code nor the message. Bounded diagnostics stay in the worker logs with `encodingJobId` and `videoAssetId`.
+
+| Failure code | Safe message shown to admins |
+|---|---|
+| `PROBE_FAILED` | The file could not be read as a video. Check that it is a complete, valid video file, then upload it again. |
+| `PROBE_TIMEOUT` | Reading the file's metadata took too long. Try again; if it fails again, re-encode the source file. |
+| `UNSUPPORTED_MEDIA` | The file has no usable video stream, or contains a stream that is not supported, such as bitmap subtitles or an unsupported codec. Remux it without those streams, then upload it again. |
+| `MEDIA_LIMIT_EXCEEDED` | The video exceeds the configured duration, resolution or stream-count limit. Upload a version within the limits. |
+| `ENCODE_FAILED` | Encoding failed or produced incomplete output. Try again; if it fails again, re-encode the source file. |
+| `ENCODE_TIMEOUT` | Encoding exceeded its time limit. Try again when the server is less busy. |
+| `INSUFFICIENT_DISK` | The server did not have enough free disk space. Free some space, then try again. |
+| `STORAGE_ERROR` | Object storage was unavailable during processing. Try again. |
+| `WORKER_INTERRUPTED` | The worker stopped while processing this video. Try again. |
+| `INTERNAL_ERROR` | An unexpected processing error occurred. Try again; if it persists, check the worker logs for this asset. |
+
+"Try again" means the admin retry (Sprint 9); before it exists, upload the file again.
+
+Sprint 5 fixes the worker failure-code enum ([ADR-010 D28](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28)): `PROBE_FAILED`, `PROBE_TIMEOUT`, `UNSUPPORTED_MEDIA`, `MEDIA_LIMIT_EXCEEDED`, `ENCODE_FAILED`, `ENCODE_TIMEOUT`, `INSUFFICIENT_DISK`, `STORAGE_ERROR`, `WORKER_INTERRUPTED` and `INTERNAL_ERROR`. ADR-011 D18 adopts it with the messages and redaction rule above (#107). A DB outage at claim/finish keeps retrying in-process with capped backoff delays regardless of outage duration; it is never a media FAILED or DLQ reason. QUEUED age alone is not evidence of a stuck job. `published_at NULL` on QUEUED means relay pending; queued/started/finished times and publication outcomes support diagnosis. Do not log uncapped FFmpeg output, tokens, storage credentials or sensitive request bodies.
 
 ## Correlation
 
