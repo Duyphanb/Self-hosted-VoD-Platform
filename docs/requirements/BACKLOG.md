@@ -916,6 +916,8 @@ Verified against `main` at `f83f576` on 2026-11-13, plus the job lifecycle logs 
 **Related Stories:** US-010, US-011  
 **Related NFRs:** NFR-005, NFR-006, NFR-016
 
+**Design authority:** [ADR-011](../architecture/adr/ADR-011.md) (owner-approved 2026-11-14 for #104, #105, #107 and #126) together with ADR-010 D14/D22/D27 and the frozen API contract. The issues below summarize it; the ADR governs when they differ.
+
 ### Issue 6.1: Backend Playback API
 
 **Description:**  
@@ -923,13 +925,14 @@ Implement `GET /api/v1/movies/{movieId}/playback` per API-CONTRACT: authenticate
 
 **Acceptance Criteria:**
 - Endpoint requires valid JWT
-- Validates movie exists and is published
+- Uses the catalog visibility check (ADR-009): a missing, DRAFT or ARCHIVED movie returns 404 `MOVIE_NOT_FOUND` for ROLE_USER and ROLE_ADMIN alike; a `movieId` that is not a UUID returns 400 `VALIDATION_ERROR`
 - Uses `findCurrentReadyByMovieId`; pending/failed replacement preserves playback on the previous current asset
 - Returns HLS manifest path per API-CONTRACT format: `/hls/video-assets/{videoAssetId}/master.m3u8`
-- Returns video duration from `video_assets` metadata
-- Returns user's current resume position from `playback_progress` table (0 if not started)
+- Returns video duration from `video_assets` metadata of the current asset
+- Returns `resumeSeconds` per ADR-011 D11: 0 without progress, when the progress is finished, or when the stored position is at or beyond 90% of the current asset's duration; otherwise the stored position
 - Visible movie with no current asset returns 409 VIDEO_NOT_READY; missing/hidden movie is 404 for every playback caller
-- Tests cover null/no READY, replacement pending/failed/succeeded, tie ordering and visibility-first 404
+- Tests cover null/no READY, replacement pending/failed/succeeded, tie ordering, visibility-first 404, and the resume rules including a shorter replacement
+- Responses are validated against the frozen contract
 
 **Dependencies:** Sprint 5 complete
 
@@ -938,57 +941,49 @@ Implement `GET /api/v1/movies/{movieId}/playback` per API-CONTRACT: authenticate
 ### Issue 6.2: Backend HLS Proxy Endpoint
 
 **Description:**  
-Implement authenticated HLS proxy endpoints per API-CONTRACT.yaml (Stream tag): `GET /hls/video-assets/{videoAssetId}/master.m3u8` (playlist) and `GET /hls/video-assets/{videoAssetId}/segments/{segmentName}` (segments). Validate JWT, check video access, read HLS objects from MinIO, stream to client. Nginx forwards `/hls/*` to backend.
+Implement authenticated HLS proxy endpoints per API-CONTRACT.yaml (Stream tag): `GET /hls/video-assets/{videoAssetId}/master.m3u8` (playlist) and `GET /hls/video-assets/{videoAssetId}/segments/{segmentName}` (segments). Validate JWT, check video access, read HLS objects from MinIO, stream to client. Nginx forwards `/hls/*` to backend. Response rules follow ADR-011 D3-D4.
 
 **Acceptance Criteria:**
 - Endpoints match API-CONTRACT paths: `/hls/video-assets/{videoAssetId}/master.m3u8` and `/hls/video-assets/{videoAssetId}/segments/{segmentName}`
-- Validates JWT from `Authorization` header
+- Validates JWT from the `Authorization` header only; a valid token sent only as `?access_token=` returns 401 on HLS and API paths (test)
 - Validates published movie and requested asset is current READY on every playlist/segment request; non-current/hidden/non-ready/missing is 404, including after a mid-stream switch
 - Derives the attempt prefix from stored hls_master_object_key, validates segmentName and streams only those objects from private vod-hls; public paths unchanged
-- Streams object with correct Content-Type (`application/vnd.apple.mpegurl` for `.m3u8`, `video/mp2t` for `.ts`)
+- Streams the whole object with correct Content-Type (`application/vnd.apple.mpegurl` for `.m3u8`, `video/mp2t` for `.ts`), `Cache-Control: no-store`, and `Content-Length` when storage reports the size; a `Range` header is ignored
 - Missing or invalid JWT returns 401
-- Missing object returns 404
-- Integration tests cover current-only playlist/segments, superseded 404, attempt-prefix resolution, unsafe segment names and visibility
-- Nginx config forwards `/hls/*` with `Authorization` header
+- Every not-found case returns 404 `VIDEO_ASSET_NOT_FOUND`: missing object, missing/superseded/non-READY asset, hidden movie, a `videoAssetId` that is not a UUID and an unsafe segment name; the HLS paths never return 400
+- A storage read failure before the response starts returns 503 `HLS_STORAGE_UNAVAILABLE`
+- HLS authorization failures are logged with request ID and asset ID, never the token
+- Integration tests cover current-only playlist/segments, superseded 404, attempt-prefix resolution, unsafe segment names, visibility, the headers and the query-token rejection
+- Nginx config forwards `/hls/*` with `Authorization` header and does not cache it
 
 **Dependencies:** Issue 6.1
 
 ---
 
-### Issue 6.3: Backend Progress Save API
+### Issue 6.3: Backend Progress Save and Read API
 
 **Description:**  
-Implement progress endpoint per API-CONTRACT.yaml (Progress tag): `PUT /api/v1/movies/{movieId}/progress` accepts current playback position. Buffer progress in Redis, flush to PostgreSQL periodically. Require authentication.
+Implement the progress endpoints per API-CONTRACT.yaml (Progress tag): `PUT /api/v1/movies/{movieId}/progress` saves the current playback position and `GET /api/v1/movies/{movieId}/progress` returns it. Each accepted update is committed to PostgreSQL before the response; there is no Redis buffer (ADR-011 D9-D12). Require authentication.
 
 **Acceptance Criteria:**
-- Endpoint is PUT (not POST) per API-CONTRACT
-- Accepts `current_seconds`, optional `duration_seconds`, required `finished` flag per ProgressRequest schema
-- Validates user is authenticated
-- Validates movie exists
-- Buffers progress in Redis with TTL
-- Scheduled task flushes buffered progress to `playback_progress` table
-- User can only update their own progress
-- Unit tests cover buffering logic
-- Integration test confirms Redis buffer and PostgreSQL flush
+- `PUT` (not POST) accepts `currentSeconds`, optional `durationSeconds` (ignored) and required `finished` per the ProgressRequest schema, and returns 200 with the stored ProgressResponse
+- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN
+- A visible movie without a current READY asset returns 409 `VIDEO_NOT_READY` on `PUT`
+- One transaction: forward-only upsert of `playback_progress` by `last_played_at` (server `Clock`), then the `watch_history` write; an older concurrent write returns the stored newer row and leaves history unchanged
+- The server clamps `currentSeconds` to the current asset's duration, stores that duration, and derives `finished` (the request flag, or the position at 90% of the duration); a later update below the threshold clears `finished`
+- `watch_history`: inserted on the first accepted update, `last_watched_at` advanced afterwards, `completed_at` set once on the first finished update
+- `GET` returns the stored row, or `currentSeconds: 0`, `finished: false` and null `durationSeconds`/`lastPlayedAt` without one; it does not require a current asset
+- User can only read and update their own progress
+- No Redis client, buffer, TTL or scheduled flush is added
+- PostgreSQL integration tests cover the transaction, the forward-only guard under concurrent writes, clamping, completion, history and ownership; responses are validated against the frozen contract
 
 **Dependencies:** Issue 6.1
 
 ---
 
-### Issue 6.4: Backend Progress Flush Service
+### Issue 6.4: Backend Progress Flush Service (withdrawn)
 
-**Description:**  
-Implement scheduled service that reads buffered progress from Redis and writes to `playback_progress` table. Run every 30-60 seconds. Update `last_played_at`, `current_seconds`, `duration_seconds`, `finished` flag.
-
-**Acceptance Criteria:**
-- Scheduled task runs every 30-60 seconds (configurable)
-- Reads all buffered progress entries from Redis
-- Upserts `playback_progress` rows (insert or update)
-- Clears processed entries from Redis
-- Logs flush metrics (number of entries processed)
-- Unit tests cover flush logic
-
-**Dependencies:** Issue 6.3
+Withdrawn by ADR-011 D9 (owner decision, 2026-11-14): progress is written directly to PostgreSQL in Issue 6.3, so there is no Redis buffer to flush and no scheduled flush service. The number is kept so that existing references stay valid; no GitHub issue is created for it.
 
 ---
 
@@ -1000,11 +995,12 @@ Implement continue watching endpoint per API-CONTRACT.yaml (History + Progress t
 **Acceptance Criteria:**
 - Endpoint path is `/api/v1/me/continue-watching` per API-CONTRACT
 - Endpoint requires valid JWT
-- Returns movies from `playback_progress` where `finished = false` and `current_seconds > 0`
-- Results ordered by `last_played_at` descending
-- Includes movie metadata and resume position per ContinueWatchingItem schema
+- Returns movies from `playback_progress` where `finished = false` and `current_seconds > 0`, for the caller only
+- Uses the catalog visibility check (ADR-009): the list excludes non-published movies for every role; integration tests cover DRAFT and ARCHIVED movies for ROLE_USER and ROLE_ADMIN
+- Results ordered by `last_played_at` descending, then `movie_id`, limited to the 50 most recent (ADR-011 D11)
+- Includes movie metadata and resume position per ContinueWatchingItem schema, without N+1 queries
 - No pagination per API-CONTRACT (returns array, not page)
-- Unit tests cover query logic
+- Tests cover the query logic, ordering, the limit and ownership
 
 **Dependencies:** Issue 6.3
 
@@ -1013,17 +1009,18 @@ Implement continue watching endpoint per API-CONTRACT.yaml (History + Progress t
 ### Issue 6.6: Frontend Video Player Component
 
 **Description:**  
-Create video player component using HLS.js or Video.js. Player accepts HLS manifest URL and resume position. Player sends progress updates every 5-10 seconds. Handle loading, buffering, error states.
+Create the video player component with hls.js (ADR-011 D1-D8, D13). The player accepts the HLS manifest URL and resume position, authenticates every HLS request, sends progress updates, and handles loading, buffering and error states.
 
 **Acceptance Criteria:**
-- Player uses HLS.js or Video.js for HLS playback
-- Player accepts manifest URL and start position props
-- Player starts at resume position if provided
-- Player sends progress updates to backend every 5-10 seconds
-- Player includes `Authorization` header with bearer token on HLS requests
-- Loading spinner during buffering
-- Error message on playback failure
-- Player controls (play, pause, seek, volume, fullscreen)
+- Player uses hls.js only, pinned to an exact version (1.5.0 or later): checks `Hls.isSupported()` first, never assigns the manifest to `video.src` or uses `canPlayType`, and shows an unsupported-browser state otherwise
+- Player accepts manifest URL and start position props; it loads paused at the resume position through hls.js `startPosition` and never calls `play()` on its own; a rejected `play()` stays paused and is not an error
+- Every HLS request reads the current access token and sends it in the `Authorization` header; a 401 runs the shared single-flight refresh once and retries that request once; a second 401 or a failed refresh ends the session; the player is destroyed when the signed-in identity changes
+- `ApiClient` exposes its refresh-once operation and authentication snapshot for the player; no token is ever put in a URL and `sendBeacon` is not used
+- Player sends progress every 10 seconds while playing, and on pause, seek, `ended` (with `finished: true`), page hide, `pagehide` and unmount; whole seconds; no save before the first play or without a position change; unload saves use `fetch` with `keepalive`; a failed save never interrupts playback; saving stops after 404 or 409
+- Native `<video controls playsinline>` with `aria-label` set to the movie title; no custom control bar
+- Error mapping per ADR-011 D7: only fatal errors leave the playing state; one `recoverMediaError()` for a fatal media error; fatal network errors mapped by status (401 refresh rule, 404 reloads playback info once, others show Retry); `role="status"` for the initial load, `role="alert"` for fatal states, an `aria-hidden` rebuffering spinner
+- Unit tests: non-fatal error ignored; fatal media error recovered once, then the error state; 401 refresh-once-retry-once and session expiry; 404 with and without a new current asset; unsupported state; hls.js path when `canPlayType` answers positively; `video.src` never set to the manifest; start position; rejected `play()`; a fake-timer test of the save triggers
+- Manual evidence: one row per verified browser (current desktop Chrome or Edge, and Firefox, versions recorded) with 60 seconds of playback, a seek, pause and resume, and a reload that resumes; a keyboard-only pass (reach the player, play, pause, seek, volume, fullscreen)
 
 **Dependencies:** Issue 6.2, Issue 6.3
 
@@ -1039,8 +1036,11 @@ Create watch page that fetches playback info and displays video player. Show mov
 - Displays player with HLS manifest and resume position
 - Shows movie title and description
 - Handles loading state during fetch
-- Shows appropriate message if video is not ready (e.g., "Processing", "Failed")
-- Error state handled
+- 409 `VIDEO_NOT_READY` shows the viewer-facing availability label ("Processing" or "Not available"); failure codes and messages are never shown to viewers
+- 404 `MOVIE_NOT_FOUND` shows the not-found state; other errors show the error state with Retry
+- When the player reports that the asset is no longer current, the page fetches playback info again once and reloads the player on a new asset (ADR-011 D7)
+- The movie detail page links to the watch page only when the movie can be watched
+- Tests cover the loading, ready, not-ready, not-found and error states; the manual rows of Issue 6.6 are run on this page
 
 **Dependencies:** Issue 6.6, Issue 6.1
 
@@ -1056,7 +1056,7 @@ Create continue watching page that displays movies user started but hasn't finis
 - Displays movie cards with resume position indicator
 - Cards link to watch page
 - Loading, empty, error states handled
-- Pagination if list is long
+- Shows the whole array (at most 50 items) without pagination, per API-CONTRACT
 
 **Dependencies:** Issue 6.5
 
@@ -1069,7 +1069,7 @@ Create continue watching page that displays movies user started but hasn't finis
 - [ ] Frontend video player plays HLS content in browser
 - [ ] Player starts at resume position if available
 - [ ] Player sends progress updates every 5-10 seconds
-- [ ] Backend buffers progress in Redis and flushes to PostgreSQL
+- [ ] Backend commits each accepted progress update to PostgreSQL before responding (ADR-011 D9)
 - [ ] Continue watching API returns user's unfinished movies
 - [ ] Frontend watch page displays player and handles not-ready videos
 - [ ] Frontend continue watching page shows resumable movies
@@ -1132,6 +1132,7 @@ Implement search endpoint per API-CONTRACT.yaml (Search tag): `GET /api/v1/searc
 - Endpoint requires valid JWT
 - Accepts required query string parameter `q` (minLength: 1)
 - Returns paginated results per SearchResponse schema
+- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN, and lists exclude non-published movies
 - Empty query returns validation error per schema requirement
 - No-results returns empty list with 200 OK
 - Integration tests cover search scenarios
@@ -1150,6 +1151,7 @@ Implement search suggestions endpoint per API-CONTRACT.yaml (Search tag): `GET /
 - Endpoint requires valid JWT
 - Accepts required query string parameter `q` (minLength: 1)
 - Returns suggestions per SearchSuggestionResponse schema (array of strings)
+- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN, and lists exclude non-published movies
 - Fast query (limit results for performance)
 - Unit tests cover suggestion logic
 
@@ -1225,6 +1227,7 @@ Implement watchlist service with add, remove, list operations per API-CONTRACT.y
 - GET /api/v1/me/watchlist lists user's watchlist (returns array, not paginated per API-CONTRACT)
 - Duplicate prevention on add
 - Watchlist scoped to authenticated user
+- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN, and lists exclude non-published movies
 - Unit tests cover service logic
 - Integration tests cover ownership enforcement
 
@@ -1235,13 +1238,14 @@ Implement watchlist service with add, remove, list operations per API-CONTRACT.y
 ### Issue 8.2: Backend Watch History Service and API
 
 **Description:**  
-Implement watch history service that records when user starts watching a movie per API-CONTRACT.yaml (History tag): `GET /api/v1/me/history` returns paginated watch history. Require authentication. Enforce ownership.
+Implement the watch history read API per API-CONTRACT.yaml (History tag): `GET /api/v1/me/history` returns paginated watch history. The rows are written by the progress transaction of Issue 6.3 (ADR-011 D12); this issue adds no second writer. Require authentication. Enforce ownership.
 
 **Acceptance Criteria:**
 - Endpoint path is `/api/v1/me/history` (not `/api/v1/users/me/watch-history`) per API-CONTRACT
-- Watch history entry created when user starts watching (first progress update)
+- Watch history rows come from Issue 6.3: created on the first accepted progress update, `completed_at` set on the first finished update
 - User can list their own watch history ordered by last_watched_at descending
 - Watch history scoped to authenticated user
+- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN, and lists exclude non-published movies
 - Pagination supported per HistoryPageResponse schema
 - Unit tests cover service logic
 - Integration tests cover ownership enforcement
@@ -1259,6 +1263,7 @@ Implement rating service with create/update operation per API-CONTRACT.yaml (Rat
 - Endpoint is PUT /api/v1/movies/{movieId}/rating (singular "rating", not "ratings") per API-CONTRACT
 - User can create or update their own rating for a movie
 - Rating value validated per RatingRequest schema (1-5 stars)
+- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN, and lists exclude non-published movies
 - Users cannot rate on behalf of another user
 - Aggregate rating calculation available (mean, count) returned in RatingResponse
 - Unit tests cover validation and service logic
@@ -1370,7 +1375,8 @@ Implement `GET /api/v1/admin/video-assets` endpoint that returns all video asset
 - Supports filtering by status (e.g., `?status=FAILED`)
 - Supports filtering by movie ID
 - Current/newest/superseded are derived per ADR-010; historical READY is not a playback promise and purged historical keys may dangle. Implement the contract's movieId filter here, not in Sprint 4
-- Before implementation, settle the admin classification/eligibility projection and UI with an authorized contract follow-up if new fields are needed; never infer movie-wide current/newest from a paginated subset
+- Returns the ADR-011 D17 projection per the VideoAssetAdmin schema: `failureCode`, the fixed safe `failureReason` message (ADR-011 D18; an unknown stored value maps to `INTERNAL_ERROR`), `queuedAt`/`startedAt`/`finishedAt` of the latest attempt, and `retryEligible` and `superseded` computed for each row from the movie-wide state; never infer movie-wide current/newest from a paginated subset
+- Total order `createdAt` descending, then `id` descending; the `movieId` and `status` filters combine; an invalid filter or page parameter returns 400 `VALIDATION_ERROR`
 - Pagination supported
 - Integration tests cover admin authorization
 
@@ -1417,11 +1423,11 @@ Create admin dashboard page showing video assets with status. Display movie titl
 
 **Acceptance Criteria:**
 - Dashboard fetches video assets from admin API
-- Table displays movie title, status, metadata, failure reason
+- Table displays movie title, status, metadata, the safe failure message, and the queued/started/finished times
 - Filter dropdown for status (All, Uploaded, Queued, Processing, Ready, Failed)
 - Loading, empty, error states handled
 - Pagination supported
-- Retry button enabled only for newest FAILED; label superseded history and handle 409 refresh. A historical READY row may have manually purged objects and is not current playback
+- Retry button enabled only when `retryEligible` is true (newest FAILED); label rows with `superseded` as history and handle 409 refresh. A historical READY row may have manually purged objects and is not current playback
 - Admin route protected with `ROLE_ADMIN` guard
 
 **Dependencies:** Issue 9.1
@@ -1655,8 +1661,8 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 - **R-007 (Queue failures):** 4.5 commits job-row outbox before publish and relays pending publication; 5.3/5.7 conditionally claim/finish and recover startup orphans with deadlines; Sprint 9 retries only newest FAILED. Never time out QUEUED by age.
 - **R-008 (Auth/RBAC):** Sprint 2 completed before catalog and upload features; authorization tests required.
 - **R-012 (Tests lag):** Definition of Done includes tests for every sprint; traceability matrix tracks coverage.
-- **R-014 (HLS headers):** Sprint 6 verifies MIME types and playback in browser; Nginx config reviewed.
-- **R-015 (Progress durability):** Sprint 6 defines Redis buffer + PostgreSQL flush; integration test confirms sync.
+- **R-014 (HLS delivery and player authentication):** ADR-011 pins the proxy headers, the hls.js-only player and token refresh during playback; Sprint 6 verifies them with proxy tests, player unit tests and manual rows per verified browser.
+- **R-015 (Progress durability):** ADR-011 writes each accepted progress update directly to PostgreSQL with a forward-only upsert; PostgreSQL integration tests cover reload, concurrency and completion.
 
 ---
 
@@ -1668,7 +1674,7 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 4. PostgreSQL full-text search is sufficient; Elasticsearch deferred.
 5. MinIO buckets are private; HLS delivered through authenticated backend proxy.
 6. Worker concurrency is 1 for MVP stability.
-7. Redis is used for cache and progress buffer only; PostgreSQL is source of truth.
+7. Redis is used for cache only and holds no playback progress (ADR-011 D9); PostgreSQL is source of truth.
 8. Frontend tokens stored in localStorage or chosen secure mechanism; strategy decided in Sprint 2.
 9. GitHub Issues will be created based on this backlog; issue numbers referenced in commits.
 10. Test media is generated at test time with FFmpeg lavfi (#123); no third-party sample media is committed. Demo media stays local to the owner.
@@ -1722,6 +1728,7 @@ After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening
 | 2026-10-06 | 1.0 | Sprint 3 catalog contract frozen (#95): Issues 3.2-3.5, 3.8 and 7.2 updated |
 | 2026-10-18 | 1.1 | Platform statements in Issues 1.1 and 1.2 and Assumption 1 changed from Spring Boot 3.x to Spring Boot 4.x after the ADR-002 amendment (Issue #50) |
 | 2026-11-03 | 1.3 | Sprint 5 worker design (ADR-010 D25-D28, #122): design authority line, Issues 5.4-5.8 criteria and tests, the Sprint 5 DoD wording, the Issue 10.6 purge rehearsal, the R-002 mitigation and Assumption 10 |
+| 2026-11-14 | 1.4 | Sprint 6 streaming design (ADR-011, #104/#105/#107/#126): design authority line, Issues 6.1-6.3 and 6.5-6.8 criteria and tests, Issue 6.4 withdrawn, the Sprint 6 DoD progress line, the catalog visibility criterion in Issues 6.3, 6.5, 7.3, 7.4, 8.1, 8.2 and 8.3, the Issue 8.2 history writer, the Issue 9.1/9.4 admin projection, R-014/R-015 and Assumption 7 |
 | 2026-10-26 | 1.2 | Contract-first API documentation (Issue #120, owner decision 2026-10-18): the Global Definition of Done requires `API-CONTRACT.yaml` updated or confirmed with responses validated in tests instead of OpenAPI annotations, and Issue 10.2 serves the frozen contract in Swagger UI instead of generating a code-first document |
 
 ---

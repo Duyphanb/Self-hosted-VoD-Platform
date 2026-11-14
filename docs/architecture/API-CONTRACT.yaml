@@ -8,6 +8,9 @@ info:
     Browser traffic enters through Nginx. JSON APIs use /api/v1/*.
     HLS uses /hls/* through the authenticated backend proxy.
     Refresh tokens use JSON request and response bodies only.
+    Sprint 6 playback, HLS, progress and admin asset projection rules follow
+    ADR-011 (2026-11-14); the bearer token is accepted only in the
+    Authorization header, never in a URL.
 servers:
   - url: http://localhost
     description: Local Nginx edge
@@ -626,6 +629,8 @@ paths:
         playback caller). Current is the READY asset with greatest (created_at, id).
         Return only that asset, preserving previous playback during a pending or
         failed replacement. With no current asset return 409 VIDEO_NOT_READY.
+        resumeSeconds follows ADR-011 D11. A movieId that is not a UUID returns
+        400 VALIDATION_ERROR.
       responses:
         "200":
           description: Playback info
@@ -633,6 +638,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PlaybackInfo"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -657,9 +664,19 @@ paths:
         non-ready or non-current assets return 404. The backend derives the
         attempt-scoped private prefix from hls_master_object_key; public paths
         remain unchanged. No direct MinIO or presigned playback.
+        The playlist is one VOD media playlist with relative segments/ URIs.
+        The response is the whole object with Cache-Control no-store; Range is
+        ignored. The bearer token is read only from the Authorization header.
+        Every not-found case, including a videoAssetId that is not a UUID,
+        returns 404 VIDEO_ASSET_NOT_FOUND; this path never returns 400.
       responses:
         "200":
           description: HLS playlist
+          headers:
+            Cache-Control:
+              description: Always no-store
+              schema:
+                type: string
           content:
             application/vnd.apple.mpegurl:
               schema:
@@ -670,6 +687,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/HlsStorageUnavailable"
 
   /hls/video-assets/{videoAssetId}/segments/{segmentName}:
     parameters:
@@ -690,9 +709,18 @@ paths:
         attempt prefix from the stored master key and validate segmentName before
         reading storage. A current-asset switch can interrupt an old stream with
         404; reopen playback. No direct MinIO or presigned playback.
+        The response is the whole segment with Cache-Control no-store; Range is
+        ignored. Every not-found case, including an invalid segmentName or a
+        videoAssetId that is not a UUID, returns 404 VIDEO_ASSET_NOT_FOUND; this
+        path never returns 400.
       responses:
         "200":
           description: HLS segment
+          headers:
+            Cache-Control:
+              description: Always no-store
+              schema:
+                type: string
           content:
             video/mp2t:
               schema:
@@ -704,6 +732,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/HlsStorageUnavailable"
 
   /api/v1/movies/{movieId}/progress:
     parameters:
@@ -711,29 +741,15 @@ paths:
     get:
       tags: [Progress]
       summary: Get current user's playback progress for a movie
+      description: >
+        Apply movie visibility first (404 for missing or non-PUBLISHED, for every
+        caller). Returns the stored progress; without any stored progress returns
+        currentSeconds 0, finished false and null durationSeconds and
+        lastPlayedAt. A current asset is not required. A movieId that is not a
+        UUID returns 400 VALIDATION_ERROR.
       responses:
         "200":
           description: Progress
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProgressResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    put:
-      tags: [Progress]
-      summary: Save playback progress
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProgressRequest"
-      responses:
-        "202":
-          description: Progress accepted for buffering
           content:
             application/json:
               schema:
@@ -744,6 +760,42 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Progress]
+      summary: Save playback progress
+      description: >
+        Apply movie visibility first (404), then require a current READY asset
+        (409 VIDEO_NOT_READY). The update is committed to PostgreSQL before the
+        response (ADR-011 D9); nothing is buffered. The server clamps
+        currentSeconds to the current asset's duration and derives finished
+        (ADR-011 D10). The newest write by server time wins; the response is the
+        stored state, which can be a newer concurrent write. An accepted write
+        also records watch history.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProgressRequest"
+      responses:
+        "200":
+          description: Progress stored; the body is the stored state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgressResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: VIDEO_NOT_READY - visible movie has no current READY asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/v1/movies/{movieId}/rating:
     parameters:
@@ -884,6 +936,11 @@ paths:
     get:
       tags: [History, Progress]
       summary: Get current user's continue-watching list
+      description: >
+        The caller's progress rows that are not finished and have a position
+        above 0, for PUBLISHED movies only, ordered by lastPlayedAt descending
+        and then movie id, limited to the 50 most recent (ADR-011 D11). An array,
+        not a page.
       responses:
         "200":
           description: Continue-watching list
@@ -904,6 +961,9 @@ paths:
         Requires ROLE_ADMIN. Implemented in Sprint 9. Includes historical assets;
         a historical READY status does not imply current/playable media. Superseded
         rows may retain keys for manually purged objects; see ADR-010.
+        Ordered by createdAt descending, then id descending. The movieId and
+        status filters combine. An invalid filter or page parameter returns 400
+        VALIDATION_ERROR.
       parameters:
         - name: movieId
           in: query
@@ -926,6 +986,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VideoAssetPageResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -943,6 +1005,8 @@ paths:
         QUEUED and insert the next attempt in one transaction, then publish after
         commit; broker failure leaves 202 QUEUED for the relay. A concurrent loser,
         non-FAILED or superseded asset returns 409 VIDEO_ASSET_NOT_RETRYABLE.
+        A missing asset returns 404 VIDEO_ASSET_NOT_FOUND; a videoAssetId that is
+        not a UUID returns 400 VALIDATION_ERROR.
       responses:
         "202":
           description: Retry queued
@@ -950,6 +1014,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VideoAssetStatusResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1069,6 +1135,14 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ApiError"
+    HlsStorageUnavailable:
+      description: >
+        HLS_STORAGE_UNAVAILABLE - the backend could not read the HLS object from
+        storage before the response started. Players retry 5xx responses.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
     UpstreamUnavailable:
       description: UPSTREAM_UNAVAILABLE - edge could not reach an available backend (502 or 503)
       content:
@@ -1112,7 +1186,8 @@ components:
             GENRE_NOT_FOUND, PERSON_NOT_FOUND, MOVIE_SLUG_CONFLICT, GENRE_CONFLICT,
             PAYLOAD_TOO_LARGE, UNSUPPORTED_VIDEO_TYPE, VIDEO_UPLOAD_IN_PROGRESS,
             UPLOAD_STORAGE_UNAVAILABLE, UPLOAD_DATABASE_ERROR, UPLOAD_OUTCOME_UNKNOWN,
-            INTERNAL_ERROR, VIDEO_NOT_READY, VIDEO_ASSET_NOT_RETRYABLE,
+            INTERNAL_ERROR, VIDEO_NOT_READY, VIDEO_ASSET_NOT_FOUND,
+            HLS_STORAGE_UNAVAILABLE, VIDEO_ASSET_NOT_RETRYABLE,
             UPSTREAM_UNAVAILABLE and UPSTREAM_TIMEOUT. The list is not exhaustive.
         message:
           type: string
@@ -1505,9 +1580,14 @@ components:
         resumeSeconds:
           type: integer
           minimum: 0
+          description: >
+            0 without stored progress, when the stored progress is finished, or
+            when the stored position is at or beyond 90% of the current asset's
+            duration; otherwise the stored position (ADR-011 D11).
         durationSeconds:
           type: integer
           nullable: true
+          description: Duration of the current asset.
 
     ProgressRequest:
       type: object
@@ -1516,12 +1596,17 @@ components:
         currentSeconds:
           type: integer
           minimum: 0
+          description: Playback position in whole seconds; the server clamps it to the current asset's duration.
         durationSeconds:
           type: integer
           minimum: 0
           nullable: true
+          description: Accepted for compatibility and ignored; the server uses the current asset's duration.
         finished:
           type: boolean
+          description: >
+            True when playback reached the end. The server also sets finished at
+            90% of the current asset's duration (ADR-011 D10).
 
     ProgressResponse:
       type: object
@@ -1535,8 +1620,10 @@ components:
         durationSeconds:
           type: integer
           nullable: true
+          description: Duration of the current asset when the progress was stored.
         finished:
           type: boolean
+          description: Server-derived completion flag (ADR-011 D10).
         lastPlayedAt:
           type: string
           format: date-time
@@ -1666,12 +1753,53 @@ components:
           type: string
           nullable: true
           description: Source primary video codec from FFprobe; the HLS output is always H.264.
+        failureCode:
+          type: string
+          nullable: true
+          enum:
+            - PROBE_FAILED
+            - PROBE_TIMEOUT
+            - UNSUPPORTED_MEDIA
+            - MEDIA_LIMIT_EXCEEDED
+            - ENCODE_FAILED
+            - ENCODE_TIMEOUT
+            - INSUFFICIENT_DISK
+            - STORAGE_ERROR
+            - WORKER_INTERRUPTED
+            - INTERNAL_ERROR
+            - null
+          description: Worker failure code of a FAILED asset (ADR-010 D28); otherwise null.
         failureReason:
           type: string
           nullable: true
+          description: Fixed safe message for failureCode (ADR-011 D18); never free text or tool output.
         latestAttempt:
           type: integer
           nullable: true
+        queuedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Queue time of the latest attempt.
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Worker start time of the latest attempt.
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Completion time of the latest attempt.
+        retryEligible:
+          type: boolean
+          description: True only for the newest asset of its movie when it is FAILED. Computed from the movie-wide state.
+        superseded:
+          type: boolean
+          description: >
+            True for a READY asset that is not current and for a FAILED asset that
+            is not newest. Superseded rows are history and may reference purged
+            objects.
         createdAt:
           type: string
           format: date-time

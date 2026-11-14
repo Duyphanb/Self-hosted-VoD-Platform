@@ -2,7 +2,7 @@
 
 ## Status
 
-Updated 2026-11-13 for the Sprint 5 closeout; the design follows [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md), Sprint 4 (F-008 and F-009) in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md), and Sprint 5 (F-010 to F-012) in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; Sprint 5 supplies encoding evidence but no playback or VPS evidence.
+Updated 2026-11-14 for the Sprint 6 streaming design ([ADR-011](../architecture/adr/ADR-011.md)) and 2026-11-13 for the Sprint 5 closeout; the upload and worker design follows [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md), Sprint 4 (F-008 and F-009) in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md), and Sprint 5 (F-010 to F-012) in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; Sprint 5 supplies encoding evidence but no playback or VPS evidence.
 
 ## Feature Traceability
 
@@ -20,9 +20,9 @@ Updated 2026-11-13 for the Sprint 5 closeout; the design follows [ADR-010](../ar
 | F-010 | Encoding worker | US-009 | worker, RabbitMQ, MinIO | Worker command construction tests; job status transition tests; failed-job test. Verified: [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md) |
 | F-011 | FFprobe metadata extraction | US-009 | worker | FFprobe parser unit tests; #123 generated-fixture probe tests with the worker image binary. Verified: [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md) |
 | F-012 | FFmpeg HLS transcoding | US-009, US-010 | worker, MinIO | HLS output smoke test; generated playlist and segments verification; #123 generated fixtures through the worker image binary with output validation. Encoding to `vod-hls` verified in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md); playback (US-010) remains Sprint 6 |
-| F-013 | HLS playback | US-010 | backend, frontend, nginx | Playback API Postman test; browser playback smoke test; HLS MIME check |
-| F-014 | Playback progress and resume | US-011 | backend, frontend, Redis, PostgreSQL | Progress API tests; Redis flush test; resume manual E2E evidence |
-| F-015 | Continue watching | US-011 | backend, frontend | Continue-watching API tests; UI list test |
+| F-013 | HLS playback | US-010 | backend, frontend, nginx | Playback API tests and Postman test; HLS proxy tests (MIME, `no-store`, current-only 404, query-token 401); player unit tests (token refresh, error mapping, hls.js-only path); one manual row per verified browser (current Chrome or Edge, and Firefox); browser playback smoke test (#125) |
+| F-014 | Playback progress and resume | US-011 | backend, frontend, PostgreSQL | Progress API tests on PostgreSQL (forward-only upsert, clamp, 90% completion, history write, ownership); player save-trigger test; resume manual E2E evidence |
+| F-015 | Continue watching | US-011 | backend, frontend | Continue-watching API tests (unfinished only, PUBLISHED only, order, limit); UI list test |
 | F-016 | Search and suggestions | US-012 | backend, frontend, PostgreSQL | Search service tests; FTS seed data tests; search UI tests |
 | F-017 | Watchlist | US-013 | backend, frontend | Watchlist API tests; duplicate prevention test; UI mutation test |
 | F-018 | Watch history | US-014 | backend, frontend | Watch history service tests; ownership authorization test |
@@ -40,8 +40,8 @@ Updated 2026-11-13 for the Sprint 5 closeout; the design follows [ADR-010](../ar
 | NFR-002 | F-021, F-022 | VPS resource observation during demo smoke test |
 | NFR-003 | F-008 | `.env.example` size/MIME allowlist configuration and backend rejection outside those limits; declared MIME/signature family, equal MiB ceilings including multipart overhead, route-limit JSON errors and a synthetic non-VPS 2 GB runner rehearsal (Issues 4.4/4.6/4.7); genuine 2 GB VPS timings/temp/memory/disk and concurrent-upload headroom (#180, before public deployment) |
 | NFR-004 | F-010 | One non-overlapping worker, prefetch/concurrency 1, startup recovery, owner product caps checked in 5.4 (ADR-010 D26), deadlines measured in #124, and a long-job/second-queued-job test (5.1/5.3/5.7) |
-| NFR-005 | F-012, F-013 | Browser playback smoke test |
-| NFR-006 | F-014, F-015 | Redis-to-PostgreSQL flush test |
+| NFR-005 | F-012, F-013 | Browser playback smoke test (#125) and one manual 60-second playback row per verified browser: current desktop Chrome or Edge, and Firefox, with versions recorded (ADR-011 D5) |
+| NFR-006 | F-014, F-015 | PostgreSQL progress test: an accepted update is committed before the response and a read right after it returns it (ADR-011 D9) |
 | NFR-007 | F-001, F-002, F-004, F-020 | Auth and authorization tests |
 | NFR-008 | All runtime features | Secret scan/manual review; `.env.example` review |
 | NFR-009 | F-008, F-012 | MinIO storage integration evidence |
@@ -66,6 +66,20 @@ The Sprint 4 (4.x) parts of these rows are verified in the [Sprint 4 closeout](.
 | D18/D20/D21, F-010 | 5.1/5.3/5.7 terminal redelivery, stale attempt, poison DLQ, DB outage, orphan restart and long job with second queued; #74 4.4 classic baseline: no ack timeout (5.1 long-job/DB-outage evidence) |
 | D22/D23, F-012/F-022, R-006 | 4.4 compensating raw delete/failed compensation; 5.6/5.7 attempt isolation, failed/lost-finish/orphan prefix delete, trailing-slash safety and temp sweep; Phase 5 manual dry-run purge/orphan audit protects current/newest FAILED/in-flight/archive |
 | D10/D24 | DTO bounds remain separate follow-up; one ADR/docs package, V5/counts implemented later in 4.3; independent AI review when a PR exists, before owner merge |
+
+## Sprint 6 design-to-test plan
+
+These rows are **planned** evidence for [ADR-011](../architecture/adr/ADR-011.md), not passed tests. #125 requires actual upload -> transcode -> HLS browser playback.
+
+| Decisions / feature | Planned evidence and owner |
+|---|---|
+| D1-D3, F-013, R-014 | 6.6: hls.js-only path when `canPlayType` answers positively, `video.src` never set to the manifest, unsupported state; token read per request, one shared refresh and one retry on 401, session expiry on the second 401, resume after a long pause; 6.2: a valid token only in `?access_token=` returns 401 on HLS and API paths |
+| D4, F-013 | 6.2: MIME types, `Cache-Control: no-store`, `Range` ignored, current-only 404 `VIDEO_ASSET_NOT_FOUND` for superseded, non-READY, hidden, malformed ID and unsafe segment name, 503 `HLS_STORAGE_UNAVAILABLE`; Nginx forwards `Authorization` |
+| D5-D8, F-013, NFR-005 | 6.6/6.7: one manual row per verified browser (60 seconds, seek, pause, reload and resume) with versions; keyboard-only pass; error-mapping unit tests for non-fatal, fatal media, 401 and 404; start position and rejected `play()` |
+| D9-D12, F-014, NFR-006, R-015 | 6.3 on PostgreSQL: reload right after a save, concurrent writes keep the newest, older write returns the stored row, clamp to the current asset, 90% and `ended` completion, rewatch clears `finished`, history insert/advance/`completed_at` once, visibility 404, 409 without a current asset, another user's rows untouched; 6.1: `resumeSeconds` 0 when finished or beyond 90% of a shorter replacement |
+| D11, F-015 | 6.5: unfinished and started only, PUBLISHED only, order by `last_played_at` then movie, 50-row limit; 6.8: list without pagination |
+| D13, F-014 | 6.6: fake-timer test for the 10-second interval, pause, seek, ended, page-hide and unmount saves, no save before first play or without a position change, `keepalive` at unload, saving stops after 404 or 409 |
+| D15-D18, F-020 | Contract validation of every new status in 6.1-6.3; Sprint 9 (9.1): projection fields computed movie-wide, total order, combined filters, code-to-message mapping and unknown-value fallback |
 
 ## Evidence Storage Plan
 

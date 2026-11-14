@@ -116,7 +116,7 @@ Acceptance criteria:
 
 - Playback is allowed only for authenticated users.
 - Backend returns playback information for ready assets.
-- Frontend plays `.m3u8` HLS output through HLS.js or Video.js.
+- Frontend plays `.m3u8` HLS output through hls.js only; a browser that hls.js cannot run in shows an unsupported-browser state (ADR-011 D1).
 - Player shows loading, buffering, and error states.
 - Not-ready or failed assets are shown with clear status.
 
@@ -126,9 +126,9 @@ As a user, I want playback to resume near my last watched position so that I can
 
 Acceptance criteria:
 
-- Frontend sends progress updates every 5 to 10 seconds while playing.
-- Backend buffers progress in Redis.
-- Progress is periodically flushed to PostgreSQL.
+- Frontend sends progress updates every 5 to 10 seconds while playing, and when playback pauses, seeks, ends or the page is hidden.
+- Backend commits each accepted update to PostgreSQL before responding (ADR-011 D9).
+- The server marks a movie finished when playback reaches its end or 90% of its duration; a finished movie resumes from the start.
 - Movie detail or watch page can retrieve the last saved position.
 - Continue-watching list shows recently started but unfinished movies.
 

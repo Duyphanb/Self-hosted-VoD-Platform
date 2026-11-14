@@ -211,7 +211,15 @@ sequenceDiagram
     Backend->>MinIO: Read segment under prefix derived from stored master key
     Backend-->>Nginx: HLS segment with MIME type
     Nginx-->>Frontend: HLS segment
+    opt access token expired during playback
+        Backend-->>Frontend: 401 on a playlist or segment request
+        Frontend->>Frontend: Shared single-flight token refresh, once
+        Frontend->>Nginx: Retry that request once with the new token
+        Note over Frontend: A second 401 or a failed refresh ends the session
+    end
 ```
+
+The player is hls.js only and never uses native HLS playback; every HLS request carries the current token in the `Authorization` header, never in the URL. HLS responses are whole objects with `Cache-Control: no-store`. [ADR-011](adr/ADR-011.md) defines the player rules, the error mapping and the start position.
 
 ## Playback Progress
 
@@ -220,20 +228,25 @@ sequenceDiagram
     participant Frontend
     participant Nginx
     participant Backend
-    participant Redis
     participant PostgreSQL
 
-    Frontend->>Nginx: PUT /api/v1/movies/{movieId}/progress every 5 to 10 seconds
+    Frontend->>Nginx: PUT /api/v1/movies/{movieId}/progress every 10 seconds while playing, and on pause, seek, end and page hide
     Nginx->>Backend: Forward progress request with Authorization
-    Backend->>Backend: Validate JWT and movie access
-    Backend->>Redis: Buffer latest progress by userId/movieId
-    Backend-->>Nginx: 202 Accepted
-    Nginx-->>Frontend: Progress accepted
-
-    Backend->>Redis: Scheduled read of dirty progress keys
-    Backend->>PostgreSQL: Upsert playback_progress and watch_history
-    Backend->>Redis: Clear flushed dirty markers
+    Backend->>Backend: Validate JWT
+    Backend->>PostgreSQL: BEGIN, apply movie visibility (404), load current READY asset (409 VIDEO_NOT_READY)
+    Backend->>Backend: Clamp position to the asset duration, derive finished at 90% or from the ended flag
+    Backend->>PostgreSQL: Forward-only upsert of playback_progress by last_played_at
+    alt write accepted
+        Backend->>PostgreSQL: Upsert watch_history, set completed_at on the first finish
+    else an older write lost to a newer stored row
+        Note over Backend,PostgreSQL: Keep the stored row, leave history unchanged
+    end
+    Backend->>PostgreSQL: COMMIT
+    Backend-->>Nginx: 200 OK with the stored progress
+    Nginx-->>Frontend: Stored progress
 ```
+
+Progress is committed to PostgreSQL before the response; there is no Redis buffer or flush job ([ADR-011 D9](adr/ADR-011.md#playback-progress-d9-d14)). The playback API, the progress `GET` and continue-watching read the same rows, so a reload resumes from the last accepted update.
 
 ## Auth Refresh
 
