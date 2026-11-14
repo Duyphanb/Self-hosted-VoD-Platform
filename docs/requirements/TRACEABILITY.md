@@ -78,7 +78,7 @@ These rows are **planned** evidence for [ADR-011](../architecture/adr/ADR-011.md
 | D5-D8, F-013, NFR-005 | 6.6/6.7: one manual row per verified browser (60 seconds, seek, pause, reload and resume) with versions; keyboard-only pass; error-mapping unit tests for non-fatal, fatal media, 401 and 404; start position and rejected `play()` |
 | D9-D12, F-014, NFR-006, R-015 | 6.3 on PostgreSQL: reload right after a save, concurrent writes keep the newest, older write returns the stored row, clamp to the current asset, 90% and `ended` completion, rewatch clears `finished`, history insert/advance/`completed_at` once, visibility 404, 409 without a current asset, another user's rows untouched; 6.1: `resumeSeconds` 0 when finished or beyond 90% of a shorter replacement |
 | D11, F-015 | 6.5: unfinished and started only, PUBLISHED only, order by `last_played_at` then movie, 50-row limit; 6.8: list without pagination |
-| D13, F-014 | 6.6: fake-timer test for the 10-second interval, pause, seek, ended, page-hide and unmount saves, no save before first play or without a position change, `keepalive` at unload, saving stops after 404 or 409 |
+| D13, F-014 | 6.6: fake-timer test for the 10-second interval, pause, seek, ended, page-hide and unmount saves, no save before first play, a save skipped only when position and `finished` both equal the last successful save, a pause followed by `ended` within the same second still stores `finished`, `keepalive` at unload, saving stops after 404 or 409 |
 | D15-D18, F-020 | Contract validation of every new status in 6.1-6.3; Sprint 9 (9.1): projection fields computed movie-wide, total order, combined filters, code-to-message mapping and unknown-value fallback |
 
 ## Evidence Storage Plan

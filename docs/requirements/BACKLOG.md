@@ -1016,10 +1016,10 @@ Create the video player component with hls.js (ADR-011 D1-D8, D13). The player a
 - Player accepts manifest URL and start position props; it loads paused at the resume position through hls.js `startPosition` and never calls `play()` on its own; a rejected `play()` stays paused and is not an error
 - Every HLS request reads the current access token and sends it in the `Authorization` header; a 401 runs the shared single-flight refresh once and retries that request once; a second 401 or a failed refresh ends the session; the player is destroyed when the signed-in identity changes
 - `ApiClient` exposes its refresh-once operation and authentication snapshot for the player; no token is ever put in a URL and `sendBeacon` is not used
-- Player sends progress every 10 seconds while playing, and on pause, seek, `ended` (with `finished: true`), page hide, `pagehide` and unmount; whole seconds; no save before the first play or without a position change; unload saves use `fetch` with `keepalive`; a failed save never interrupts playback; saving stops after 404 or 409
+- Player sends progress every 10 seconds while playing, and on pause, seek, `ended` (with `finished: true`), page hide, `pagehide` and unmount; whole seconds; no save before the first play; a save is skipped only when its whole payload (position and `finished`) equals the last successful save, so the `ended` save is always sent; unload saves use `fetch` with `keepalive`; a failed save never interrupts playback; saving stops after 404 or 409
 - Native `<video controls playsinline>` with `aria-label` set to the movie title; no custom control bar
 - Error mapping per ADR-011 D7: only fatal errors leave the playing state; one `recoverMediaError()` for a fatal media error; fatal network errors mapped by status (401 refresh rule, 404 reloads playback info once, others show Retry); `role="status"` for the initial load, `role="alert"` for fatal states, an `aria-hidden` rebuffering spinner
-- Unit tests: non-fatal error ignored; fatal media error recovered once, then the error state; 401 refresh-once-retry-once and session expiry; 404 with and without a new current asset; unsupported state; hls.js path when `canPlayType` answers positively; `video.src` never set to the manifest; start position; rejected `play()`; a fake-timer test of the save triggers
+- Unit tests: non-fatal error ignored; fatal media error recovered once, then the error state; 401 refresh-once-retry-once and session expiry; 404 with and without a new current asset; unsupported state; hls.js path when `canPlayType` answers positively; `video.src` never set to the manifest; start position; rejected `play()`; a fake-timer test of the save triggers, including a pause followed by `ended` within the same second
 - Manual evidence: one row per verified browser (current desktop Chrome or Edge, and Firefox, versions recorded) with 60 seconds of playback, a seek, pause and resume, and a reload that resumes; a keyboard-only pass (reach the player, play, pause, seek, volume, fullscreen)
 
 **Dependencies:** Issue 6.2, Issue 6.3
@@ -1132,7 +1132,7 @@ Implement search endpoint per API-CONTRACT.yaml (Search tag): `GET /api/v1/searc
 - Endpoint requires valid JWT
 - Accepts required query string parameter `q` (minLength: 1)
 - Returns paginated results per SearchResponse schema
-- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN, and lists exclude non-published movies
+- Uses the catalog visibility check (ADR-009): results contain only PUBLISHED movies for every role, with 200 and an empty result when nothing matches; integration tests cover DRAFT and ARCHIVED movies for ROLE_USER and ROLE_ADMIN
 - Empty query returns validation error per schema requirement
 - No-results returns empty list with 200 OK
 - Integration tests cover search scenarios
@@ -1151,7 +1151,7 @@ Implement search suggestions endpoint per API-CONTRACT.yaml (Search tag): `GET /
 - Endpoint requires valid JWT
 - Accepts required query string parameter `q` (minLength: 1)
 - Returns suggestions per SearchSuggestionResponse schema (array of strings)
-- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN, and lists exclude non-published movies
+- Uses the catalog visibility check (ADR-009): results contain only PUBLISHED movies for every role, with 200 and an empty result when nothing matches; integration tests cover DRAFT and ARCHIVED movies for ROLE_USER and ROLE_ADMIN
 - Fast query (limit results for performance)
 - Unit tests cover suggestion logic
 
@@ -1245,7 +1245,7 @@ Implement the watch history read API per API-CONTRACT.yaml (History tag): `GET /
 - Watch history rows come from Issue 6.3: created on the first accepted progress update, `completed_at` set on the first finished update
 - User can list their own watch history ordered by last_watched_at descending
 - Watch history scoped to authenticated user
-- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN, and lists exclude non-published movies
+- Uses the catalog visibility check (ADR-009): results contain only PUBLISHED movies for every role, with 200 and an empty result when nothing matches; integration tests cover DRAFT and ARCHIVED movies for ROLE_USER and ROLE_ADMIN
 - Pagination supported per HistoryPageResponse schema
 - Unit tests cover service logic
 - Integration tests cover ownership enforcement
@@ -1263,7 +1263,7 @@ Implement rating service with create/update operation per API-CONTRACT.yaml (Rat
 - Endpoint is PUT /api/v1/movies/{movieId}/rating (singular "rating", not "ratings") per API-CONTRACT
 - User can create or update their own rating for a movie
 - Rating value validated per RatingRequest schema (1-5 stars)
-- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN, and lists exclude non-published movies
+- Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN
 - Users cannot rate on behalf of another user
 - Aggregate rating calculation available (mean, count) returned in RatingResponse
 - Unit tests cover validation and service logic
@@ -1728,7 +1728,7 @@ After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening
 | 2026-10-06 | 1.0 | Sprint 3 catalog contract frozen (#95): Issues 3.2-3.5, 3.8 and 7.2 updated |
 | 2026-10-18 | 1.1 | Platform statements in Issues 1.1 and 1.2 and Assumption 1 changed from Spring Boot 3.x to Spring Boot 4.x after the ADR-002 amendment (Issue #50) |
 | 2026-11-03 | 1.3 | Sprint 5 worker design (ADR-010 D25-D28, #122): design authority line, Issues 5.4-5.8 criteria and tests, the Sprint 5 DoD wording, the Issue 10.6 purge rehearsal, the R-002 mitigation and Assumption 10 |
-| 2026-11-14 | 1.4 | Sprint 6 streaming design (ADR-011, #104/#105/#107/#126): design authority line, Issues 6.1-6.3 and 6.5-6.8 criteria and tests, Issue 6.4 withdrawn, the Sprint 6 DoD progress line, the catalog visibility criterion in Issues 6.3, 6.5, 7.3, 7.4, 8.1, 8.2 and 8.3, the Issue 8.2 history writer, the Issue 9.1/9.4 admin projection, R-014/R-015 and Assumption 7 |
+| 2026-11-14 | 1.4 | Sprint 6 streaming design (ADR-011, #104/#105/#107/#126): design authority line, Issues 6.1-6.3 and 6.5-6.8 criteria and tests, Issue 6.4 withdrawn, the Sprint 6 DoD progress line, the catalog visibility criteria in Issues 6.3, 6.5, 7.3, 7.4, 8.1, 8.2 and 8.3 (404 for operations that take a `movieId`, filtered results for lists), the Issue 8.2 history writer, the Issue 9.1/9.4 admin projection, R-014/R-015 and Assumption 7 |
 | 2026-10-26 | 1.2 | Contract-first API documentation (Issue #120, owner decision 2026-10-18): the Global Definition of Done requires `API-CONTRACT.yaml` updated or confirmed with responses validated in tests instead of OpenAPI annotations, and Issue 10.2 serves the frozen contract in Swagger UI instead of generating a code-first document |
 
 ---
