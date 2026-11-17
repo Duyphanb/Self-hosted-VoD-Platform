@@ -14,6 +14,11 @@
     <name>vod-backend-playback</name>
     <dependencies>
         <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>com.vodplatform</groupId>
             <artifactId>shared</artifactId>
             <version>${project.version}</version>

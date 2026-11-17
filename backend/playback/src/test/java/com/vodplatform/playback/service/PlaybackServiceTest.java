@@ -1,4 +1,4 @@
-package com.vodplatform.common;
+package com.vodplatform.playback.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -13,7 +13,6 @@ import com.vodplatform.catalog.service.MovieVisibility;
 import com.vodplatform.encoding.exception.VideoNotReadyException;
 import com.vodplatform.encoding.persistence.VideoAsset;
 import com.vodplatform.encoding.persistence.VideoAssetRepository;
-import com.vodplatform.playback.service.PlaybackService;
 import com.vodplatform.progress.service.ProgressReader;
 import com.vodplatform.progress.service.StoredProgress;
 import java.time.Instant;

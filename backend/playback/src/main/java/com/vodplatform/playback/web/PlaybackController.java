@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Authenticated playback-info endpoint; ADR-011 D11/D15 resume and error rules live in the service. */
 @RestController
 public class PlaybackController {
 

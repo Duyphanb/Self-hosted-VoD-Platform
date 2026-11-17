@@ -15,6 +15,9 @@ NEWMAN_ADMIN_PASSWORD; neither is printed.
    movie reports videoStatus READY, and no job directory remains in WORKER_TEMP_DIR.
 3. Thread budget: the container's peak task count (cgroup pids.peak, which counts threads) during the job
    stays below its pids limit, and both numbers are printed.
+4. Authenticated HLS through Nginx: DRAFT is hidden; after publishing, playback selects this asset,
+   playlist/segment bytes have the frozen types, no-store and length, Range is ignored, a missing
+   segment is 404 with the backend's unchanged GetObject-only storage policy, and query-only JWT is 401.
 
 Output names the checks and safe identifiers only, never tokens, passwords or response bodies.
 """
@@ -127,7 +130,12 @@ class Stack:
                         "SQL", input_text=statement).strip()
 
     def request(self, path, token=None, body=None, content_type=None, timeout=60):
+        status, _, content = self.raw_request(path, token, body, content_type, timeout)
+        return status, json.loads(content) if content else None
+
+    def raw_request(self, path, token=None, body=None, content_type=None, timeout=60, extra_headers=None):
         headers = {"Authorization": "Bearer " + token} if token else {}
+        headers.update(extra_headers or {})
         if content_type:
             headers["Content-Type"] = content_type
         req = urllib.request.Request(self.base_url + path, data=body, headers=headers,
@@ -136,9 +144,48 @@ class Stack:
             response = urllib.request.urlopen(req, timeout=timeout)
         except urllib.error.HTTPError as error:
             response = error
+        except (urllib.error.URLError, TimeoutError):
+            raise SmokeError("HTTP request failed (details withheld)") from None
         with response:
             content = response.read()
-            return response.status, json.loads(content) if content else None
+            return response.status, response.headers, content
+
+
+def verify_hls(stack, movie, asset, token):
+    """Probe the real edge and scoped backend storage; never include URLs or bodies in failures."""
+    master = f"/hls/video-assets/{asset}/master.m3u8"
+    status, headers, body = stack.raw_request(master, token)
+    check(status == 404 and json.loads(body).get("code") == "VIDEO_ASSET_NOT_FOUND",
+          "DRAFT HLS must be hidden with 404")
+    check(headers.get("Cache-Control") == "no-store", "DRAFT HLS cache policy")
+    stack.sql(f"UPDATE movies SET status='PUBLISHED', updated_at=now() WHERE id='{movie}';")
+    status, playback = stack.request(f"/api/v1/movies/{movie}/playback", token)
+    check(status == 200 and playback.get("videoAssetId") == asset and playback.get("hlsManifestUrl") == master,
+          "Playback must select the worker's READY asset")
+    status, headers, body = stack.raw_request(master, token)
+    check(status == 200 and headers.get_content_type() == "application/vnd.apple.mpegurl"
+          and headers.get("Cache-Control") == "no-store" and body.startswith(b"#EXTM3U"), "HLS playlist response")
+    check(int(headers.get("Content-Length", -1)) == len(body), "HLS playlist length")
+    import re
+    uris = [line for line in body.decode("utf-8").splitlines() if line and not line.startswith("#")]
+    check(uris and re.fullmatch(r"segments/[A-Za-z0-9._-]+\.ts", uris[0]), "HLS relative segment URI")
+    segment = master.removesuffix("master.m3u8") + uris[0]
+    status, headers, body = stack.raw_request(segment, token)
+    check(status == 200 and headers.get_content_type() == "video/mp2t" and headers.get("Cache-Control") == "no-store",
+          "HLS segment response")
+    check(int(headers.get("Content-Length", -1)) == len(body) and len(body) > 0, "HLS segment length")
+    status, headers, ranged = stack.raw_request(segment, token, extra_headers={"Range": "bytes=0-9"})
+    check(status == 200 and ranged == body and int(headers.get("Content-Length", -1)) == len(body)
+          and headers.get("Content-Range") is None and headers.get("Accept-Ranges") is None
+          and headers.get("Cache-Control") == "no-store", "HLS Range is ignored")
+    missing = master.removesuffix("master.m3u8") + "segments/seg_99999.ts"
+    status, headers, body = stack.raw_request(missing, token)
+    check(status == 404 and json.loads(body).get("code") == "VIDEO_ASSET_NOT_FOUND"
+          and headers.get("Cache-Control") == "no-store", "HLS missing object under scoped MinIO policy")
+    status, headers, body = stack.raw_request(master + "?access_token=" + urllib.parse.quote(token, safe=""))
+    check(status == 401 and json.loads(body).get("code") == "UNAUTHORIZED"
+          and headers.get("Cache-Control") == "no-store", "HLS query token is refused")
+    print("PASS HLS visibility, playback, playlist, segment, length, no-store, ignored Range, missing object and query-token rejection", flush=True)
 
 
 def verify_runtime(stack):
@@ -243,6 +290,8 @@ def end_to_end(stack, image, pids_limit, timeout):
                            "job directories").strip()
     check(leftovers == "", "A job directory remains in WORKER_TEMP_DIR")
     print("PASS movie reports videoStatus READY and the worker removed its job directory", flush=True)
+
+    verify_hls(stack, movie, asset, token)
 
     peak = pids_peak(stack)
     if peak is None:
