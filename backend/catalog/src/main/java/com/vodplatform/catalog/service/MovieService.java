@@ -206,12 +206,22 @@ public class MovieService {
      */
     @Transactional(readOnly = true)
     public MovieDetail getMovie(UUID movieId, MovieVisibility visibility) {
+        Movie movie = findVisible(movieId, visibility);
+        return MovieMapper.toDetail(movie, videoStatusLookup.videoStatus(movieId));
+    }
+
+    /** Checks catalog visibility without mapping detail or looking up video status. */
+    @Transactional(readOnly = true)
+    public void requireVisible(UUID movieId, MovieVisibility visibility) {
+        findVisible(movieId, visibility);
+    }
+
+    private Movie findVisible(UUID movieId, MovieVisibility visibility) {
         Objects.requireNonNull(movieId, "movieId");
         Objects.requireNonNull(visibility, "visibility");
-        Movie movie = movieRepository.findById(movieId)
+        return movieRepository.findById(movieId)
                 .filter(found -> visibility.includes(found.getStatus()))
                 .orElseThrow(MovieNotFoundException::new);
-        return MovieMapper.toDetail(movie, videoStatusLookup.videoStatus(movieId));
     }
 
     /**
