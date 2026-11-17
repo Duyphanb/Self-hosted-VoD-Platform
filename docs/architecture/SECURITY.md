@@ -80,7 +80,7 @@ Rules:
 - Nginx forwards `Authorization` to backend for `/hls/*`.
 - Backend validates JWT, movie visibility, and current READY asset before reading from MinIO. Current is the READY asset with greatest `(created_at, id)` for the movie ([ADR-010](adr/ADR-010.md)).
 - Backend streams only objects of that current asset. Missing, hidden, non-ready and superseded assets return 404 on both playlist and segment requests. A switch may interrupt an old stream; the player reopens playback. Derive the attempt prefix from the stored master key and validate segment names; never accept an arbitrary storage key from the client.
-- HLS responses carry `Cache-Control: no-store`, and Nginx does not cache them: a shared browser must not serve media from its cache after logout, and a current-asset switch takes effect at once. Every not-found case returns the same 404 `VIDEO_ASSET_NOT_FOUND`, including a malformed asset ID or segment name.
+- HLS responses, including errors, carry `Cache-Control: no-store`, and Nginx does not cache them: a shared browser must not serve media from its cache after logout, and the next request after a current-asset switch is refused. Media the player already buffered can still play. Every not-found case the application validates returns the same 404 `VIDEO_ASSET_NOT_FOUND`, including a malformed asset ID or segment name.
 - Native HLS playback (`video.src`), AirPlay and casting cannot send the header and are unsupported; supporting them needs a new ADR, not a URL token.
 - MinIO remains private; HLS is not served through direct MinIO or presigned playback URLs.
 
@@ -208,10 +208,10 @@ Recommended after MVP-local works:
 
 Frontend must:
 
-- clear auth state on logout or refresh failure
+- clear auth state on logout, or when the server rejects the refresh token (401); a refresh that fails by a network error, a timeout or a 5xx keeps the session and shows a retryable error ([ADR-011 D2](adr/ADR-011.md#player-transport-and-authentication-d1-d4))
 - attach bearer tokens to API and HLS requests
 - play HLS only through hls.js: check `Hls.isSupported()` first, never assign the manifest to `video.src`, and show an unsupported-browser state otherwise ([ADR-011 D1](adr/ADR-011.md#player-transport-and-authentication-d1-d4))
-- read the current token for every HLS request; on a 401, run the shared single-flight refresh once and retry that request once; treat a second 401 or a failed refresh as an expired session; destroy the player when the signed-in identity changes (ADR-011 D2)
+- read the current token for every HLS request; on a 401, run the shared `ApiClient` recovery once (retry with a newer current token, or join the single-flight refresh) and retry that request once; treat a 401 on that retry, or a refresh rejected with 401, as an expired session; destroy the player when the signed-in identity changes (ADR-011 D2)
 - never put a token in a URL and never use `navigator.sendBeacon` for an authenticated call; progress saves at unload use `fetch` with `keepalive` and the header
 - avoid rendering unsafe HTML
 - treat API authorization failures as expected states

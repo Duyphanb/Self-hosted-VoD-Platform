@@ -275,7 +275,7 @@ Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specific
 | `movie_id` | uuid | PK, FK -> `movies.id` on delete cascade | Movie |
 | `current_seconds` | int | not null, check `current_seconds >= 0` | Last saved position, clamped by the server to the current asset's duration |
 | `duration_seconds` | int | null, check `duration_seconds >= 0` | Duration of the movie's current asset when the row was saved; never the client's value |
-| `finished` | boolean | not null default false | Server-derived completion flag: the player reported the end, or the position reached 90% of the duration |
+| `finished` | boolean | not null default false | Server-derived "counts as watched" flag: the player reported the end (the position is then stored as the duration), or the position reached 90% of the duration. It does not set the resume position |
 | `last_played_at` | timestamptz | not null | Server time of the last accepted update; updates are forward-only on this column |
 | `created_at` | timestamptz | not null | Creation timestamp |
 | `updated_at` | timestamptz | not null | Last update timestamp |

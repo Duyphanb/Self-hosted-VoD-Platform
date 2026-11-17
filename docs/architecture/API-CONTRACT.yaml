@@ -668,7 +668,8 @@ paths:
         The response is the whole object with Cache-Control no-store; Range is
         ignored. The bearer token is read only from the Authorization header.
         Every not-found case, including a videoAssetId that is not a UUID,
-        returns 404 VIDEO_ASSET_NOT_FOUND; this path never returns 400.
+        returns 404 VIDEO_ASSET_NOT_FOUND; the application's own validation never
+        answers 400 here. Error responses also carry Cache-Control no-store.
       responses:
         "200":
           description: HLS playlist
@@ -711,8 +712,9 @@ paths:
         404; reopen playback. No direct MinIO or presigned playback.
         The response is the whole segment with Cache-Control no-store; Range is
         ignored. Every not-found case, including an invalid segmentName or a
-        videoAssetId that is not a UUID, returns 404 VIDEO_ASSET_NOT_FOUND; this
-        path never returns 400.
+        videoAssetId that is not a UUID, returns 404 VIDEO_ASSET_NOT_FOUND; the
+        application's own validation never answers 400 here. Error responses also
+        carry Cache-Control no-store.
       responses:
         "200":
           description: HLS segment
@@ -743,10 +745,12 @@ paths:
       summary: Get current user's playback progress for a movie
       description: >
         Apply movie visibility first (404 for missing or non-PUBLISHED, for every
-        caller). Returns the stored progress; without any stored progress returns
-        currentSeconds 0, finished false and null durationSeconds and
-        lastPlayedAt. A current asset is not required. A movieId that is not a
-        UUID returns 400 VALIDATION_ERROR.
+        caller). Returns the stored progress, normalized against the current asset
+        when one exists (position clamped to its duration, durationSeconds set to
+        it; ADR-011 D11); without any stored progress returns currentSeconds 0,
+        finished false and null durationSeconds and lastPlayedAt. A current asset
+        is not required. A movieId that is not a UUID returns 400
+        VALIDATION_ERROR.
       responses:
         "200":
           description: Progress
@@ -765,7 +769,8 @@ paths:
       summary: Save playback progress
       description: >
         Apply movie visibility first (404), then require a current READY asset
-        (409 VIDEO_NOT_READY). The update is committed to PostgreSQL before the
+        (409 VIDEO_NOT_READY) and that videoAssetId names it (409
+        VIDEO_ASSET_NOT_CURRENT). The update is committed to PostgreSQL before the
         response (ADR-011 D9); nothing is buffered. The server clamps
         currentSeconds to the current asset's duration and derives finished
         (ADR-011 D10). The newest write by server time wins; the response is the
@@ -791,7 +796,10 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: VIDEO_NOT_READY - visible movie has no current READY asset
+          description: >
+            VIDEO_NOT_READY - visible movie has no current READY asset.
+            VIDEO_ASSET_NOT_CURRENT - videoAssetId is not the movie's current
+            asset; fetch the playback info again.
           content:
             application/json:
               schema:
@@ -937,10 +945,12 @@ paths:
       tags: [History, Progress]
       summary: Get current user's continue-watching list
       description: >
-        The caller's progress rows that are not finished and have a position
-        above 0, for PUBLISHED movies only, ordered by lastPlayedAt descending
-        and then movie id, limited to the 50 most recent (ADR-011 D11). An array,
-        not a page.
+        The caller's progress rows that are not finished and whose position,
+        normalized against the current asset, is above 0 and below its duration,
+        for PUBLISHED movies with a current READY asset only. These conditions
+        apply before ordering by lastPlayedAt descending, then movie id, and the
+        limit of the 50 most recent (ADR-011 D11). Each item carries the
+        normalized progress. An array, not a page.
       responses:
         "200":
           description: Continue-watching list
@@ -1187,6 +1197,7 @@ components:
             PAYLOAD_TOO_LARGE, UNSUPPORTED_VIDEO_TYPE, VIDEO_UPLOAD_IN_PROGRESS,
             UPLOAD_STORAGE_UNAVAILABLE, UPLOAD_DATABASE_ERROR, UPLOAD_OUTCOME_UNKNOWN,
             INTERNAL_ERROR, VIDEO_NOT_READY, VIDEO_ASSET_NOT_FOUND,
+            VIDEO_ASSET_NOT_CURRENT,
             HLS_STORAGE_UNAVAILABLE, VIDEO_ASSET_NOT_RETRYABLE,
             UPSTREAM_UNAVAILABLE and UPSTREAM_TIMEOUT. The list is not exhaustive.
         message:
@@ -1581,9 +1592,11 @@ components:
           type: integer
           minimum: 0
           description: >
-            0 without stored progress, when the stored progress is finished, or
-            when the stored position is at or beyond 90% of the current asset's
-            duration; otherwise the stored position (ADR-011 D11).
+            0 without stored progress, or when the stored position clamped to the
+            current asset's duration equals that duration (playback reached the
+            end, or a shorter replacement ends earlier); otherwise the clamped
+            stored position, also when the progress counts as finished at 90%
+            (ADR-011 D11).
         durationSeconds:
           type: integer
           nullable: true
@@ -1591,8 +1604,12 @@ components:
 
     ProgressRequest:
       type: object
-      required: [currentSeconds, finished]
+      required: [videoAssetId, currentSeconds, finished]
       properties:
+        videoAssetId:
+          type: string
+          format: uuid
+          description: The asset being played, from PlaybackInfo.videoAssetId.
         currentSeconds:
           type: integer
           minimum: 0
@@ -1605,7 +1622,8 @@ components:
         finished:
           type: boolean
           description: >
-            True when playback reached the end. The server also sets finished at
+            True when playback reached the end; the server then stores the
+            position as the asset's duration. The server also sets finished at
             90% of the current asset's duration (ADR-011 D10).
 
     ProgressResponse:
@@ -1623,7 +1641,9 @@ components:
           description: Duration of the current asset when the progress was stored.
         finished:
           type: boolean
-          description: Server-derived completion flag (ADR-011 D10).
+          description: >
+            Server-derived "counts as watched" flag for history and continue
+            watching (ADR-011 D10). It does not set the resume position.
         lastPlayedAt:
           type: string
           format: date-time
@@ -1725,7 +1745,7 @@ components:
 
     VideoAssetAdmin:
       type: object
-      required: [id, movieId, movieTitle, status, createdAt, updatedAt]
+      required: [id, movieId, movieTitle, status, retryEligible, superseded, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -1793,7 +1813,10 @@ components:
           description: Completion time of the latest attempt.
         retryEligible:
           type: boolean
-          description: True only for the newest asset of its movie when it is FAILED. Computed from the movie-wide state.
+          description: >
+            True only for the newest asset of its movie when it is FAILED. Computed
+            from the movie-wide state; a snapshot, so the retry endpoint can still
+            answer 409.
         superseded:
           type: boolean
           description: >

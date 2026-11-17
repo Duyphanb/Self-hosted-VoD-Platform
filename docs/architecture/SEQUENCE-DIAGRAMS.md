@@ -234,6 +234,7 @@ sequenceDiagram
     Nginx->>Backend: Forward progress request with Authorization
     Backend->>Backend: Validate JWT
     Backend->>PostgreSQL: BEGIN, apply movie visibility (404), load current READY asset (409 VIDEO_NOT_READY)
+    Backend->>Backend: Require videoAssetId to be the current asset (409 VIDEO_ASSET_NOT_CURRENT)
     Backend->>Backend: Clamp position to the asset duration, derive finished at 90% or from the ended flag
     Backend->>PostgreSQL: Forward-only upsert of playback_progress by last_played_at
     alt write accepted
@@ -246,7 +247,7 @@ sequenceDiagram
     Nginx-->>Frontend: Stored progress
 ```
 
-Progress is committed to PostgreSQL before the response; there is no Redis buffer or flush job ([ADR-011 D9](adr/ADR-011.md#playback-progress-d9-d14)). The playback API, the progress `GET` and continue-watching read the same rows, so a reload resumes from the last accepted update.
+Progress is committed to PostgreSQL before the response; there is no Redis buffer or flush job ([ADR-011 D9](adr/ADR-011.md#playback-progress-d9-d14)). The playback API, the progress `GET` and continue-watching read the same rows and normalize them against the current asset in the same way, so a reload resumes from the last accepted update. The player sends at most one save at a time, so a save delayed by a token refresh cannot overwrite a newer one; between tabs or devices the last save to arrive wins.
 
 ## Auth Refresh
 

@@ -929,7 +929,7 @@ Implement `GET /api/v1/movies/{movieId}/playback` per API-CONTRACT: authenticate
 - Uses `findCurrentReadyByMovieId`; pending/failed replacement preserves playback on the previous current asset
 - Returns HLS manifest path per API-CONTRACT format: `/hls/video-assets/{videoAssetId}/master.m3u8`
 - Returns video duration from `video_assets` metadata of the current asset
-- Returns `resumeSeconds` per ADR-011 D11: 0 without progress, when the progress is finished, or when the stored position is at or beyond 90% of the current asset's duration; otherwise the stored position
+- Returns `resumeSeconds` per ADR-011 D11: 0 without progress, or when the stored position clamped to the current asset's duration equals that duration (played to the end, or a shorter replacement); otherwise the clamped position, also for a movie finished at 90%
 - Visible movie with no current asset returns 409 VIDEO_NOT_READY; missing/hidden movie is 404 for every playback caller
 - Tests cover null/no READY, replacement pending/failed/succeeded, tie ordering, visibility-first 404, and the resume rules including a shorter replacement
 - Responses are validated against the frozen contract
@@ -950,7 +950,8 @@ Implement authenticated HLS proxy endpoints per API-CONTRACT.yaml (Stream tag): 
 - Derives the attempt prefix from stored hls_master_object_key, validates segmentName and streams only those objects from private vod-hls; public paths unchanged
 - Streams the whole object with correct Content-Type (`application/vnd.apple.mpegurl` for `.m3u8`, `video/mp2t` for `.ts`), `Cache-Control: no-store`, and `Content-Length` when storage reports the size; a `Range` header is ignored
 - Missing or invalid JWT returns 401
-- Every not-found case returns 404 `VIDEO_ASSET_NOT_FOUND`: missing object, missing/superseded/non-READY asset, hidden movie, a `videoAssetId` that is not a UUID and an unsafe segment name; the HLS paths never return 400
+- Every not-found case returns 404 `VIDEO_ASSET_NOT_FOUND`: missing object, missing/superseded/non-READY asset, hidden movie, a `videoAssetId` that is not a UUID and an unsafe segment name; the application's own validation never answers 400 on HLS paths, and error responses also carry `Cache-Control: no-store`
+- The `ObjectStorage` port distinguishes a missing object (404) from unavailable storage (503) instead of one `IOException`, closes the storage stream when the client disconnects, and a missing object of a current READY asset is logged at WARN as an integrity problem
 - A storage read failure before the response starts returns 503 `HLS_STORAGE_UNAVAILABLE`
 - HLS authorization failures are logged with request ID and asset ID, never the token
 - Integration tests cover current-only playlist/segments, superseded 404, attempt-prefix resolution, unsafe segment names, visibility, the headers and the query-token rejection
@@ -966,13 +967,14 @@ Implement authenticated HLS proxy endpoints per API-CONTRACT.yaml (Stream tag): 
 Implement the progress endpoints per API-CONTRACT.yaml (Progress tag): `PUT /api/v1/movies/{movieId}/progress` saves the current playback position and `GET /api/v1/movies/{movieId}/progress` returns it. Each accepted update is committed to PostgreSQL before the response; there is no Redis buffer (ADR-011 D9-D12). Require authentication.
 
 **Acceptance Criteria:**
-- `PUT` (not POST) accepts `currentSeconds`, optional `durationSeconds` (ignored) and required `finished` per the ProgressRequest schema, and returns 200 with the stored ProgressResponse
+- `PUT` (not POST) accepts the required `videoAssetId`, `currentSeconds` and `finished`, and the optional `durationSeconds` (ignored), per the ProgressRequest schema, and returns 200 with the stored ProgressResponse
+- A `videoAssetId` that is not the current asset returns 409 `VIDEO_ASSET_NOT_CURRENT` and stores nothing
 - Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN
 - A visible movie without a current READY asset returns 409 `VIDEO_NOT_READY` on `PUT`
 - One transaction: forward-only upsert of `playback_progress` by `last_played_at` (server `Clock`), then the `watch_history` write; an older concurrent write returns the stored newer row and leaves history unchanged
-- The server clamps `currentSeconds` to the current asset's duration, stores that duration, and derives `finished` (the request flag, or the position at 90% of the duration); a later update below the threshold clears `finished`
+- The server clamps `currentSeconds` to the current asset's duration, stores that duration, and derives `finished` (the request flag, which also stores the position as the duration, or the position at 90% of the duration); a later update below the threshold clears `finished`
 - `watch_history`: inserted on the first accepted update, `last_watched_at` advanced afterwards, `completed_at` set once on the first finished update
-- `GET` returns the stored row, or `currentSeconds: 0`, `finished: false` and null `durationSeconds`/`lastPlayedAt` without one; it does not require a current asset
+- `GET` returns the row normalized against the current asset (ADR-011 D11), or `currentSeconds: 0`, `finished: false` and null `durationSeconds`/`lastPlayedAt` without one; it does not require a current asset
 - User can only read and update their own progress
 - No Redis client, buffer, TTL or scheduled flush is added
 - PostgreSQL integration tests cover the transaction, the forward-only guard under concurrent writes, clamping, completion, history and ownership; responses are validated against the frozen contract
@@ -995,7 +997,7 @@ Implement continue watching endpoint per API-CONTRACT.yaml (History + Progress t
 **Acceptance Criteria:**
 - Endpoint path is `/api/v1/me/continue-watching` per API-CONTRACT
 - Endpoint requires valid JWT
-- Returns movies from `playback_progress` where `finished = false` and `current_seconds > 0`, for the caller only
+- Returns the caller's movies from `playback_progress` that are not finished and whose position, normalized against the current asset, is above 0 and below its duration; movies without a current READY asset are excluded; these conditions apply before ordering and the limit, and each item carries the normalized progress
 - Uses the catalog visibility check (ADR-009): the list excludes non-published movies for every role; integration tests cover DRAFT and ARCHIVED movies for ROLE_USER and ROLE_ADMIN
 - Results ordered by `last_played_at` descending, then `movie_id`, limited to the 50 most recent (ADR-011 D11)
 - Includes movie metadata and resume position per ContinueWatchingItem schema, without N+1 queries
@@ -1014,13 +1016,14 @@ Create the video player component with hls.js (ADR-011 D1-D8, D13). The player a
 **Acceptance Criteria:**
 - Player uses hls.js only, pinned to an exact version (1.5.0 or later): checks `Hls.isSupported()` first, never assigns the manifest to `video.src` or uses `canPlayType`, and shows an unsupported-browser state otherwise
 - Player accepts manifest URL and start position props; it loads paused at the resume position through hls.js `startPosition` and never calls `play()` on its own; a rejected `play()` stays paused and is not an error
-- Every HLS request reads the current access token and sends it in the `Authorization` header; a 401 runs the shared single-flight refresh once and retries that request once; a second 401 or a failed refresh ends the session; the player is destroyed when the signed-in identity changes
-- `ApiClient` exposes its refresh-once operation and authentication snapshot for the player; no token is ever put in a URL and `sendBeacon` is not used
-- Player sends progress every 10 seconds while playing, and on pause, seek, `ended` (with `finished: true`), page hide, `pagehide` and unmount; whole seconds; no save before the first play; a save is skipped only when its whole payload (position and `finished`) equals the last successful save, so the `ended` save is always sent; unload saves use `fetch` with `keepalive`; a failed save never interrupts playback; saving stops after 404 or 409
+- Every HLS request reads the current access token and sends it in the `Authorization` header; a 401 runs the shared `ApiClient` authentication recovery once (retry with a newer current token, or join the single-flight refresh) and retries that request once; the load-policy retry and the fatal handler share that one budget; only a 401 on the retry, or a refresh rejected with 401, ends the session; the player is destroyed when the signed-in identity changes, and an old identity's callback never ends a newer session
+- `ApiClient` exposes that recovery and the authentication snapshot for the player; a refresh that fails by a network error, a timeout or a 5xx keeps the session for the player and for JSON requests alike (a change of the Sprint 2 behaviour, with tests on both paths); no token is ever put in a URL and `sendBeacon` is not used
+- Player sends progress every 10 seconds while playing, and on pause, seek, `ended` (with `finished: true`), page hide, `pagehide` and unmount; whole seconds; no save before the first play; a save is skipped only when its whole payload (position and `finished`) equals the last successful save, so the `ended` save is always sent; each save carries the `videoAssetId`; at most one save is in flight, later triggers replace one pending snapshot; unload saves use `fetch` with `keepalive` and the latest snapshot; a failed save never interrupts playback; saving stops after 404 or 409, and 409 `VIDEO_ASSET_NOT_CURRENT` also makes the page fetch the playback info again
 - Native `<video controls playsinline>` with `aria-label` set to the movie title; no custom control bar
-- Error mapping per ADR-011 D7: only fatal errors leave the playing state; one `recoverMediaError()` for a fatal media error; fatal network errors mapped by status (401 refresh rule, 404 reloads playback info once, others show Retry); `role="status"` for the initial load, `role="alert"` for fatal states, an `aria-hidden` rebuffering spinner
-- Unit tests: non-fatal error ignored; fatal media error recovered once, then the error state; 401 refresh-once-retry-once and session expiry; 404 with and without a new current asset; unsupported state; hls.js path when `canPlayType` answers positively; `video.src` never set to the manifest; start position; rejected `play()`; a fake-timer test of the save triggers, including a pause followed by `ended` within the same second
+- Error mapping per ADR-011 D7: only fatal errors leave the playing state; one `recoverMediaError()` for a fatal media error; fatal network errors mapped by status (401 recovery rule, 404 reloads playback info once and a failed refetch shows Retry, others show Retry); `role="status"` for the initial load, `role="alert"` for fatal states, an `aria-hidden` rebuffering spinner
+- Unit tests: non-fatal error ignored; fatal media error recovered once, then the error state; 401 recover-once-retry-once and session expiry; a late 401 of an old token retries without a refresh; a refresh 503 keeps the session; an account change during a refresh; one recovery budget shared with the fatal handler; 404 with and without a new current asset; unsupported state; hls.js path when `canPlayType` answers positively; `video.src` never set to the manifest; start position; rejected `play()`; a fake-timer test of the save triggers, including a pause followed by `ended` within the same second
 - Manual evidence: one row per verified browser (current desktop Chrome or Edge, and Firefox, versions recorded) with 60 seconds of playback, a seek, pause and resume, and a reload that resumes; a keyboard-only pass (reach the player, play, pause, seek, volume, fullscreen)
+- The automated Chrome playback smoke of ADR-011 (Playwright, part of #125) runs against this player once Issue 6.7 exists
 
 **Dependencies:** Issue 6.2, Issue 6.3
 
@@ -1056,7 +1059,7 @@ Create continue watching page that displays movies user started but hasn't finis
 - Displays movie cards with resume position indicator
 - Cards link to watch page
 - Loading, empty, error states handled
-- Shows the whole array (at most 50 items) without pagination, per API-CONTRACT
+- Shows the whole array without pagination, per API-CONTRACT, and says that it lists the 50 most recently watched movies
 
 **Dependencies:** Issue 6.5
 

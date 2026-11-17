@@ -128,7 +128,7 @@ Acceptance criteria:
 
 - Frontend sends progress updates every 5 to 10 seconds while playing, and when playback pauses, seeks, ends or the page is hidden.
 - Backend commits each accepted update to PostgreSQL before responding (ADR-011 D9).
-- The server marks a movie finished when playback reaches its end or 90% of its duration; a finished movie resumes from the start.
+- The server marks a movie finished (watched) when playback reaches its end or 90% of its duration. Reopening a movie resumes at the saved position; only a movie played to the end starts again from the beginning.
 - Movie detail or watch page can retrieve the last saved position.
 - Continue-watching list shows recently started but unfinished movies.
 

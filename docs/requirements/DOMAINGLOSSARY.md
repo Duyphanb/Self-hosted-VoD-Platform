@@ -13,7 +13,7 @@ Use these terms consistently across code, documentation, API contracts, and UI l
 | Encoding Status | The lifecycle state of a video asset: `UPLOADED`, `QUEUED`, `PROCESSING`, `READY`, or `FAILED`. |
 | FFmpeg | Command-line tool used by the worker to transcode video into HLS. |
 | FFprobe | Command-line tool used by the worker to inspect media metadata such as duration, codec, bitrate, and resolution. |
-| Finished | Server-derived completion of a movie for a user: the player reported the end, or the saved position reached 90% of the current video asset's duration (ADR-011 D10). |
+| Finished | Server-derived "counts as watched" state of a movie for a user: the player reported the end, or the saved position reached 90% of the current video asset's duration (ADR-011 D10). It removes the movie from Continue Watching and completes its watch history; it does not reset the resume position. |
 | Genre | A category assigned to movies for browsing, filtering, and search. |
 | HLS | HTTP Live Streaming, the MVP playback format based on `.m3u8` playlists and segment files. |
 | HLS Artifact | A generated playlist or media segment produced by FFmpeg and stored in MinIO. |
