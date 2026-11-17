@@ -14,6 +14,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.vodplatform.catalog.exception.CatalogValidationException;
+import com.vodplatform.catalog.exception.MovieNotFoundException;
 import com.vodplatform.catalog.exception.MovieSlugConflictException;
 import com.vodplatform.catalog.persistence.Movie;
 import com.vodplatform.catalog.persistence.MovieRepository;
@@ -62,6 +63,27 @@ class MovieServiceUnitTest {
         movieService = new MovieService(
                 movieRepository, assignmentResolver, clock,
                 new CatalogWriteRetry(new NoOpTransactionManager()), videoStatusLookup);
+    }
+
+    @Test
+    void leanVisibilityCheckSkipsDetailAndVideoStatus() {
+        when(movieRepository.findById(MOVIE_ID)).thenReturn(Optional.of(movie(MovieStatus.PUBLISHED)));
+        movieService.requireVisible(MOVIE_ID, MovieVisibility.PUBLISHED_ONLY);
+        verify(movieRepository).findById(MOVIE_ID);
+        verifyNoInteractions(videoStatusLookup, assignmentResolver);
+    }
+
+    @Test
+    void leanVisibilityCheckAndDetailShareTheHiddenAndMissingRule() {
+        for (Optional<Movie> found : List.of(Optional.of(movie(MovieStatus.DRAFT)),
+                Optional.of(movie(MovieStatus.ARCHIVED)), Optional.<Movie>empty())) {
+            when(movieRepository.findById(MOVIE_ID)).thenReturn(found);
+            assertThat(catchThrowable(() -> movieService.requireVisible(MOVIE_ID, MovieVisibility.PUBLISHED_ONLY)))
+                    .isInstanceOf(MovieNotFoundException.class);
+            assertThat(catchThrowable(() -> movieService.getMovie(MOVIE_ID, MovieVisibility.PUBLISHED_ONLY)))
+                    .isInstanceOf(MovieNotFoundException.class);
+        }
+        verifyNoInteractions(videoStatusLookup, assignmentResolver);
     }
 
     @Test

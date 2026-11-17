@@ -21,6 +21,8 @@ import com.vodplatform.encoding.persistence.EncodingJob;
 import com.vodplatform.encoding.persistence.EncodingJobRepository;
 import com.vodplatform.encoding.persistence.VideoAsset;
 import com.vodplatform.encoding.persistence.VideoAssetRepository;
+import com.vodplatform.progress.persistence.PlaybackProgress;
+import com.vodplatform.progress.persistence.PlaybackProgressRepository;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.metamodel.EntityType;
 import java.util.Set;
@@ -66,7 +68,8 @@ class CatalogPersistenceContextTests implements PostgresTestDatabase {
                 Person.class,
                 MovieCredit.class,
                 VideoAsset.class,
-                EncodingJob.class
+                EncodingJob.class,
+                PlaybackProgress.class
         );
     }
 
@@ -80,6 +83,7 @@ class CatalogPersistenceContextTests implements PostgresTestDatabase {
         assertThat(applicationContext.getBeanNamesForType(RefreshTokenRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(VideoAssetRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(EncodingJobRepository.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(PlaybackProgressRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(VideoStatusLookup.class)).hasSize(1);
     }
 }
