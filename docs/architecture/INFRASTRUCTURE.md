@@ -17,7 +17,7 @@ Nginx is the only public edge in both local Compose and VPS runtime.
 | `backend` | Java 21 Spring Boot | Core API, auth, upload, HLS proxy, progress, admin APIs | Internal behind Nginx |
 | `worker` | Java 21 Spring Boot with FFmpeg/FFprobe from Debian trixie packages ([ADR-010 D25](adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28)) | Video processing | Internal only |
 | `postgres` | PostgreSQL | Source-of-truth database | Internal only |
-| `redis` | Redis | Cache and playback-progress buffer | Internal only |
+| `redis` | Redis | Cache (reserved; no consumer yet, [ADR-011 D9](adr/ADR-011.md#playback-progress-d9-d14)) | Internal only |
 | `rabbitmq` | RabbitMQ 4.4 (Docker official alpine image, digest pinned; see Broker runtime image) | Encoding job queue | Internal only |
 | `minio` | PGSTY Silo (MinIO-compatible, digest pinned) | Private object storage | Internal only; console disabled |
 
@@ -74,7 +74,7 @@ Required named volumes:
 - `minio_data`
 - `worker_temp` (Issue 5.8)
 
-Redis persistence is not required for MVP because Redis is a cache/progress buffer. Durable playback progress belongs in PostgreSQL.
+Redis persistence is not required for MVP because Redis is only a cache. Playback progress is written directly to PostgreSQL and never passes through Redis (ADR-011 D9). The production overlay still mounts `redis_data` and keeps the default RDB snapshots; that is harmless while no component uses Redis. The first change that adds a Redis client must make the server explicitly ephemeral in the same change (`--save ""`, no data volume, `maxmemory` with an eviction policy), so a restored snapshot can never be mistaken for current data.
 
 `worker_temp` is the worker's only configured writable volume under its read-only root (Issue 5.8). Compose mounts this named, disk-backed volume (never tmpfs) on `/tmp`, so it holds `WORKER_TEMP_DIR` (`/tmp/vod-worker`, owned by the worker's uid 10001) and the JVM's `java.io.tmpdir` (`/tmp`, where embedded Tomcat keeps its base directory). A new volume copies the image's `/tmp` on first use. Keeping `WORKER_TEMP_DIR` below `/tmp` is an operator requirement. Most other paths are on the read-only root, where the worker refuses to start, but Docker keeps its implicit writable `/dev/shm` tmpfs even with `read_only: true`, and the worker does not reject a path there; that path would put job files in memory instead of on disk. `worker-stack-smoke.py` asserts the deployed value is below `/tmp`. The volume shares the Docker data root's filesystem, so the two-step free-disk check and watchdog of ADR-010 D27 measure the real free space, and the reserve also protects the co-located PostgreSQL and Silo data. The volume needs no backup: it holds only owned `job-*` working copies, which the startup sweep removes, plus JVM scratch files. Backend `TEMP_UPLOAD_DIR` is separate and stays in the backend container layer.
 

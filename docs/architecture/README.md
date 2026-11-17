@@ -31,6 +31,7 @@ Choose the contract sections relevant to the task; this list is not a required r
 | [ADR-008](adr/ADR-008.md) | Case-insensitive email identity |
 | [ADR-009](adr/ADR-009.md) | Catalog visibility, archive retention and slugs |
 | [ADR-010](adr/ADR-010.md) | Upload transport, video asset lifecycle, encoding handoff and cleanup |
+| [ADR-011](adr/ADR-011.md) | Authenticated HLS playback, player behaviour and playback progress |
 
 ## Purpose
 

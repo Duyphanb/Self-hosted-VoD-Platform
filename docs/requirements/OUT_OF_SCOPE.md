@@ -28,6 +28,8 @@ Out of scope for MVP:
 - subtitle authoring or subtitle conversion
 - MP4 range streaming as the primary playback architecture
 - real-time encoding updates through WebSocket or SSE
+- native HLS playback (`video.src`), AirPlay and casting, which cannot send the bearer header ([ADR-011 D1](../architecture/adr/ADR-011.md#player-transport-and-authentication-d1-d4))
+- a custom player control bar, skin or hotkeys, and captions (ADR-011 D6)
 
 Allowed MVP focus:
 

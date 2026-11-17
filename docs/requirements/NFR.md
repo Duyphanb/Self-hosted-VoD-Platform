@@ -13,7 +13,7 @@ The MVP targets a single Oracle Cloud Free Tier VPS, expected baseline: Ampere A
 | NFR-003 | Upload limits | Maximum upload size and allowed declared MIME types must be configurable. | `.env.example` exposes `MAX_UPLOAD_SIZE_MB` and an allowlist for MP4, MKV, WebM, and MOV; backend rejects files above the configured limit or outside the allowlist. MAX_UPLOAD_SIZE_MB defaults to 2048 MiB; equal file/request/upload-edge ceilings include multipart overhead, other edge routes 1 MiB. Signature family must match the allowlisted declaration. Issue 4.6/4.7 records a synthetic non-VPS 2 GB transport/storage rehearsal; #180 measures a genuine 2 GB upload on the target VPS (saving wait, temp peak, memory, disk and concurrent-upload headroom) before public deployment. |
 | NFR-004 | Encoding stability | Worker concurrency and prefetch are 1 for MVP, with exactly one non-overlapping replica. | One encoding job is processed at a time. Conditional claim/finish, restricted processes with owner product caps and measured deadlines (ADR-010 D26/D28), startup orphan recovery and a long-job/second-queued-job test per ADR-010; increasing replica count requires a recovery decision. |
 | NFR-005 | Playback readiness | A ready video must be playable in a modern desktop browser. | A smoke test plays generated HLS for at least 60 seconds without manual file access. |
-| NFR-006 | Progress durability | Playback progress may be buffered but must not remain only in memory. | Redis-buffered progress is flushed to PostgreSQL on a scheduled interval. |
+| NFR-006 | Progress durability | Accepted playback progress must be durable and must not remain only in memory or in a cache. | Each accepted progress update is committed to PostgreSQL before the API responds (ADR-011 D9); a reload right after an update resumes from it. |
 | NFR-007 | API security | Protected APIs must reject unauthenticated requests and enforce roles. | Auth and RBAC tests cover user-only, admin-only, and anonymous access. |
 | NFR-008 | Secret handling | Secrets must not be committed. | `.env.example` uses placeholders; real secrets are supplied through environment variables. |
 | NFR-009 | Data storage | Raw and processed media must be stored in object storage for MVP. | MinIO buckets store raw uploads and HLS artifacts; app containers do not rely on permanent local media files. |
@@ -34,7 +34,7 @@ These are demo-grade targets, not production SLA commitments.
 | Login API | Responds within 1 second under local demo conditions. |
 | Movie list API | Responds within 1 second for up to 500 seeded movies. |
 | Search API | Responds within 1 second for up to 500 seeded movies using PostgreSQL FTS. |
-| Playback progress save | Client sends updates every 5 to 10 seconds; backend accepts without visible playback interruption. |
+| Playback progress save | Client sends updates every 5 to 10 seconds (10 seconds in ADR-011 D13); backend accepts without visible playback interruption. |
 | Encoding | Completion time depends on source size and VPS resources; correctness is prioritized over speed. |
 | Recovery | Unpublished QUEUED is recovered by backend relay without an age timeout; worker deadlines/startup fail interrupted PROCESSING as safe FAILED. Before Sprint 9 re-upload; afterwards admin retries only newest FAILED. |
 
