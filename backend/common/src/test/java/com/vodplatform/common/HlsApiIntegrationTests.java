@@ -3,6 +3,7 @@ package com.vodplatform.common;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -37,6 +39,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
@@ -264,6 +267,41 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
         assertThat(closed).hasValue(1);
     }
 
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"video/mp2t", "application/vnd.apple.mpegurl"})
+    void errorsStayJsonForMediaOnlyAndAbsentAccept(String accept) throws Exception {
+        UUID id = ready(movie("PUBLISHED"));
+        String token = bearer("ROLE_USER");
+        for (boolean segment : List.of(false, true)) {
+            notFound(request(path(UUID.randomUUID(), segment), token, accept));
+
+            jdbc.update("update video_assets set hls_master_object_key='invalid-master-key' where id=?", id);
+            notFound(request(path(id, segment), token, accept));
+            jdbc.update("update video_assets set hls_master_object_key=? where id=?", key(id), id);
+
+            doThrow(new ObjectMissingException()).when(storage).get(anyString(), anyString());
+            notFound(request(path(id, segment), token, accept));
+
+            doThrow(new IOException("private diagnostics")).when(storage).get(anyString(), anyString());
+            assertJsonError(mvc.perform(request(path(id, segment), token, accept)).andReturn(),
+                    503, "HLS_STORAGE_UNAVAILABLE");
+
+            doAnswer(call -> new StoredObject(new java.io.InputStream() {
+                @Override public int read() throws IOException { throw new IOException("private diagnostics"); }
+                @Override public void close() { closed.incrementAndGet(); }
+            }, 987654)).when(storage).get(anyString(), anyString());
+            int closedBefore = closed.get();
+            MvcResult readFailure = mvc.perform(request(path(id, segment), token, accept)).andReturn();
+            assertJsonError(readFailure, 503, "HLS_STORAGE_UNAVAILABLE");
+            assertThat(readFailure.getResponse().getHeader("Content-Length")).isNotEqualTo("987654");
+            assertThat(closed).hasValue(closedBefore + 1);
+
+            assertJsonError(mvc.perform(request(path(id, segment), null, accept)).andReturn(),
+                    401, "UNAUTHORIZED");
+        }
+    }
+
     private StoredObject object(byte[] body, long size) {
         return new StoredObject(new ByteArrayInputStream(body) {
             @Override public synchronized int read(byte[] b, int off, int len) {
@@ -290,8 +328,12 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
     }
 
     private void notFound(String path, String token) throws Exception {
-        MvcResult result = mvc.perform(request(path, token)).andExpect(status().isNotFound()).andReturn();
-        assertNoStore(result);
+        notFound(request(path, token));
+    }
+
+    private void notFound(MockHttpServletRequestBuilder request) throws Exception {
+        MvcResult result = mvc.perform(request).andExpect(status().isNotFound()).andReturn();
+        assertJsonError(result, 404, "VIDEO_ASSET_NOT_FOUND");
         assertThat(result.getResponse().getHeader("Content-Disposition")).isEqualTo("inline;filename=f.txt");
         ObjectNode body = (ObjectNode) mapper.readTree(result.getResponse().getContentAsString());
         assertThat(body.path("code").asString()).isEqualTo("VIDEO_ASSET_NOT_FOUND");
@@ -303,6 +345,22 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
         if (expected404 == null) { expected404 = body; expected404Headers = headers; }
         assertThat(body).isEqualTo(expected404);
         assertThat(headers).isEqualTo(expected404Headers);
+    }
+
+    private void assertJsonError(MvcResult result, int status, String code) throws Exception {
+        assertThat(result.getResponse().getStatus()).isEqualTo(status);
+        assertThat(MediaType.parseMediaType(result.getResponse().getContentType())
+                .isCompatibleWith(MediaType.APPLICATION_JSON)).isTrue();
+        assertNoStore(result);
+        var body = mapper.readTree(result.getResponse().getContentAsString());
+        assertThat(body.path("status").asInt()).isEqualTo(status);
+        assertThat(body.path("code").asString()).isEqualTo(code);
+    }
+
+    private MockHttpServletRequestBuilder request(String path, String token, String accept) {
+        var request = request(path, token);
+        if (accept != null) request.header(HttpHeaders.ACCEPT, accept);
+        return request;
     }
 
     private MockHttpServletRequestBuilder request(String path, String token) {

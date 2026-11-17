@@ -5,6 +5,7 @@ import com.vodplatform.shared.error.ApiErrorFactory;
 import com.vodplatform.shared.error.ApiException;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -25,6 +26,7 @@ public class HlsErrorHandler {
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiError> handle(ApiException failure) {
         return ResponseEntity.status(failure.getStatus()).header("Content-Disposition", "inline;filename=f.txt")
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(errors.create(failure.getStatus(), failure.getCode(), failure.getMessage(), failure.getFieldErrors()));
     }
 }
