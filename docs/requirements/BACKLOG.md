@@ -1025,7 +1025,7 @@ Create the video player component with hls.js (ADR-011 D1-D8, D13). The player a
 - Manual evidence: one row per verified browser (current desktop Chrome or Edge, and Firefox, versions recorded) with 60 seconds of playback, a seek, pause and resume, and a reload that resumes; a keyboard-only pass (reach the player, play, pause, seek, volume, fullscreen)
 - The automated Chrome playback smoke of ADR-011 (Playwright, part of #125) runs against this player once Issue 6.7 exists
 
-**Dependencies:** Issue 6.2, Issue 6.3
+**Dependencies:** Issue 6.2, Issue 6.3, Issue 6.9
 
 ---
 
@@ -1065,6 +1065,48 @@ Create continue watching page that displays movies user started but hasn't finis
 
 ---
 
+### Issue 6.9: Browser Session Cookie and In-Memory Access Token
+
+**Description:**  
+Implement ADR-012 D1-D3 and D7: move the refresh token from JSON bodies and `localStorage` into the HttpOnly `vod_refresh` cookie scoped to `/api/v1/auth`, keep the access token in memory only, and protect the auth endpoints with `SameSite=Strict`, an exact `Origin` check and `Sec-Fetch-Site`. Backend, frontend, API contract, smoke scripts and Postman collections change in one pull request, because the auth contract change is breaking. Must land before Issue 6.6.
+
+**Acceptance Criteria:**
+- Login and refresh set `vod_refresh` with `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, no `Domain`, `Max-Age` equal to the remaining lifetime; no response body contains a refresh token; refresh and logout take no body
+- Refresh returns 401 and clears the cookie for a missing, unknown, expired, revoked, over-long or replayed cookie; logout is idempotent 204 and always clears the cookie
+- `refresh` and `logout` require an allowed `Origin`; `login` and `register` reject a present, disallowed `Origin`; `Sec-Fetch-Site: cross-site` is rejected on all four with 403 `ORIGIN_NOT_ALLOWED`; tests cover each case
+- `Secure` can be disabled only with loopback-only allowed origins; startup fails otherwise
+- `API-CONTRACT.yaml` updated per ADR-012 D2 in the same pull request (`AuthResponse` without `refreshToken`, `RefreshRequest` removed, `Set-Cookie` headers, `refreshSession` cookie scheme, 403 `ORIGIN_NOT_ALLOWED`); every auth response validated against it
+- The SPA keeps the access token in memory only, bootstraps with one refresh call, serializes refreshes across tabs with the existing Web Lock, announces sign-in, sign-out and identity changes on a token-free `BroadcastChannel`, and deletes the legacy `localStorage` session key; no token is written to web storage (tests)
+- The `ApiClient` recovery, the single-flight refresh, keeping the session on a refresh network error or 5xx, and the generation guards keep their behaviour (existing tests stay green)
+- A refresh in one tab followed by a refresh in another tab does not look like a replay; a sign-in as another user in one tab replaces the session in every tab (tests)
+- Newman Sprint 2 auth collection and every smoke that refreshes or logs out use a cookie jar and send `Origin`
+- Manual check in Chrome and Firefox on the local Compose stack: sign in, reload, two tabs, sign out
+
+**Dependencies:** #94 (forwarded host and port, before the edge verification)
+
+---
+
+### Issue 6.10: Server-Side Sessions and Bounded Revocation
+
+**Description:**  
+Implement ADR-012 D4-D6, D8 and D9: an `auth_sessions` table with an absolute lifetime, refresh tokens bound to a session, replay revoking the whole session, `users.auth_epoch`, access tokens with `sid` and `ver`, a per-request session check with a 30-second bounded cache, direct database checks for refresh and admin operations, a 10-session cap per user and daily pruning. May land after Issue 6.6, before public deployment.
+
+**Acceptance Criteria:**
+- One new Flyway migration (no existing migration edited) creates `auth_sessions`, adds nullable `refresh_tokens.session_id` with a cascading foreign key and an index, and `users.auth_epoch integer NOT NULL DEFAULT 0`; legacy tokens without a session are rejected at refresh; the schema snapshot is updated
+- Login creates a session with `expires_at = now + JWT_REFRESH_TOKEN_TTL_DAYS`; rotation stays in the session and never extends it; replaying a rotated token revokes the session (PostgreSQL tests, including concurrent rotation)
+- Access tokens last `JWT_ACCESS_TOKEN_TTL_MINUTES` (default 5, allowed 1-15; session 1-30 days) and carry `sid` and `ver`; a token without them, for a revoked or expired session, a non-active user or an outdated epoch is 401
+- The session check uses a Caffeine cache with entries expiring 30 seconds after loading, a shared load per key, and no re-population by a load that started before an invalidation; logout and epoch changes invalidate after commit (tests with a controllable clock)
+- Refresh and admin operations (`/api/v1/admin/**` and the admin movie writes) read PostgreSQL on every request; a demoted admin is refused on the next admin request (test)
+- A database failure during the check fails the request; no token is accepted without its state (test)
+- A user has at most 10 active sessions; the 11th login revokes the oldest (test)
+- A daily job deletes sessions ended more than 30 days ago and legacy session-less tokens in bounded batches (test)
+- The deployment runbook's disable and role-change steps increment `auth_epoch` and revoke the user's sessions; SECURITY's personal-data inventory lists the session tables
+- HLS and playback keep their per-request visibility and current-asset checks; the HLS path adds at most one cached session lookup (existing HLS tests stay green)
+
+**Dependencies:** Issue 6.9
+
+---
+
 ### Sprint 6 Definition of Done
 
 - [ ] Authenticated users can fetch playback info for ready videos
@@ -1080,6 +1122,7 @@ Create continue watching page that displays movies user started but hasn't finis
 - [ ] End-to-end manual test: watch video, close, resume from same position
 - [ ] Postman collection includes playback and progress endpoints
 - [ ] Player handles loading, buffering, and error states
+- [ ] The refresh token lives only in the HttpOnly cookie and the access token only in memory; logout, account disabling and role changes take effect within 30 seconds (ADR-012)
 
 ---
 
@@ -1732,6 +1775,7 @@ After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening
 | 2026-10-18 | 1.1 | Platform statements in Issues 1.1 and 1.2 and Assumption 1 changed from Spring Boot 3.x to Spring Boot 4.x after the ADR-002 amendment (Issue #50) |
 | 2026-11-03 | 1.3 | Sprint 5 worker design (ADR-010 D25-D28, #122): design authority line, Issues 5.4-5.8 criteria and tests, the Sprint 5 DoD wording, the Issue 10.6 purge rehearsal, the R-002 mitigation and Assumption 10 |
 | 2026-11-14 | 1.4 | Sprint 6 streaming design (ADR-011, #104/#105/#107/#126): design authority line, Issues 6.1-6.3 and 6.5-6.8 criteria and tests, Issue 6.4 withdrawn, the Sprint 6 DoD progress line, the catalog visibility criteria in Issues 6.3, 6.5, 7.3, 7.4, 8.1, 8.2 and 8.3 (404 for operations that take a `movieId`, filtered results for lists), the Issue 8.2 history writer, the Issue 9.1/9.4 admin projection, R-014/R-015 and Assumption 7 |
+| 2026-11-19 | 1.5 | Browser session design (ADR-012, #72): Issues 6.9 and 6.10 added to Sprint 6, Issue 6.6 depends on Issue 6.9, a Sprint 6 DoD line for the session model |
 | 2026-10-26 | 1.2 | Contract-first API documentation (Issue #120, owner decision 2026-10-18): the Global Definition of Done requires `API-CONTRACT.yaml` updated or confirmed with responses validated in tests instead of OpenAPI annotations, and Issue 10.2 serves the frozen contract in Swagger UI instead of generating a code-first document |
 
 ---

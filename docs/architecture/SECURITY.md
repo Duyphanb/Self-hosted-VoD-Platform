@@ -21,6 +21,17 @@ MVP uses bearer JWT access tokens plus persisted refresh tokens.
 - Refresh tokens have an expiration timestamp and can be revoked.
 - `POST /api/v1/auth/refresh` rotates the refresh token: the old token is revoked and a new token is issued.
 - `POST /api/v1/auth/logout` revokes the submitted refresh token when present; the frontend also clears local auth state.
+
+### Browser session (ADR-012, planned: Issues 6.9 and 6.10)
+
+[ADR-012](adr/ADR-012.md) replaces the body-based delivery above. Until Issue 6.9 lands, the list above is the delivered behaviour; afterwards these rules apply:
+
+- The refresh token travels only in the `vod_refresh` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, host-only, `Max-Age` equal to the remaining session lifetime. It never appears in a body, `localStorage`, `sessionStorage` or IndexedDB. `Secure` may be disabled only for loopback-only local development; the production preflight rejects it.
+- The access token is kept in JavaScript memory only and sent only in the `Authorization` header. No cookie authenticates `/api/v1/*` resources or `/hls/*`.
+- `refresh` and `logout` take no body and require an allowed `Origin`; `login` and `register` reject a present, disallowed `Origin`; `Sec-Fetch-Site: cross-site` is rejected on all four (403 `ORIGIN_NOT_ALLOWED`).
+- Each sign-in is a server-side session with an absolute 7-day lifetime (rotation never extends it) and at most 10 active sessions per user. Replaying an already rotated refresh token revokes the whole session.
+- Access tokens live 5 minutes (allowed 1-15) and carry `sid` and `ver`. Every authenticated request checks the session and the user's `auth_epoch` through a cache whose entries expire 30 seconds after loading, so logout, account disabling and role changes take effect within 30 seconds; refresh and admin operations read PostgreSQL directly and apply them at once. A database failure never lets a token through.
+- Disabling an account or changing its roles increments `auth_epoch` and revokes the user's sessions. Expired and revoked sessions are pruned 30 days after they end.
 - Passwords are hashed with BCrypt.
 - Login passwords share the registration maximum of 72 characters, and refresh and logout tokens are at most 128 characters, both counted in UTF-16 code units. Longer values return 400 `VALIDATION_ERROR` before any lookup or hashing. New hashes pre-hash the full UTF-8 password with SHA-256, so a password longer than 72 bytes is never truncated by BCrypt.
 - Login failures return a generic authentication error.
@@ -208,6 +219,7 @@ Recommended after MVP-local works:
 
 Frontend must:
 
+- after Issue 6.9, keep the access token in memory only, never store a token in web storage, bootstrap a page load with one refresh call, serialize refreshes across tabs and announce sign-in, sign-out and identity changes on a `BroadcastChannel` that carries no token ([ADR-012 D7](adr/ADR-012.md#frontend-session-lifecycle-d7))
 - clear auth state on logout, or when the server rejects the refresh token (401); a refresh that fails by a network error, a timeout or a 5xx keeps the session and shows a retryable error ([ADR-011 D2](adr/ADR-011.md#player-transport-and-authentication-d1-d4))
 - attach bearer tokens to API and HLS requests
 - play HLS only through hls.js: check `Hls.isSupported()` first, never assign the manifest to `video.src`, and show an unsupported-browser state otherwise ([ADR-011 D1](adr/ADR-011.md#player-transport-and-authentication-d1-d4))
