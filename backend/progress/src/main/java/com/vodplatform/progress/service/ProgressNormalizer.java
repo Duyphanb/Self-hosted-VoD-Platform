@@ -19,7 +19,7 @@ public final class ProgressNormalizer {
             return new Result(Optional.empty(), 0);
         }
         StoredProgress row = stored.orElseThrow();
-        if (currentDurationSeconds == null) {
+        if (currentDurationSeconds == null || currentDurationSeconds < 0) {
             return new Result(stored, row.finished() ? 0 : row.currentSeconds());
         }
         int position = Math.clamp(row.currentSeconds(), 0, currentDurationSeconds);
