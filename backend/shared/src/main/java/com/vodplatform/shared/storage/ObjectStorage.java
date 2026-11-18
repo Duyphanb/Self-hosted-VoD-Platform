@@ -7,7 +7,9 @@ import java.io.InputStream;
 public interface ObjectStorage {
     void put(String bucket, String key, InputStream source, long size, String contentType) throws IOException;
 
-    InputStream get(String bucket, String key) throws IOException;
+    /** Missing keys raise ObjectMissingException; every other read failure is an IOException.
+     * The caller must close the returned stream, including after a failed copy. */
+    StoredObject get(String bucket, String key) throws IOException;
 
     void delete(String bucket, String key) throws IOException;
 }

@@ -30,6 +30,16 @@ public interface VideoAssetRepository extends JpaRepository<VideoAsset, UUID> {
         return findFirstByMovieIdAndStatusOrderByCreatedAtDescIdDesc(movieId, VideoAssetStatus.READY);
     }
 
+    /** Current-only lookup for HLS: one query, with PostgreSQL's tuple/UUID ordering. */
+    @Query(value = """
+            SELECT a.* FROM video_assets a
+            WHERE a.id = :assetId AND a.status = 'READY'
+              AND NOT EXISTS (SELECT 1 FROM video_assets b
+                  WHERE b.movie_id = a.movie_id AND b.status = 'READY'
+                    AND (b.created_at, b.id) > (a.created_at, a.id))
+            """, nativeQuery = true)
+    Optional<VideoAsset> findCurrentReadyById(@Param("assetId") UUID assetId);
+
     boolean existsByMovieIdAndStatusIn(UUID movieId, Collection<VideoAssetStatus> statuses);
 
     /** Advisory check only; V5's partial unique index is authoritative for races. */

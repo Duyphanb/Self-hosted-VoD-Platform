@@ -12,7 +12,7 @@ import java.util.UUID;
  * {@code 00000001-0001-0001-0001-000000000001}, and Spring's own conversion also trims
  * whitespace first.
  */
-final class CanonicalUuid {
+public final class CanonicalUuid {
 
     private static final int LENGTH = 36;
 
@@ -45,7 +45,7 @@ final class CanonicalUuid {
      * @throws IllegalArgumentException if the text is not in canonical form; the message does not
      *         quote the text
      */
-    static UUID parse(String text) {
+    public static UUID parse(String text) {
         if (!isCanonical(text)) {
             throw new IllegalArgumentException("Not a UUID in canonical 8-4-4-4-12 form");
         }

@@ -1,17 +1,27 @@
 package com.vodplatform.common.storage;
 
 import com.vodplatform.shared.storage.ObjectStorage;
+import com.vodplatform.shared.storage.ObjectMissingException;
+import com.vodplatform.shared.storage.StoredObject;
 import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
 import io.minio.errors.MinioException;
+import io.minio.errors.ErrorResponseException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Objects;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * MinIO streaming adapter. Verified against the pinned Silo RELEASE.2026-10-26 storage image:
+ * a missing authorized HLS key returns HTTP 404 / NoSuchKey under the shipped GetObject-only
+ * vod-backend policy, while listing and paths outside that policy return 403 / AccessDenied.
+ * Only NoSuchKey means missing; AccessDenied, NoSuchBucket and all other failures stay unavailable.
+ * The verification used a disposable Compose project and the unchanged minio-init.sh policy.
+ */
 public final class MinioObjectStorage implements ObjectStorage {
     // Fixed part size bounds SDK buffering independently of the upload's total length.
     private static final long PART_SIZE = 5L * 1024 * 1024;
@@ -55,9 +65,20 @@ public final class MinioObjectStorage implements ObjectStorage {
     }
 
     @Override
-    public InputStream get(String bucket, String key) throws IOException {
+    public StoredObject get(String bucket, String key) throws IOException {
         try {
-            return client.getObject(GetObjectArgs.builder().bucket(bucket).object(key).build());
+            var response = client.getObject(GetObjectArgs.builder().bucket(bucket).object(key).build());
+            long size = -1;
+            try {
+                String length = response.headers().get("Content-Length");
+                if (length != null) size = Long.parseLong(length);
+            } catch (NumberFormatException ignored) {
+                // A missing or unusable length must not turn a streaming GET into a HEAD request.
+            }
+            return new StoredObject(response, size);
+        } catch (ErrorResponseException e) {
+            if ("NoSuchKey".equals(e.errorResponse().code())) throw new ObjectMissingException();
+            throw new IOException("Object storage GET failed");
         } catch (MinioException e) {
             throw new IOException("Object storage GET failed");
         } catch (IllegalStateException e) {

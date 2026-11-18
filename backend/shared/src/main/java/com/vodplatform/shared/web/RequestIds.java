@@ -8,8 +8,8 @@ import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 
 /**
- * Request correlation ids for operations that opt in to correlated error responses (the upload
- * operation, see {@code MultipartRouteFilter}). Other routes never resolve an id, so their error
+ * Request correlation ids for operations that opt in to correlated error responses (upload and
+ * HLS, through their route filters). Other routes never resolve an id, so their error
  * bodies stay unchanged until global correlation (#139).
  *
  * <p>An inbound {@value #HEADER} value is reused only when it is a safe token; otherwise a random
