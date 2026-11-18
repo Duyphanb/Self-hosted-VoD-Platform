@@ -1017,7 +1017,7 @@ Create the video player component with hls.js (ADR-011 D1-D8, D13). The player a
 - Player uses hls.js only, pinned to an exact version (1.5.0 or later): checks `Hls.isSupported()` first, never assigns the manifest to `video.src` or uses `canPlayType`, and shows an unsupported-browser state otherwise
 - Player accepts manifest URL and start position props; it loads paused at the resume position through hls.js `startPosition` and never calls `play()` on its own; a rejected `play()` stays paused and is not an error
 - Every HLS request reads the current access token and sends it in the `Authorization` header; a 401 runs the shared `ApiClient` authentication recovery once (retry with a newer current token, or join the single-flight refresh) and retries that request once; the load-policy retry and the fatal handler share that one budget; only a 401 on the retry, or a refresh rejected with 401, ends the session; the player is destroyed when the signed-in identity changes, and an old identity's callback never ends a newer session
-- `ApiClient` exposes that recovery and the authentication snapshot for the player; a refresh that fails by a network error, a timeout or a 5xx keeps the session for the player and for JSON requests alike (a change of the Sprint 2 behaviour, with tests on both paths); no token is ever put in a URL and `sendBeacon` is not used
+- `ApiClient` exposes that recovery and the authentication snapshot for the player; the player reuses Issue 6.9's refresh-failure classification (a refresh that fails by a network error, a timeout or a 5xx keeps the session; only a 401 ends it), with tests on the HLS path; no token is ever put in a URL and `sendBeacon` is not used
 - Player sends progress every 10 seconds while playing, and on pause, seek, `ended` (with `finished: true`), page hide, `pagehide` and unmount; whole seconds; no save before the first play; a save is skipped only when its whole payload (position and `finished`) equals the last successful save, so the `ended` save is always sent; each save carries the `videoAssetId`; at most one save is in flight, later triggers replace one pending snapshot; unload saves use `fetch` with `keepalive` and the latest snapshot; a failed save never interrupts playback; saving stops after 404 or 409, and 409 `VIDEO_ASSET_NOT_CURRENT` also makes the page fetch the playback info again
 - Native `<video controls playsinline>` with `aria-label` set to the movie title; no custom control bar
 - Error mapping per ADR-011 D7: only fatal errors leave the playing state; one `recoverMediaError()` for a fatal media error; fatal network errors mapped by status (401 recovery rule, 404 reloads playback info once and a failed refetch shows Retry, others show Retry); `role="status"` for the initial load, `role="alert"` for fatal states, an `aria-hidden` rebuffering spinner
@@ -1067,20 +1067,23 @@ Create continue watching page that displays movies user started but hasn't finis
 
 ### Issue 6.9: Browser Session Cookie and In-Memory Access Token
 
-**Description:**  
-Implement ADR-012 D1-D3 and D7: move the refresh token from JSON bodies and `localStorage` into the HttpOnly `vod_refresh` cookie scoped to `/api/v1/auth`, keep the access token in memory only, and protect the auth endpoints with `SameSite=Strict`, an exact `Origin` check and `Sec-Fetch-Site`. Backend, frontend, API contract, smoke scripts and Postman collections change in one pull request, because the auth contract change is breaking. Must land before Issue 6.6.
+**Description:**
+Implement ADR-012 D1-D3, D7 and the 6.9 part of D9: move the refresh token from JSON bodies and `localStorage` into the HttpOnly `vod_refresh` cookie scoped to `/api/v1/auth`, keep the access token in memory only, protect the auth endpoints with `SameSite=Strict`, an exact `Origin` check and `Sec-Fetch-Site`, and move the SPA's refresh-failure classification here from Issue 6.6. Backend, frontend, API contract, smoke scripts and Postman collections change in one pull request, because the auth contract change is breaking. Must land before Issue 6.6.
 
 **Acceptance Criteria:**
-- Login and refresh set `vod_refresh` with `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, no `Domain`, `Max-Age` equal to the remaining lifetime; no response body contains a refresh token; refresh and logout take no body
-- Refresh returns 401 and clears the cookie for a missing, unknown, expired, revoked, over-long or replayed cookie; logout is idempotent 204 and always clears the cookie
-- `refresh` and `logout` require an allowed `Origin`; `login` and `register` reject a present, disallowed `Origin`; `Sec-Fetch-Site: cross-site` is rejected on all four with 403 `ORIGIN_NOT_ALLOWED`; tests cover each case
-- `Secure` can be disabled only with loopback-only allowed origins; startup fails otherwise
-- `API-CONTRACT.yaml` updated per ADR-012 D2 in the same pull request (`AuthResponse` without `refreshToken`, `RefreshRequest` removed, `Set-Cookie` headers, `refreshSession` cookie scheme, 403 `ORIGIN_NOT_ALLOWED`); every auth response validated against it
-- The SPA keeps the access token in memory only, bootstraps with one refresh call, serializes refreshes across tabs with the existing Web Lock, announces sign-in, sign-out and identity changes on a token-free `BroadcastChannel`, and deletes the legacy `localStorage` session key; no token is written to web storage (tests)
-- The `ApiClient` recovery, the single-flight refresh, keeping the session on a refresh network error or 5xx, and the generation guards keep their behaviour (existing tests stay green)
-- A refresh in one tab followed by a refresh in another tab does not look like a replay; a sign-in as another user in one tab replaces the session in every tab (tests)
+- Login and refresh set `vod_refresh` with `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, no `Domain`, `Max-Age` equal to the refresh token's remaining lifetime; no response body contains a refresh token; refresh and logout take no body
+- Refresh returns 401 and clears the cookie for a missing, unknown, expired, revoked, over-long, duplicated or replayed cookie; a failure to read the token state is 503, not 401; logout is idempotent 204 and always clears the cookie; login revokes a valid refresh token presented with it
+- `refresh` and `logout` require an allowed `Origin`; `login` and `register` reject a present, disallowed `Origin`; `Sec-Fetch-Site: cross-site` is rejected on all four with 403 `ORIGIN_NOT_ALLOWED`; tests cover each case, including two `vod_refresh` cookies
+- `Secure` can be disabled only with loopback-only allowed origins; startup fails otherwise; `CORS_ALLOWED_ORIGINS` defaults include the Compose edge origin
+- `API-CONTRACT.yaml` updated per ADR-012 D2 in the same pull request; every auth response validated against it; cookie attributes tested directly, since the contract validator does not check them
+- Login, refresh (including bootstrap) and logout each run inside the cross-tab Web Lock from request to response handling; timeouts abort inside the lock; the "revoke the unused refresh token" clean-up is removed; browser-level tests with controlled response order check both the real cookie and the memory state
+- A non-secret `localStorage` marker holds the generation and the signed-in user id (never a token); requests check it before sending and before committing; tabs reconcile on `pageshow`, `visibilitychange` and focus; a token-free `BroadcastChannel` only wakes tabs; tests delay the channel and simulate a restored tab
+- The SPA keeps the access token in memory only, bootstraps with one refresh call, and deletes the legacy `localStorage` session key; no token is written to web storage (tests)
+- Only a refresh rejected with 401 ends the session; a network error, a timeout or a 5xx keeps it with a retryable error, for JSON requests and bootstrap (tests; a change of the Sprint 2 behaviour)
+- A logout the server has not confirmed leaves a non-secret "logout pending" flag; bootstrap retries the logout instead of refreshing until it returns 204 or the user signs in; the UI shows the unconfirmed sign-out with a retry (tests)
+- A sign-in as another user in one tab replaces the session in every tab (tests)
 - Newman Sprint 2 auth collection and every smoke that refreshes or logs out use a cookie jar and send `Origin`
-- Manual check in Chrome and Firefox on the local Compose stack: sign in, reload, two tabs, sign out
+- Manual check in Chrome and Firefox on the local Compose stack: sign in, reload, two tabs, sign out, sign out while offline
 
 **Dependencies:** #94 (forwarded host and port, before the edge verification)
 
@@ -1088,20 +1091,20 @@ Implement ADR-012 D1-D3 and D7: move the refresh token from JSON bodies and `loc
 
 ### Issue 6.10: Server-Side Sessions and Bounded Revocation
 
-**Description:**  
-Implement ADR-012 D4-D6, D8 and D9: an `auth_sessions` table with an absolute lifetime, refresh tokens bound to a session, replay revoking the whole session, `users.auth_epoch`, access tokens with `sid` and `ver`, a per-request session check with a 30-second bounded cache, direct database checks for refresh and admin operations, a 10-session cap per user and daily pruning. May land after Issue 6.6, before public deployment.
+**Description:**
+Implement ADR-012 D4-D6, D8 and the 6.10 part of D9: an `auth_sessions` table with an absolute lifetime, refresh tokens bound to a session, replay revoking the whole session, `users.auth_epoch`, access tokens with `sid` and `ver`, a 5-second JWT clock skew, a per-request session check with a 30-second cache aged from load start, direct database checks for refresh and admin operations, 503 `AUTH_STATE_UNAVAILABLE` when the state cannot be read, a 10-session cap per user and daily pruning. May land after Issue 6.6; must land before public deployment and before the final #125 run.
 
 **Acceptance Criteria:**
 - One new Flyway migration (no existing migration edited) creates `auth_sessions`, adds nullable `refresh_tokens.session_id` with a cascading foreign key and an index, and `users.auth_epoch integer NOT NULL DEFAULT 0`; legacy tokens without a session are rejected at refresh; the schema snapshot is updated
-- Login creates a session with `expires_at = now + JWT_REFRESH_TOKEN_TTL_DAYS`; rotation stays in the session and never extends it; replaying a rotated token revokes the session (PostgreSQL tests, including concurrent rotation)
-- Access tokens last `JWT_ACCESS_TOKEN_TTL_MINUTES` (default 5, allowed 1-15; session 1-30 days) and carry `sid` and `ver`; a token without them, for a revoked or expired session, a non-active user or an outdated epoch is 401
-- The session check uses a Caffeine cache with entries expiring 30 seconds after loading, a shared load per key, and no re-population by a load that started before an invalidation; logout and epoch changes invalidate after commit (tests with a controllable clock)
+- Login creates a session with `expires_at = now + JWT_REFRESH_TOKEN_TTL_DAYS`; rotation stays in the session and never extends it; replaying a rotated token revokes the session; login revokes the session of a presented cookie (PostgreSQL tests, including concurrent rotation)
+- Access tokens last `JWT_ACCESS_TOKEN_TTL_MINUTES` (default 5, allowed 1-15; session 1-30 days), are validated with a 5-second clock skew, and carry `sid` and `ver`; a token without them, for a revoked or expired session, a non-active user or an outdated epoch is 401; `.env.example`, Compose defaults and the deployment README's upgrade steps change the TTL from 60 to 5
+- The session check uses a Caffeine cache whose entries authorize only while less than 30 seconds have passed since their load started, shares one load per key, and discards a load invalidated while it ran (neither cached nor used for the waiting requests); backend-made changes invalidate after commit (tests with a controllable clock, including a load that is slower than an operator's SQL revocation)
 - Refresh and admin operations (`/api/v1/admin/**` and the admin movie writes) read PostgreSQL on every request; a demoted admin is refused on the next admin request (test)
-- A database failure during the check fails the request; no token is accepted without its state (test)
+- A failure to read the auth state returns 503 `AUTH_STATE_UNAVAILABLE`, is not turned into 401 by the access-token converter, and clears no cookie; the API contract declares this 503 on every bearer-authenticated operation (tests)
 - A user has at most 10 active sessions; the 11th login revokes the oldest (test)
 - A daily job deletes sessions ended more than 30 days ago and legacy session-less tokens in bounded batches (test)
-- The deployment runbook's disable and role-change steps increment `auth_epoch` and revoke the user's sessions; SECURITY's personal-data inventory lists the session tables
-- HLS and playback keep their per-request visibility and current-asset checks; the HLS path adds at most one cached session lookup (existing HLS tests stay green)
+- The deployment runbook's disable and role-change steps increment `auth_epoch` and revoke the user's sessions in one transaction; SECURITY's personal-data inventory lists the session tables
+- HLS and playback keep their per-request visibility and current-asset checks (existing HLS tests stay green)
 
 **Dependencies:** Issue 6.9
 
