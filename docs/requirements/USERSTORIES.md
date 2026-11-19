@@ -24,7 +24,7 @@ As a registered user, I want to log in so that I can access protected APIs.
 
 Acceptance criteria:
 
-- Login accepts valid credentials and returns a JWT-based authentication result with access and refresh tokens in the JSON response body.
+- Login accepts valid credentials and returns the user profile and JWT access token in JSON; the refresh token travels only in the HttpOnly `vod_refresh` cookie. [ADR-012 Issue 6.9](../architecture/adr/ADR-012.md) supersedes the original body-based refresh-token delivery.
 - Invalid credentials return a generic authentication failure.
 - JWT secret and expiration settings come from environment variables.
 - Protected APIs reject missing, expired, or malformed tokens.

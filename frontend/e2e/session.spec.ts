@@ -111,6 +111,50 @@ test('unconfirmed sign-out survives reload and retries logout rather than refres
   expect(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)!).logoutPending,markerKey)).toBe(false);
 });
 
+test('two pending tabs do not retry failed logout on wake-ups', async ({ page, context, request }) => {
+  await signIn(page);
+  const other = await context.newPage();
+  await other.goto('/');
+  await identity(other, 'alice');
+  await control(request, { logoutStatus: 503 });
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  for (const tab of [page, other]) {
+    await identity(tab, 'signed-out');
+    await expect(tab.getByRole('button', { name: 'Retry sign-out' })).toBeVisible();
+  }
+  await expect.poll(async () => (await state(request)).active).toBe(0);
+  const before = (await state(request)).counts.logout;
+  const pending = await page.evaluate(key => localStorage.getItem(key), markerKey);
+  expect(before).toBe(1);
+  for (const tab of [page, other]) {
+    await tab.evaluate(async key => {
+      for (let round = 0; round < 6; round += 1) {
+        window.dispatchEvent(new StorageEvent('storage', { key }));
+        window.dispatchEvent(new Event('focus'));
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+        const channel = new BroadcastChannel('vod.auth.wakeup.v2');
+        channel.postMessage('changed');
+        channel.close();
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+    }, markerKey);
+  }
+  expect((await state(request)).counts.logout).toBe(before);
+  expect(await other.evaluate(key => localStorage.getItem(key), markerKey)).toBe(pending);
+
+  // A reload gets exactly one bootstrap attempt, without publishing a new generation.
+  await other.reload();
+  await expect.poll(async () => (await state(request)).counts.logout).toBe(before + 1);
+  await expect.poll(async () => (await state(request)).active).toBe(0);
+  expect(await other.evaluate(key => localStorage.getItem(key), markerKey)).toBe(pending);
+  await control(request, { logoutStatus: null });
+  await page.getByRole('button', { name: 'Retry sign-out' }).click();
+  for (const tab of [page, other]) await expect(tab.getByRole('button', { name: 'Retry sign-out' })).toHaveCount(0);
+  expect((await state(request)).counts.logout).toBe(before + 2);
+  expect((await context.cookies()).some(cookie => cookie.name === 'vod_refresh')).toBe(false);
+});
+
 test('bootstrap outage is retryable and keeps the persistent identity',async({page,request})=>{
   await signIn(page);await control(request,{refreshStatus:503});await page.reload();
   await expect(page.getByRole('button',{name:'Retry sign-in'})).toBeVisible();

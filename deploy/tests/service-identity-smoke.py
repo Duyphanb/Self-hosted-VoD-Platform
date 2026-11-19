@@ -349,7 +349,9 @@ class Smoke:
         if internal_status("/api/v1/health") != "200" or internal_status(login, *body) != "400":
             raise SmokeError("Check failed: internal-trust-positive-controls")
         # Keep curl's default Host=backend:8080: only forged forwarded values could match Origin.
-        if internal_status(login, *body, "-H", "X-Forwarded-Host: forged.example.test",
+        # Use a non-auth route: only CORS may reject this forged origin. An auth
+        # Origin rejection would hide a regression in forwarded-header trust.
+        if internal_status("/api/v1/health", "-H", "X-Forwarded-Host: forged.example.test",
                            "-H", "X-Forwarded-Port: 9443", "-H", "X-Forwarded-Proto: https",
                            "-H", "X-Forwarded-For: 198.51.100.7",
                            "-H", "Origin: https://forged.example.test:9443") != "403":

@@ -48,8 +48,8 @@ test('real Compose session: sign in, reload, two tabs, sign out and offline retr
   await expect(page.getByRole('alert')).toContainText('Sign-out is not confirmed.');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('vod.auth.marker.v2')!).logoutPending)).toBe(true);
   await context.unroute('**/api/v1/auth/logout');
-  // Focus reconciliation may already have retried; the control remains usable otherwise.
-  await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.textContent === 'Retry sign-out')?.click());
+  // Reconciliation leaves logout pending; only this explicit action retries it.
+  await page.getByRole('button', { name: 'Retry sign-out', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
   expect((await context.cookies()).some(c => c.name === 'vod_refresh')).toBe(false);
   await page.reload();

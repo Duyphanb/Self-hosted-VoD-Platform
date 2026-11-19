@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, screen, waitFor } from '@testing-library/react';
 import { StrictMode, type PropsWithChildren } from 'react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth, useApiClient } from './AuthContext';
@@ -80,6 +80,49 @@ describe('cookie-backed memory session',()=>{
     refresh.mockClear();const next=setup();await waitFor(()=>expect(logout).toHaveBeenCalledTimes(2));
     await waitFor(()=>expect(JSON.parse(window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY)!).logoutPending).toBe(false));
     expect(refresh).not.toHaveBeenCalled();expect(next.result.current.auth.isAuthenticated).toBe(false);
+  });
+  it('pending logout wake-ups send no requests; retries publish only confirmation', async () => {
+    const postMessage = vi.fn();
+    const channels: Array<{ onmessage: ((event: MessageEvent) => void) | null }> = [];
+    vi.stubGlobal('BroadcastChannel', class {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      postMessage = postMessage;
+      close() { /* No browser resources in this fixture. */ }
+      constructor() { channels.push(this); }
+    });
+    knownUser();
+    const { result } = setup();
+    await waitFor(() => expect(result.current.auth.isAuthenticated).toBe(true));
+    logout.mockRejectedValue(new Error('offline'));
+    await act(async () => { await expect(result.current.auth.logout()).rejects.toThrow('offline'); });
+    const marker = window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY);
+    const publications = postMessage.mock.calls.length;
+
+    for (let round = 0; round < 5; round += 1) {
+      await act(async () => {
+        window.dispatchEvent(new StorageEvent('storage', { key: AUTH_GENERATION_STORAGE_KEY }));
+        for (const event of ['focus', 'pageshow']) window.dispatchEvent(new Event(event));
+        document.dispatchEvent(new Event('visibilitychange'));
+        for (const channel of channels) channel.onmessage?.(new MessageEvent('message', { data: 'changed' }));
+      });
+    }
+    expect(logout).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY)).toBe(marker);
+    expect(postMessage).toHaveBeenCalledTimes(publications);
+    expect(result.current.auth.isAuthenticated).toBe(false);
+    expect(screen.getByRole('alert')).toHaveTextContent('Sign-out is not confirmed.');
+
+    await act(async () => { screen.getByRole('button', { name: 'Retry sign-out' }).click(); });
+    expect(logout).toHaveBeenCalledTimes(2);
+    expect(window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY)).toBe(marker);
+    expect(postMessage).toHaveBeenCalledTimes(publications);
+
+    logout.mockResolvedValueOnce();
+    await act(async () => { screen.getByRole('button', { name: 'Retry sign-out' }).click(); });
+    expect(logout).toHaveBeenCalledTimes(3);
+    const confirmed = JSON.parse(window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY)!);
+    expect(confirmed).toEqual({ ...JSON.parse(marker!), logoutPending: false });
+    expect(postMessage).toHaveBeenCalledTimes(publications + 1);
   });
   it.each(['pageshow','focus','visibilitychange'])('reconciles another identity on %s without a channel',async(event)=>{
     knownUser();const {result}=setup();await waitFor(()=>expect(result.current.auth.isAuthenticated).toBe(true));

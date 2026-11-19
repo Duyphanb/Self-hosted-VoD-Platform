@@ -93,6 +93,14 @@ export function AuthProvider({ children, storage, redirectToLogin = defaultRedir
         } else if (!(failure instanceof AuthenticationSupersededError)) { setError(asError(failure)); setRestoreFailed(true); }
         throw failure;
       }
+    }).catch((failure: unknown) => {
+      // The lock's timeout also bounds a transport that never settles on abort.
+      if (failure instanceof DOMException && failure.name === 'TimeoutError'
+        && sameMarker(expected, store.read().marker)) {
+        setError(failure);
+        setRestoreFailed(true);
+      }
+      throw failure;
     });
     refreshing.current = operation;
     void operation.finally(() => { if (refreshing.current === operation) refreshing.current = null; }).catch(() => undefined);
@@ -104,11 +112,17 @@ export function AuthProvider({ children, storage, redirectToLogin = defaultRedir
     await withAuthSessionLock(async (signal) => {
       const m = store.read().marker;
       if (retry && !m.logoutPending) return; // Later explicit login cancels stale retries.
-      const next = { ...m, generation: m.generation + 1, userId: null, logoutPending: true };
-      publish(next); commit(null); setInitializing(false);
+      const next = retry ? m : { ...m, generation: m.generation + 1, userId: null, logoutPending: true };
+      // A retry keeps the pending marker unchanged, so it cannot wake another
+      // tab into retrying. Only a new sign-out increments the generation.
+      if (!retry) publish(next);
+      commit(null);
+      setInitializing(false);
       try {
         await authApi.logout(client, signal);
-        publish({ ...next, logoutPending: false }); setError(null); setRestoreFailed(false);
+        if (sameMarker(next, store.read().marker)) publish({ ...next, logoutPending: false });
+        setError(null);
+        setRestoreFailed(false);
       } catch (failure) {
         if (sameMarker(next, store.read().marker)) setError(asError(failure));
         throw failure;
@@ -116,12 +130,19 @@ export function AuthProvider({ children, storage, redirectToLogin = defaultRedir
     });
   }, [client, commit, publish, store]);
 
-  const restore = useCallback((): Promise<void> => {
+  const restore = useCallback((bootstrap = false): Promise<void> => {
     if (restoring.current) { restoreQueued.current = true; return restoring.current; }
     const operation = (async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
       const state = store.read(); setStorageAvailable(state.available); setPending(state.marker.logoutPending);
-      if (state.marker.logoutPending) { commit(null); await performLogout(true); return; }
+      if (state.marker.logoutPending) {
+        commit(null);
+        setInitializing(false);
+        // Wake-ups only reconcile memory and the pending notice. Bootstrap gets
+        // one retry; subsequent attempts require the explicit retry action.
+        if (bootstrap) await performLogout(true);
+        return;
+      }
       if (state.known && state.marker.userId === null) { commit(null); setInitializing(false); return; }
       const current = sessionRef.current;
       if (current && current.authGeneration === state.marker.generation && current.user.id === state.marker.userId) return;
@@ -149,7 +170,7 @@ export function AuthProvider({ children, storage, redirectToLogin = defaultRedir
   useEffect(() => { restoreCallback.current = restore; }, [restore]);
   useEffect(() => {
     mounted.current = true;
-    if (!bootstrapped.current) { bootstrapped.current = true; void restore().catch(() => undefined); }
+    if (!bootstrapped.current) { bootstrapped.current = true; void restore(true).catch(() => undefined); }
     const reconcile = () => { void restore().catch(() => undefined); };
     const onStorage = (event: StorageEvent) => { if (event.key === AUTH_GENERATION_STORAGE_KEY || event.key === null) reconcile(); };
     window.addEventListener('storage', onStorage); window.addEventListener('pageshow', reconcile);

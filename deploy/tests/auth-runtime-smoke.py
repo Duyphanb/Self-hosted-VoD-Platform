@@ -41,7 +41,7 @@ def main():
 
     assert sql("SELECT count(*) FROM users;") == "0", "Database must be fresh"
 
-    def request(path, body=None, token=None, method=None, origin="default", cookie=None):
+    def request(path, body=None, token=None, method=None, origin="default", cookie=None, host=None):
         headers = {}
         if body is not None:
             headers["Content-Type"] = "application/json"
@@ -52,6 +52,8 @@ def main():
             headers.pop("Origin", None)
         elif origin != "default":
             headers["Origin"] = origin
+        if host is not None:
+            headers["Host"] = host
         req = urllib.request.Request(
             args.base_url + path, data=None if body is None else json.dumps(body).encode(),
             headers=headers, method=method or ("POST" if body is not None or path.startswith("/api/v1/auth/") else "GET")
@@ -135,6 +137,16 @@ def main():
     assert request("/api/v1/auth/login", {"email": email, "password": password},
                    origin=args.base_url)[0] == 200, "Same-origin login through Nginx was rejected"
     print("PASS same-origin login through Nginx on the explicitly allowed public origin")
+    # A non-auth route avoids ADR-012's Origin filter masking #236 regressions.
+    # First prove the alternate origin is not allow-listed, then make it same-
+    # origin via Host: success requires the edge's forwarded host AND port.
+    edge = urllib.parse.urlsplit(args.base_url)
+    alternate = "localhost" if edge.hostname == "127.0.0.1" else "127.0.0.1"
+    alternate_host = alternate + (f":{edge.port}" if edge.port else "")
+    alternate_origin = f"{edge.scheme}://{alternate_host}"
+    assert request("/api/v1/health", origin=alternate_origin)[0] == 403, "Probe origin must not be allow-listed"
+    assert request("/api/v1/health", origin=alternate_origin, host=alternate_host)[0] == 200, "Forwarded edge origin was not applied"
+    print("PASS non-auth same-origin request with an origin outside the allowlist (#236)")
     for origin in (None, "https://untrusted.example"):
         status, error = request("/api/v1/auth/refresh", origin=origin)
         assert status == 403 and error["code"] == "ORIGIN_NOT_ALLOWED"

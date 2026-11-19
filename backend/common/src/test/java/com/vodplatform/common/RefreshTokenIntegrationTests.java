@@ -103,10 +103,16 @@ class RefreshTokenIntegrationTests extends CookieAuthFixture implements Postgres
         assertThat(revoked()).isEqualTo(1);
     }
     @Test void originAndFetchSiteMatrixAlwaysUsesJsonErrors() throws Exception {
-        for(String endpoint:List.of("login","register","refresh","logout")) {
+        for(String path:List.of("login","register","refresh","logout",
+                "%6cogin","reg%69ster","%72efresh","logou%74")) {
+            String endpoint = java.net.URLDecoder.decode(path, java.nio.charset.StandardCharsets.UTF_8);
             for(String origin:List.of("absent",ORIGIN,"https://untrusted.example","null")) {
                 for(String site:List.of("absent","same-origin","same-site","cross-site")) {
-                    var request=post("/api/v1/auth/"+endpoint).contentType(MediaType.APPLICATION_JSON).content("{}");
+                    var request=post(java.net.URI.create("/api/v1/auth/"+path)).contentType(MediaType.APPLICATION_JSON).content("{}");
+                    if (!path.equals(endpoint)) {
+                        request.with(com.vodplatform.common.contract.ContractValidation.offContract(
+                                "Encoded auth alias; validate the response against its canonical operation below"));
+                    }
                     if(!origin.equals("absent")) request.header("Origin",origin);
                     if(!site.equals("absent")) request.header("Sec-Fetch-Site",site);
                     boolean required=endpoint.equals("refresh")||endpoint.equals("logout");
@@ -116,6 +122,14 @@ class RefreshTokenIntegrationTests extends CookieAuthFixture implements Postgres
                     if(reject) result.andExpect(status().isForbidden()).andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                             .andExpect(jsonPath("$.code").value("ORIGIN_NOT_ALLOWED"));
                     else result.andExpect(status().is(endpoint.equals("logout")?204:endpoint.equals("refresh")?401:400));
+                    if (!path.equals(endpoint)) {
+                        result.andExpect(actual -> {
+                            var response = actual.getResponse();
+                            assertThat(com.vodplatform.common.contract.ApiContract.get().violations(
+                                    "POST", "/api/v1/auth/" + endpoint, response.getStatus(),
+                                    response.getContentType(), response.getContentAsByteArray())).isEmpty();
+                        });
+                    }
                 }
             }
         }

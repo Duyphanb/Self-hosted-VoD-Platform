@@ -3,6 +3,7 @@ package com.vodplatform.auth.config;
 import com.vodplatform.auth.security.AccessTokenAuthenticationConverter;
 import com.vodplatform.auth.security.ApiAccessDeniedHandler;
 import com.vodplatform.auth.security.ApiAuthenticationEntryPoint;
+import com.vodplatform.auth.security.AuthEndpoints;
 import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -50,10 +51,7 @@ public class SecurityConfiguration {
     );
 
     private static final RequestMatcher PUBLIC_ENDPOINTS = new OrRequestMatcher(
-            post("/api/v1/auth/register"),
-            post("/api/v1/auth/login"),
-            post("/api/v1/auth/refresh"),
-            post("/api/v1/auth/logout"),
+            AuthEndpoints.POSTS,
             get("/api/v1/health"),
             get("/actuator/health"),
             get("/actuator/health/**")
