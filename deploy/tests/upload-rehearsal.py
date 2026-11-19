@@ -89,8 +89,7 @@ def new_environment(port):
         env[prefix + "_ACCESS_KEY"] = "audit_" + secrets.token_hex(12)
         env[prefix + "_SECRET_KEY"] = secrets.token_urlsafe(48)
     env.update({"JWT_SECRET": secrets.token_urlsafe(48), "NGINX_HTTP_PORT": f"0.0.0.0:{port}",
-                "NGINX_HTTPS_PORT": "0.0.0.0:18444", "MAX_UPLOAD_SIZE_MB": "2048",
-                "CORS_ALLOWED_ORIGINS": f"http://localhost:{port}"})
+                "NGINX_HTTPS_PORT": "0.0.0.0:18444", "MAX_UPLOAD_SIZE_MB": "2048"})
     return env
 
 

@@ -253,10 +253,20 @@ Nginx must:
 - proxy `/api/v1/*` to backend
 - proxy `/hls/*` to backend HLS proxy
 - forward `Authorization` and `X-Request-ID` headers to backend
+- overwrite `X-Forwarded-For` with the single `$remote_addr`, `X-Forwarded-Host` with `$host`,
+  `X-Forwarded-Proto` with `$scheme`, and `X-Forwarded-Port` with the browser's explicit Host port
+  (including bracketed IPv6), otherwise 80 for HTTP or 443 for HTTPS; clear RFC `Forwarded`
 - terminate HTTPS on VPS
 - apply basic security headers
 - enforce upload body size at least as strictly as backend configuration on the upload route; all other routes have a 1 MiB default
 - return correct HLS MIME types when applicable
+
+Every backend proxy, including health and HLS, sets these forwarded headers; the nested upload
+location inherits them. The published port can differ from the container's `$server_port`, which
+must not be used as the browser port. Tomcat applies the headers only from its default internal
+proxy ranges; the backend port must never be published. See [forwarded-header security](SECURITY.md#forwarded-headers-and-same-origin-requests).
+Before placing a load balancer or CDN ahead of Nginx, configure `real_ip` and review the
+`X-Forwarded-For` trust boundary (#51, #136). HSTS stays deferred at the edge; Spring's HSTS is disabled.
 
 HLS MIME baseline:
 

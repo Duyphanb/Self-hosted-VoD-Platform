@@ -77,7 +77,7 @@ Expected result for the full stack:
 
 ### 4. Verify the public routes
 
-The commands below assume the default `NGINX_HTTP_PORT=127.0.0.1:80`, which publishes the edge on host port 80 of the loopback interface only: `http://localhost/` works from the same machine, but other devices cannot reach it (see [LAN access for a demo](#lan-access-for-a-demo)). If you configure another host port, keep the loopback address and include the port in each URL; for example, `NGINX_HTTP_PORT=127.0.0.1:8088` serves `http://localhost:8088/`. Also add that origin to `CORS_ALLOWED_ORIGINS` (for example `CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8088`): the backend does not yet apply forwarded host and port headers, so it treats same-origin browser `POST`, `PUT`, and `DELETE` requests on a non-80 edge port as cross-origin and rejects them with 403.
+The commands below assume the default `NGINX_HTTP_PORT=127.0.0.1:80`, which publishes the edge on host port 80 of the loopback interface only: `http://localhost/` works from the same machine, but other devices cannot reach it (see [LAN access for a demo](#lan-access-for-a-demo)). If you configure another host port, keep the loopback address and include the port in each URL; for example, `NGINX_HTTP_PORT=127.0.0.1:8088` serves `http://localhost:8088/`. Nginx forwards the browser-visible host, port and scheme, so same-origin requests also work on non-default ports without adding the edge origin to the CORS allowlist. Cross-origin clients such as the Vite dev server still need `CORS_ALLOWED_ORIGINS`; ADR-012's separate auth Origin check is part of Issue 6.9.
 
 To use admin features locally, register an account and promote it with the [first administrator procedure](docs/deployment/README.md#first-administrator).
 
@@ -118,7 +118,7 @@ These service ports are not published to the host. Nginx and the frontend share 
 The edge stays on loopback by default because the local `JWT_SECRET` in `.env.example` is a public placeholder: anyone who can reach the edge could sign their own access tokens for any user, including administrators. To let other devices on a trusted network reach the stack:
 
 1. In `.env`, replace `JWT_SECRET` with a random value of at least 32 bytes that is not the placeholder, for example the output of `openssl rand -base64 48` (available in Git Bash and WSL). Also replace the other placeholders listed in [step 1](#1-create-the-local-environment-file).
-2. In `.env`, publish the edge on the network: `NGINX_HTTP_PORT=80` listens on every interface, and `NGINX_HTTP_PORT=192.168.1.20:80` (your machine's LAN address) listens on that address only. If you choose a host port other than 80, apply the `CORS_ALLOWED_ORIGINS` note from [step 4](#4-verify-the-public-routes) to that origin.
+2. In `.env`, publish the edge on the network: `NGINX_HTTP_PORT=80` listens on every interface, and `NGINX_HTTP_PORT=192.168.1.20:80` (your machine's LAN address) listens on that address only. If you choose a host port other than 80, include it in the browser URL as in [step 4](#4-verify-the-public-routes).
 3. Recreate the affected containers. Tokens signed with the previous secret stop working, so sign in again.
 
    ```bash

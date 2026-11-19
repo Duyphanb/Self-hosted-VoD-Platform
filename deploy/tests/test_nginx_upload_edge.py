@@ -119,8 +119,11 @@ class NginxUploadEdgeTests(unittest.TestCase):
         self.assertEqual(select(self.api.children, "proxy_set_header"), [
             Directive("proxy_set_header", ("Host", "$host")),
             Directive("proxy_set_header", ("X-Real-IP", "$remote_addr")),
-            Directive("proxy_set_header", ("X-Forwarded-For", "$proxy_add_x_forwarded_for")),
+            Directive("proxy_set_header", ("X-Forwarded-For", "$remote_addr")),
+            Directive("proxy_set_header", ("X-Forwarded-Host", "$host")),
+            Directive("proxy_set_header", ("X-Forwarded-Port", "$forwarded_port")),
             Directive("proxy_set_header", ("X-Forwarded-Proto", "$scheme")),
+            Directive("proxy_set_header", ("Forwarded", "")),
             Directive("proxy_set_header", ("X-Request-ID", "$request_id")),
             Directive("proxy_set_header", ("Authorization", "$http_authorization")),
         ])
@@ -176,19 +179,46 @@ class NginxUploadEdgeTests(unittest.TestCase):
                 proxy_http_version 1.1;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-For $remote_addr;
+                proxy_set_header X-Forwarded-Host $host;
+                proxy_set_header X-Forwarded-Port $forwarded_port;
                 proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Forwarded "";
                 proxy_set_header X-Request-ID $request_id;
                 proxy_set_header Authorization $http_authorization;
             }
             location = /actuator/health {
                 proxy_pass http://backend_upstream/actuator/health;
                 proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $remote_addr;
+                proxy_set_header X-Forwarded-Host $host;
+                proxy_set_header X-Forwarded-Port $forwarded_port;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Forwarded "";
                 proxy_set_header X-Request-ID $request_id;
             }
         """)
         for node in expected:
             self.assertEqual(select(self.server.children, "location", node.arguments), [node])
+
+    def test_every_proxy_overwrites_native_forwarded_values_and_clears_rfc_forwarded(self):
+        for location in select(self.server.children, "location"):
+            if not select(location.children, "proxy_pass"):
+                continue
+            headers = {node.arguments[0]: node.arguments[1]
+                       for node in select(location.children, "proxy_set_header")}
+            with self.subTest(location=location.arguments):
+                self.assertEqual({name: headers.get(name) for name in (
+                    "Host", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Port",
+                    "X-Forwarded-Proto", "Forwarded")}, {
+                    "Host": "$host", "X-Forwarded-For": "$remote_addr", "X-Forwarded-Host": "$host",
+                    "X-Forwarded-Port": "$forwarded_port", "X-Forwarded-Proto": "$scheme", "Forwarded": ""})
+        defaults, = select(self.http.children, "map", ("$scheme", "$default_forwarded_port"))
+        self.assertEqual(defaults.children, [Directive("default", ("80",)), Directive("https", ("443",))])
+        authority, = select(self.http.children, "map", ("$http_host", "$forwarded_port"))
+        self.assertEqual(select(authority.children, "default"), [Directive("default", ("$default_forwarded_port",))])
+        self.assertNotIn("$server_port", str(authority))
 
     def test_upload_defaults_equal_the_frozen_mib_limit_at_every_layer(self):
         def read(path):

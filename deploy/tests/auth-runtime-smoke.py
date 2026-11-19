@@ -128,6 +128,9 @@ def main():
     assert {k: v for k, v in wrong.items() if k != "timestamp"} == {k: v for k, v in missing.items() if k != "timestamp"}
     status, session = login()
     assert status == 200 and session["expiresInSeconds"] > 0
+    assert request("/api/v1/auth/login", {"email": email, "password": password},
+                   origin=args.base_url)[0] == 200, "Same-origin login through Nginx was rejected"
+    print("PASS same-origin login through Nginx on the published port without a CORS allowlist entry")
     access, original = session["accessToken"], session["refreshToken"]
     digest = hashlib.sha256(original.encode()).hexdigest()
     assert sql(f"SELECT count(*) FROM refresh_tokens WHERE user_id = '{user_id}' AND token_hash = '{digest}' AND revoked_at IS NULL;") == "1"

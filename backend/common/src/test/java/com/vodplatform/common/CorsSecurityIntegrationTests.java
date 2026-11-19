@@ -63,6 +63,16 @@ class CorsSecurityIntegrationTests implements PostgresTestDatabase {
     private MockMvc mockMvc;
 
     @Test
+    void secureMockRequestsOnBothChainsDoNotWriteHsts() throws Exception {
+        mockMvc.perform(get("/api/v1/health").secure(true))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Strict-Transport-Security"));
+        mockMvc.perform(get("/api/v1/users/me").secure(true))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().doesNotExist("Strict-Transport-Security"));
+    }
+
+    @Test
     void allowedPreflightRunsBeforeAuthenticationForPublicProtectedAndHlsPaths() throws Exception {
         assertAllowedPreflight(
                 "/api/v1/auth/login",

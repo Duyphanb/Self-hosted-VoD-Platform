@@ -9,6 +9,7 @@ import argparse
 from datetime import datetime
 import hashlib
 import http.client
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -139,6 +140,25 @@ def streaming_upload(port, chunked):
 
 
 def exercise(port):
+    for authority, host, browser_port in ((f"localhost:{port}", "localhost", port),
+                                           ("localhost", "localhost", 80),
+                                           ("[2001:db8::1]:8088", "[2001:db8::1]", 8088),
+                                           ("[2001:db8::1]", "[2001:db8::1]", 80)):
+        for path in ("/api/v1/movies", UPLOAD, "/hls/video-assets/smoke/master.m3u8", "/actuator/health"):
+            status, headers, body = request(port, path, headers={
+                "Host": authority, "X-Smoke-Echo-Headers": "yes",
+                "X-Forwarded-For": "198.51.100.1, 203.0.113.2", "X-Forwarded-Host": "forged.example",
+                "X-Forwarded-Port": "9443", "X-Forwarded-Proto": "https",
+                "Forwarded": "for=198.51.100.1;host=forged.example:9443;proto=https"})
+            assert status in (200, 202), "Forwarded-header probe failed"
+            payload = json.loads(body)
+            ipaddress.ip_address(payload["forwardedFor"])  # Exactly one address, no client-supplied chain.
+            assert payload["forwardedFor"] == payload["realIp"] == headers["x-smoke-remote-addr"], "Forged client IP survived"
+            assert payload["host"] == payload["forwardedHost"] == host, "Forged host survived"
+            assert payload["forwardedPort"] == str(browser_port), "Published port or IPv6 authority was lost"
+            assert payload["forwardedProto"] == "http" and payload["forwarded"] is None, "Forged scheme/Forwarded survived"
+    print("PASS all backend routes overwrite forged forwarded headers; published/default ports and bracketed IPv6", flush=True)
+
     for path in ("/api/v1/auth/login", "/api/v1/movies", UPLOAD + "/", UPLOAD + "s",
                  UPLOAD.replace("/video", "/VIDEO")):
         assert_edge_error(header_only_request(port, path, MIB + 1), 413, "PAYLOAD_TOO_LARGE")
@@ -195,7 +215,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", default="vod-auth-audit-edge-" + secrets.token_hex(6))
     arguments = parser.parse_args()
-    assert re.fullmatch(r"vod-auth-audit-[a-z0-9][a-z0-9_-]*", arguments.project), "Disposable audit project required"
+    assert re.fullmatch(r"(?:vod-auth-audit-|vod94-)[a-z0-9][a-z0-9_-]*", arguments.project), "Disposable audit project required"
     project = arguments.project
     stub, edge = project + "-stub", project + "-edge"
     syntax_names = [project + "-syntax-" + str(index) for index in range(2)]
@@ -210,7 +230,8 @@ def main():
     # same Nginx-generated variable used in JSON and forwarded upstream.
     test_config = test_config.replace('add_header Referrer-Policy "no-referrer" always;',
                                       'add_header Referrer-Policy "no-referrer" always;\n'
-                                      '        add_header X-Smoke-Request-ID $request_id always;')
+                                      '        add_header X-Smoke-Request-ID $request_id always;\n'
+                                      '        add_header X-Smoke-Remote-Addr $remote_addr always;')
     marker = "        location /api/v1/ {\n"
     assert test_config.count(marker) == 1, "Expected exactly one API parent"
     probes = ("            # Test-only probes inherit the real API error handling.\n"

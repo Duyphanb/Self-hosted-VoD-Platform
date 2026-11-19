@@ -87,6 +87,17 @@ placeholder. Then set `NGINX_HTTP_PORT=80` (every interface) or
 [LAN access for a demo](../../README.md#lan-access-for-a-demo) lists the steps.
 Return to `127.0.0.1:80` when the demo ends.
 
+On a non-default port, include it in the browser URL, for example `http://localhost:8088`.
+Same-origin requests need no CORS allowlist entry: Nginx overwrites the forwarded host, port,
+scheme and client IP, and clears RFC `Forwarded`. The port comes from the browser's Host authority
+(including bracketed IPv6), otherwise 80 for HTTP or 443 for HTTPS, never the container port.
+Tomcat's native valve accepts these values only from its default internal proxy ranges.
+Keep the backend port unpublished; only Nginx may publish service ports. Cross-origin clients
+still need the CORS allowlist. ADR-012's separate auth Origin check is implemented by Issue 6.9.
+Spring's HSTS writer is disabled; HTTPS/HSTS rollout remains an edge decision (#72, #136).
+A load balancer or CDN in front of Nginx requires explicit `real_ip` configuration and a review
+of `X-Forwarded-For` and client-IP trust before deployment (#51, #136).
+
 Production publishes the edge on the public interface, so `.env.production`
 must set `NGINX_HTTP_PORT=80` explicitly. The production overlay fails during
 configuration when the value is missing or empty, and the

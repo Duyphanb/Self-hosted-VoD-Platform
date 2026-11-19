@@ -221,6 +221,25 @@ Recommended after MVP-local works:
 - rate limiting for login, search, and upload
 - dependency vulnerability scanning in CI
 
+## Forwarded Headers and Same-Origin Requests
+
+Nginx is the only published edge; the backend port must never be published. Nginx overwrites
+`X-Forwarded-For` with its single `$remote_addr`, `X-Forwarded-Host` with `$host`,
+`X-Forwarded-Port` with the browser's explicit Host port (otherwise 80 for HTTP or 443 for HTTPS),
+and `X-Forwarded-Proto` with `$scheme`. It clears RFC `Forwarded`; client-supplied forwarded
+values cannot override this view. The nested upload route inherits these directives.
+
+The backend uses Tomcat's native `RemoteIpValve`, honouring these values only from the default
+internal private/link-local/loopback proxy ranges; `trusted-proxies` is unset. This relies on the
+unpublished backend and isolated Compose networks, rather than pinning a subnet that can collide
+with developer or VPS networks. Same-origin browser requests through Nginx, including a non-default
+published port, are not CORS requests. The environment-driven CORS allowlist remains required for
+cross-origin clients, with `allowCredentials=false`. ADR-012's separate auth Origin check is owned
+by Issue 6.9 and is not replaced by this CORS behavior.
+
+A future load balancer or CDN before Nginx requires an explicit `real_ip` configuration and a
+review of the client-IP/forwarded-header trust boundary (#51, #136).
+
 ## Frontend Safeguards
 
 Frontend must:
@@ -254,6 +273,8 @@ Nginx headers for MVP:
 - `Referrer-Policy: no-referrer`
 
 CSP and HSTS are deferred until frontend asset paths and HTTPS behavior are verified on the VPS.
+Spring Security's HSTS writer is disabled on both security chains, including forwarded HTTPS
+requests, so enabling HSTS remains an edge decision.
 
 ## Security Test Expectations
 
