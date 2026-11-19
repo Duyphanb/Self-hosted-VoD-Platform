@@ -27,11 +27,12 @@ Choose the contract sections relevant to the task; this list is not a required r
 | [ADR-004](adr/ADR-004.md) | MinIO-compatible storage / PGSTY Silo |
 | [ADR-005](adr/ADR-005.md) | RabbitMQ encoding queue |
 | [ADR-006](adr/ADR-006.md) | FFprobe / FFmpeg / HLS |
-| [ADR-007](adr/ADR-007.md) | Body-based refresh tokens |
+| [ADR-007](adr/ADR-007.md) | Body-based refresh tokens (superseded by ADR-012 once Issue 6.9 lands) |
 | [ADR-008](adr/ADR-008.md) | Case-insensitive email identity |
 | [ADR-009](adr/ADR-009.md) | Catalog visibility, archive retention and slugs |
 | [ADR-010](adr/ADR-010.md) | Upload transport, video asset lifecycle, encoding handoff and cleanup |
 | [ADR-011](adr/ADR-011.md) | Authenticated HLS playback, player behaviour and playback progress |
+| [ADR-012](adr/ADR-012.md) | Browser session: HttpOnly refresh cookie, in-memory access token, sessions and bounded revocation |
 
 ## Purpose
 

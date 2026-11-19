@@ -26,6 +26,23 @@ MVP uses bearer JWT access tokens plus persisted refresh tokens.
 - Login failures return a generic authentication error.
 - Email identities are case-insensitive through PostgreSQL `lower(email)` for both lookup and uniqueness. Preserve stored spelling and do not collapse dots or plus tags. Existing identity collisions block migration rather than merging accounts; see [ADR-008](adr/ADR-008.md).
 
+### Browser session (ADR-012, planned: Issues 6.9 and 6.10)
+
+[ADR-012](adr/ADR-012.md) replaces the body-based delivery above in two steps. Until Issue 6.9 lands, the list above is the delivered behaviour.
+
+After Issue 6.9:
+
+- The refresh token travels only in the `vod_refresh` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, host-only, `Max-Age` equal to the token's remaining lifetime. It never appears in a body, `localStorage`, `sessionStorage` or IndexedDB. `Secure` may be disabled only for loopback-only local development; the production preflight rejects it. A request with two `vod_refresh` cookies is invalid; no subdomain of the deployment's domain may be controlled by a third party (otherwise the cookie becomes `__Host-vod_refresh` with `Path=/`).
+- The access token is kept in JavaScript memory only and sent only in the `Authorization` header. No cookie authenticates `/api/v1/*` resources or `/hls/*`.
+- `refresh` and `logout` take no body and require an allowed `Origin`; `login` and `register` reject a present, disallowed `Origin`; `Sec-Fetch-Site: cross-site` is rejected on all four (403 `ORIGIN_NOT_ALLOWED`). Login revokes a refresh token presented with it.
+- The refresh token still slides for 7 days and logout revokes the presented token, as today.
+
+After Issue 6.10 (required before public deployment):
+
+- Each sign-in is a server-side session with an absolute 7-day lifetime (rotation never extends it) and at most 10 active sessions per user. Replaying an already rotated refresh token revokes the whole session.
+- Access tokens live 5 minutes (allowed 1-15), are validated with a 5-second clock skew, and carry `sid` and `ver`. Every authenticated request checks the session and the user's `auth_epoch` through a cache whose entries authorize for 30 seconds from the start of their load, so a logout, an account disabling or a role change committed at time C is enforced for every request after C + 30 seconds; refresh and admin operations read PostgreSQL directly and apply it at once. If the state cannot be read the request fails with 503 `AUTH_STATE_UNAVAILABLE`, never 401, and never lets a token through.
+- Disabling an account or changing its roles increments `auth_epoch` and revokes the user's sessions in one transaction. Expired and revoked sessions are pruned 30 days after they end.
+
 ## RBAC Model
 
 Roles:
@@ -208,6 +225,7 @@ Recommended after MVP-local works:
 
 Frontend must:
 
+- after Issue 6.9, keep the access token in memory only and never store a token in web storage; run login, refresh and logout inside one cross-tab lock from request to response; keep a non-secret generation marker in `localStorage` and check it before sending and before committing; bootstrap a page load with one refresh call; keep a "logout pending" flag until the server confirms the logout ([ADR-012 D7](adr/ADR-012.md#frontend-session-lifecycle-d7-issue-69))
 - clear auth state on logout, or when the server rejects the refresh token (401); a refresh that fails by a network error, a timeout or a 5xx keeps the session and shows a retryable error ([ADR-011 D2](adr/ADR-011.md#player-transport-and-authentication-d1-d4))
 - attach bearer tokens to API and HLS requests
 - play HLS only through hls.js: check `Hls.isSupported()` first, never assign the manifest to `video.src`, and show an unsupported-browser state otherwise ([ADR-011 D1](adr/ADR-011.md#player-transport-and-authentication-d1-d4))
