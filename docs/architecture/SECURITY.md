@@ -199,7 +199,7 @@ Decision (#106, extending the #169 storage split): every application holds only 
 - RabbitMQ: the backend and worker users have no management tag and are limited to the ADR-010 encoding queue, its DLX and DLQ on vhost `/`. Only the backend can publish jobs; neither can read the DLQ, which stays an operator task.
 - Silo: the scoped backend/worker policies of [#169](#object-storage-security).
 - Redis: the server always requires a password, and only the backend receives it.
-- Network: Nginx and the frontend sit on an edge network; the data stores, the init jobs and the worker sit on an `internal: true` network with no egress and no published ports. The backend is the only service on both.
+- Network: only Nginx/frontend share `vod_edge`; only Nginx/backend share the IPv4 `vod_proxy` link. Backend also joins `vod_internal` with the data stores, init jobs and worker; those peers have no egress or published ports. Frontend cannot reach backend, and private internal peers cannot supply trusted forwarded values.
 
 Production preflight rejects the published development identities and secrets, a user name reused by two identities of one service, a secret reused by any two identities, PostgreSQL role names that the init scripts cannot quote safely, and an application datasource URL that differs from the database Flyway migrates. It reports variable names only. The exact roles, grants, permission patterns and network membership are in [INFRASTRUCTURE.md](INFRASTRUCTURE.md#service-identities-and-network); rotation is in the [deployment runbook](../deployment/README.md#service-identity-rotation). Applications held the bootstrap PostgreSQL and RabbitMQ identities before #106, so an existing deployment also rotates those after adopting the split.
 
@@ -221,6 +221,27 @@ Recommended after MVP-local works:
 - rate limiting for login, search, and upload
 - dependency vulnerability scanning in CI
 
+## Forwarded Headers and Same-Origin Requests
+
+Nginx is the only published edge; the backend port must never be published. Nginx overwrites
+`X-Forwarded-For` with its single `$remote_addr`, `X-Forwarded-Host` with `$host`,
+`X-Forwarded-Port` with the browser's explicit Host port (otherwise 80 for HTTP or 443 for HTTPS),
+and `X-Forwarded-Proto` with `$scheme`. It clears RFC `Forwarded`; client-supplied forwarded
+values cannot override this view. The nested upload route inherits these directives.
+
+Owner decision of 2026-11-19 (PR #236 review): the backend uses Tomcat's native `RemoteIpValve`,
+honouring these values **only from Nginx's fixed address `/32` on `vod_proxy`**. Compose derives
+`FORWARDED_TRUSTED_PROXIES` from `VOD_PROXY_NGINX_IP`, so they cannot drift. A private address alone
+confers no trust; even an internal worker/data peer that reaches backend cannot override the
+forwarded origin or client IP. Outside Compose the default is exactly `127.0.0.1/32,::1/128`;
+`trusted-proxies` remains unset. Keep backend unpublished. Same-origin requests, including a non-default
+published port, are not CORS requests. The environment-driven CORS allowlist remains required for
+cross-origin clients, with `allowCredentials=false`. ADR-012's separate auth Origin check is owned
+by Issue 6.9 and is not replaced by this CORS behavior.
+
+A future load balancer or CDN before Nginx requires an explicit `real_ip` configuration and a
+review of the client-IP/forwarded-header trust boundary (#51, #136).
+
 ## Frontend Safeguards
 
 Frontend must:
@@ -241,7 +262,7 @@ Single VPS production demo must include:
 
 - HTTPS through Nginx
 - non-default production secrets
-- internal Docker network (`internal: true`) for backend, worker, PostgreSQL, Redis, RabbitMQ, and MinIO; Nginx and the frontend only on the edge network, which the backend also joins (#106)
+- internal Docker network (`internal: true`) for backend, worker, PostgreSQL, Redis, RabbitMQ and MinIO; Nginx/frontend share only the edge network, while Nginx/backend share a dedicated IPv4 proxy link (#94/#106)
 - least-privilege service identities and an authenticated Redis, as in [Service Identities and Network Isolation](#service-identities-and-network-isolation)
 - only ports 80 and 443 publicly exposed
 - backups documented before demo data matters
@@ -254,6 +275,8 @@ Nginx headers for MVP:
 - `Referrer-Policy: no-referrer`
 
 CSP and HSTS are deferred until frontend asset paths and HTTPS behavior are verified on the VPS.
+Spring Security's HSTS writer is disabled on both security chains, including forwarded HTTPS
+requests, so enabling HSTS remains an edge decision.
 
 ## Security Test Expectations
 

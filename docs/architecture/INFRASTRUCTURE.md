@@ -48,7 +48,21 @@ Compose service names are stable DNS names:
 
 Application configuration must use service names instead of hardcoded IP addresses.
 
-Compose defines two networks (#106). `vod_edge` carries `nginx`, `frontend` and `backend`. `vod_internal` is `internal: true` and carries `postgres`, `redis`, `rabbitmq`, `minio`, `worker`, the one-shot `postgres-init`, `flyway` and `minio-init` jobs, and `backend`, the only service on both networks. Docker DNS answers only for attached networks, so Nginx cannot resolve or reach a data service or the worker. A service attached only to the internal network has no egress and cannot publish a port. See [Service identities and network](#service-identities-and-network).
+Compose defines three bridge networks (#94/#106). `vod_edge` carries only `nginx` and `frontend`.
+`vod_proxy` carries only `nginx` and `backend`; it is IPv4-only and not internal, preserving backend
+egress. `vod_internal` is `internal: true` and carries the data stores, worker, one-shot init/Flyway
+jobs and backend. The frontend cannot resolve or reach the backend; Nginx cannot resolve or reach
+internal services or the worker. A service attached only to the internal network has no egress or
+published port. See [Service identities and network](#service-identities-and-network).
+
+The proxy IPAM defaults are `VOD_PROXY_SUBNET=10.94.250.0/29`,
+`VOD_PROXY_NGINX_IP=10.94.250.2` and `VOD_PROXY_BACKEND_IP=10.94.250.3`. Change all three together
+to an unused subnet with distinct usable addresses, excluding network, gateway (normally `.1`) and
+broadcast. Both addresses are static: the backend starts first and must not allocate Nginx's
+trusted address; recreating backend also preserves Nginx's resolved upstream address. This does
+not close the broader Nginx DNS/recovery issue #57. Disposable backend/Nginx smoke projects choose
+their own random /29 in `10.94.0.0/16`, excluding the deployment default, with bounded retries on
+Docker pool overlap. See the [proxy network runbook](../deployment/README.md#proxy-network-configuration).
 
 ## Port Baseline
 
@@ -178,6 +192,11 @@ No PostgreSQL role has a superuser, role-creation, database-creation, replicatio
 
 `service-identity-smoke.py` upgrades a database migrated the pre-#106 way on a fresh disposable project. It checks ownership and the exact grants, idempotent reruns, the allowed and denied operations of each role, a password rotation, Redis authentication and the network membership. With `--running-stack`, CI checks the healthy full stack: JDBC sessions use only application roles, broker connections only application users, Redis requires its password, and Nginx reaches the backend but no internal service by name or address. `rabbitmq-publisher-smoke.py` declares the topology as the worker user and runs `EncodingBrokerPermissionTests`: both users declare it, the backend publishes, the worker consumes and dead-letters, and every other probed operation is refused with 403. `production-config-smoke.sh` and `test_production_config_check.py` cover the preflight rules.
 
+The #94 running-stack probes also prove frontend cannot reach backend by name or either address,
+and a `vod_internal` peer cannot forge forwarded origin (403 with GET/POST positive controls).
+Static topology checks cover base and production, proxy IPAM/static addresses and trust equal to
+Nginx's `/32`.
+
 ### Upload and encoding settings
 
 These are the approved settings to wire into `.env.example`, application configuration and Compose in Issues 4.2/4.4/4.6/5.1/5.7/5.8; this document does not claim those bindings exist yet.
@@ -253,10 +272,20 @@ Nginx must:
 - proxy `/api/v1/*` to backend
 - proxy `/hls/*` to backend HLS proxy
 - forward `Authorization` and `X-Request-ID` headers to backend
+- overwrite `X-Forwarded-For` with the single `$remote_addr`, `X-Forwarded-Host` with `$host`,
+  `X-Forwarded-Proto` with `$scheme`, and `X-Forwarded-Port` with the browser's explicit Host port
+  (including bracketed IPv6), otherwise 80 for HTTP or 443 for HTTPS; clear RFC `Forwarded`
 - terminate HTTPS on VPS
 - apply basic security headers
 - enforce upload body size at least as strictly as backend configuration on the upload route; all other routes have a 1 MiB default
 - return correct HLS MIME types when applicable
+
+Every backend proxy, including health and HLS, sets these forwarded headers; the nested upload
+location inherits them. The published port can differ from the container's `$server_port`, which
+must not be used as the browser port. Tomcat applies the headers only from its configured Nginx
+proxy address (Nginx's `/32` on `vod_proxy`); the backend port must never be published. See [forwarded-header security](SECURITY.md#forwarded-headers-and-same-origin-requests).
+Before placing a load balancer or CDN ahead of Nginx, configure `real_ip` and review the
+`X-Forwarded-For` trust boundary (#51, #136). HSTS stays deferred at the edge; Spring's HSTS is disabled.
 
 HLS MIME baseline:
 

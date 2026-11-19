@@ -118,6 +118,8 @@ public class SecurityConfiguration {
             CorsConfigurationSource corsConfigurationSource
     ) throws Exception {
         http.cors(cors -> cors.configurationSource(corsConfigurationSource))
+                // SECURITY.md: HSTS is deferred and remains an edge decision, on both chains.
+                .headers(headers -> headers.httpStrictTransportSecurity(hsts -> hsts.disable()))
                 .csrf(csrf -> csrf.disable())
                 .requestCache(requestCache -> requestCache.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

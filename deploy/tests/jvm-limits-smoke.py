@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import time
+from proxy_network import disposable_proxy_environment, start_with_proxy_retry
 
 ROOT = Path(__file__).resolve().parents[2]
 LABEL = "Production-overlay JVM limits (#124)"
@@ -111,6 +112,7 @@ def new_environment():
     # Disposable JVM fixture only. Production media deadlines await #124.
     env.update({"WORKER_FFPROBE_TIMEOUT_SECONDS": "15", "WORKER_FFMPEG_TIMEOUT_MIN_SECONDS": "60",
                 "WORKER_FFMPEG_TIMEOUT_FACTOR": "8"})
+    env.update(disposable_proxy_environment())
     return env
 
 
@@ -286,7 +288,12 @@ def main():
             report["phase"] = "image build"
             command(compose + ["build", *SERVICES], env=env, timeout=2400)
         report["phase"] = "startup"
-        command(compose + ["up", "-d", "--wait", "--wait-timeout", "300", "--no-build", *SERVICES], env=env, timeout=420)
+        started = start_with_proxy_retry(
+            lambda: command(compose + ["up", "-d", "--wait", "--wait-timeout", "300", "--no-build", *SERVICES],
+                            env=env, timeout=420, check=False),
+            lambda: command(compose + ["down", "--remove-orphans"], env=env), env)
+        if started.returncode:
+            raise SmokeError("Disposable stack startup failed (output withheld)")
         ids = {}
         for service in SERVICES:
             ids[service] = command(compose + ["ps", "-q", service], env=env).stdout.strip()

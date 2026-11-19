@@ -86,11 +86,12 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(status, json.dumps(payload, indent=2).encode() + b"\n")
             return
 
-        if self.path.startswith("/hls/"):
+        echo = self.headers.get("X-Smoke-Echo-Headers") == "yes"
+        if self.path.startswith("/hls/") and not echo:
             content_type = "application/vnd.apple.mpegurl" if self.path.endswith(".m3u8") else "video/mp2t"
             self.respond(200, self.path.encode(), content_type)
             return
-        if self.path == "/actuator/health":
+        if self.path == "/actuator/health" and not echo:
             self.respond(200, b'{"status":"UP","stub":"backend"}')
             return
 
@@ -99,7 +100,10 @@ class Handler(BaseHTTPRequestHandler):
                    "requestId": state["requestId"], "host": self.headers.get("Host"),
                    "realIp": self.headers.get("X-Real-IP"),
                    "forwardedFor": self.headers.get("X-Forwarded-For"),
+                   "forwardedHost": self.headers.get("X-Forwarded-Host"),
+                   "forwardedPort": self.headers.get("X-Forwarded-Port"),
                    "forwardedProto": self.headers.get("X-Forwarded-Proto"),
+                   "forwarded": self.headers.get("Forwarded"),
                    "authorization": self.headers.get("Authorization"),
                    "transferEncoding": self.headers.get("Transfer-Encoding")}
         self.respond(202 if "/admin/movies/" in self.path and "/video" in self.path else 200,

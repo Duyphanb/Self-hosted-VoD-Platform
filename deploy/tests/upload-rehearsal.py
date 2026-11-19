@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 import uuid
+from proxy_network import disposable_proxy_environment, start_with_proxy_retry
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_BYTES = 2_000_000_000
@@ -89,8 +90,8 @@ def new_environment(port):
         env[prefix + "_ACCESS_KEY"] = "audit_" + secrets.token_hex(12)
         env[prefix + "_SECRET_KEY"] = secrets.token_urlsafe(48)
     env.update({"JWT_SECRET": secrets.token_urlsafe(48), "NGINX_HTTP_PORT": f"0.0.0.0:{port}",
-                "NGINX_HTTPS_PORT": "0.0.0.0:18444", "MAX_UPLOAD_SIZE_MB": "2048",
-                "CORS_ALLOWED_ORIGINS": f"http://localhost:{port}"})
+                "NGINX_HTTPS_PORT": "0.0.0.0:18444", "MAX_UPLOAD_SIZE_MB": "2048"})
+    env.update(disposable_proxy_environment())
     return env
 
 
@@ -409,8 +410,12 @@ def main():
         report["fixture"] = make_fixture(fixture)
         report["disk_before_stack"] = require_capacity(directory, docker_root, report["fixture"]["allocated_bytes"] or 0)
         report["phase"] = "disposable production-overlay startup"
-        command(compose + ["up", "-d", "--wait", "--wait-timeout", "240", "--no-build", "nginx"],
-                env=env, timeout=300)
+        started = start_with_proxy_retry(
+            lambda: command(compose + ["up", "-d", "--wait", "--wait-timeout", "240", "--no-build", "nginx"],
+                            env=env, timeout=300, check=False),
+            lambda: command(compose + ["down", "--remove-orphans"], env=env), env)
+        if started.returncode:
+            raise RehearsalError("Disposable stack startup failed (details withheld)")
         ids = {}
         for service in ("postgres", "redis", "rabbitmq", "minio", "backend", "frontend", "nginx"):
             ids[service] = command(compose + ["ps", "-q", service], env=env).stdout.strip()
