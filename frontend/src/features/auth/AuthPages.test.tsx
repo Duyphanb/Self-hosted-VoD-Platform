@@ -1,3 +1,4 @@
+import * as authApi from './authApi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
@@ -10,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { AuthProvider } from './AuthContext';
-import { createAuthSession, writeAuthSession } from './authStorage';
+import { createAuthSession} from './authStorage';
+import { installCookieSession as writeAuthSession } from '../../test/cookieSession';
 import type { AuthResponse, UserProfile } from '../../lib/api/types';
 
 const user: UserProfile = {
@@ -23,7 +25,7 @@ const user: UserProfile = {
 const authResponse: AuthResponse = {
   user,
   accessToken: 'access-token',
-  refreshToken: 'refresh-token',
+
   expiresInSeconds: 900
 };
 
@@ -102,10 +104,10 @@ describe('LoginPage', () => {
       ...createAuthSession(authResponse),
       accessTokenExpiresAt: Date.now() + 1_000
     }, window.localStorage);
-    fetchMock.mockReturnValue(new Promise<Response>(() => undefined));
+    vi.mocked(authApi.refresh).mockReset().mockReturnValue(new Promise(() => undefined));
     renderAuthRoutes('/login');
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(authApi.refresh).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
     expect(screen.getByRole('status')).toHaveTextContent('');
   });
@@ -181,7 +183,7 @@ describe('RegisterPage', () => {
     await waitFor(() => expect(screen.getByRole('status'))
       .toHaveTextContent('Account created for viewer@example.com.'));
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
-    expect(window.localStorage.length).toBe(0);
+    expect(JSON.parse(window.localStorage.getItem('vod.auth.marker.v2')!).userId).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/register', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({

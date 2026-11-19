@@ -31,7 +31,7 @@ class ApiContractTests {
             {"id": "%s", "email": "viewer@example.com", "displayName": "Viewer", "roles": ["ROLE_USER"]}
             """.formatted(USER_ID);
     private static final String AUTH_RESPONSE = """
-            {"user": %s, "accessToken": "access", "refreshToken": "refresh", "expiresInSeconds": 900}
+            {"user": %s, "accessToken": "access", "expiresInSeconds": 900}
             """.formatted(USER);
     private static final String MOVIE_SUMMARY = """
             {"id": "%s", "title": "Spirited Away", "slug": "spirited-away", "description": "A girl.",

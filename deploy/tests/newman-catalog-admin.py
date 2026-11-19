@@ -48,7 +48,7 @@ def main():
 
     body = json.dumps({"email": email, "password": password, "displayName": "Newman Catalog Admin"}).encode()
     request = urllib.request.Request(args.base_url + "/api/v1/auth/register", data=body,
-                                     headers={"Content-Type": "application/json"}, method="POST")
+                                     headers={"Content-Type": "application/json", "Origin": args.base_url}, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             status = response.status

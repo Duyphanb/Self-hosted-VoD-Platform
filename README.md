@@ -77,7 +77,7 @@ Expected result for the full stack:
 
 ### 4. Verify the public routes
 
-The commands below assume the default `NGINX_HTTP_PORT=127.0.0.1:80`, which publishes the edge on host port 80 of the loopback interface only: `http://localhost/` works from the same machine, but other devices cannot reach it (see [LAN access for a demo](#lan-access-for-a-demo)). If you configure another host port, keep the loopback address and include the port in each URL; for example, `NGINX_HTTP_PORT=127.0.0.1:8088` serves `http://localhost:8088/`. Nginx forwards the browser-visible host, port and scheme, so same-origin requests also work on non-default ports without adding the edge origin to the CORS allowlist. Cross-origin clients such as the Vite dev server still need `CORS_ALLOWED_ORIGINS`; ADR-012's separate auth Origin check is part of Issue 6.9.
+The commands below assume the default `NGINX_HTTP_PORT=127.0.0.1:80`, which publishes the edge on host port 80 of the loopback interface only: `http://localhost/` works from the same machine, but other devices cannot reach it (see [LAN access for a demo](#lan-access-for-a-demo)). If you configure another host port, keep the loopback address and include the port in each URL; for example, `NGINX_HTTP_PORT=127.0.0.1:8088` serves `http://localhost:8088/`. Nginx forwards the browser-visible host, port and scheme. Auth also checks an explicit Origin allowlist (ADR-012): add every browser-facing origin, including a non-default port, to `CORS_ALLOWED_ORIGINS` (default `http://localhost,http://localhost:5173`). For the example use `http://localhost:8088,http://localhost:5173`. This auth check is separate from CORS; no CORS credentials are enabled.
 
 To use admin features locally, register an account and promote it with the [first administrator procedure](docs/deployment/README.md#first-administrator).
 
@@ -113,7 +113,13 @@ These service ports are not published to the host. Nginx and the frontend share 
 | Worker | 8081 |
 | Frontend | 80 |
 
+### Browser authentication
+
+Login and refresh return the access token and profile in JSON and set an HttpOnly, Secure, SameSite=Strict `vod_refresh` cookie. Refresh and logout send no body and require an allowed `Origin`. The SPA keeps access tokens only in memory and restores them once through the cookie after reload. It removes the old token storage on startup. An unsuccessful sign-out remains pending with a retry action, including after reload. Blocked storage and browsers without Web Locks display a single-tab limitation notice.
+
 ### LAN access for a demo
+
+**Plain HTTP over a LAN address cannot sign in.** The refresh cookie requires `Secure`; disabling it is allowed only when every allowed origin is loopback. The steps below expose public routes only. Use HTTPS (#136) and allow its public origin for an authenticated demo on other devices.
 
 The edge stays on loopback by default because the local `JWT_SECRET` in `.env.example` is a public placeholder: anyone who can reach the edge could sign their own access tokens for any user, including administrators. To let other devices on a trusted network reach the stack:
 

@@ -40,7 +40,8 @@ BASELINE = dict(
     MINIO_BACKEND_ACCESS_KEY="fixture-backend", MINIO_BACKEND_SECRET_KEY="fixture-backend-secret",
     MINIO_WORKER_ACCESS_KEY="fixture-worker", MINIO_WORKER_SECRET_KEY="fixture-worker-secret",
     JWT_SECRET="fixture-jwt-secret-longer-than-thirty-two-bytes", NGINX_HTTP_PORT="80",
-    MINIO_BROWSER="off", MAX_UPLOAD_SIZE_MB="2048", LC_ALL="C")
+    MINIO_BROWSER="off", MAX_UPLOAD_SIZE_MB="2048", LC_ALL="C",
+    CORS_ALLOWED_ORIGINS="https://vod.example.com", AUTH_COOKIE_SECURE="true")
 SECRETS = ("POSTGRES_PASSWORD", "POSTGRES_OWNER_PASSWORD", "POSTGRES_BACKEND_PASSWORD", "POSTGRES_WORKER_PASSWORD",
            "REDIS_PASSWORD", "RABBITMQ_PASSWORD", "RABBITMQ_BACKEND_PASSWORD", "RABBITMQ_WORKER_PASSWORD",
            "MINIO_SECRET_KEY", "MINIO_BACKEND_SECRET_KEY", "MINIO_WORKER_SECRET_KEY", "JWT_SECRET")
@@ -48,6 +49,10 @@ SECRETS = ("POSTGRES_PASSWORD", "POSTGRES_OWNER_PASSWORD", "POSTGRES_BACKEND_PAS
 
 @unittest.skipUnless(SHELL, "POSIX shell is required for preflight tests")
 class ProductionPreflightTests(unittest.TestCase):
+    def test_auth_cookie_requires_secure_and_a_public_origin(self):
+        self.assert_rejected(self.execute(CORS_ALLOWED_ORIGINS=""), "CORS_ALLOWED_ORIGINS must include the public origin")
+        self.assert_rejected(self.execute(AUTH_COOKIE_SECURE="false"), "AUTH_COOKIE_SECURE must be true in production")
+
     def execute(self, name=None, value=None, *, cwd=None, **overrides):
         environment = dict(os.environ, **BASELINE, **JVM_DEFAULTS)
         if name:

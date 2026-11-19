@@ -7,7 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.vodplatform.auth.dto.AuthResponse;
+import com.vodplatform.auth.service.IssuedAuthentication;
 import com.vodplatform.auth.dto.LoginRequest;
 import com.vodplatform.auth.dto.UserProfile;
 import com.vodplatform.auth.exception.InvalidCredentialsException;
@@ -81,7 +81,7 @@ class LoginServiceTest {
         ));
         when(userProfileMapper.toProfile(user)).thenReturn(profile);
 
-        AuthResponse response = loginService.login(request);
+        IssuedAuthentication response = loginService.login(request);
 
         assertThat(response.user()).isEqualTo(profile);
         assertThat(response.accessToken()).isEqualTo("access-token");

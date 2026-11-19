@@ -1,7 +1,5 @@
 package com.vodplatform.auth.service;
 
-import com.vodplatform.auth.dto.AuthResponse;
-import com.vodplatform.auth.dto.RefreshRequest;
 import com.vodplatform.auth.exception.InvalidRefreshTokenException;
 import com.vodplatform.auth.persistence.RefreshTokenEntity;
 import com.vodplatform.auth.persistence.RefreshTokenRepository;
@@ -36,8 +34,9 @@ public class RefreshTokenRotationService {
     }
 
     @Transactional
-    public AuthResponse rotate(RefreshRequest request) {
-        String tokenHash = refreshTokenService.hash(request.refreshToken());
+    public IssuedAuthentication rotate(String token) {
+        if (token == null || token.isBlank() || token.length() > 128) throw new InvalidRefreshTokenException();
+        String tokenHash = refreshTokenService.hash(token);
         RefreshTokenEntity currentToken = refreshTokenRepository.findByTokenHash(tokenHash)
                 .orElseThrow(InvalidRefreshTokenException::new);
         // A competing rotation/logout can hold the row lock until after expiration.
@@ -53,11 +52,11 @@ public class RefreshTokenRotationService {
         currentToken.revoke(now);
         IssuedAccessToken accessToken = jwtAccessTokenService.issue(user);
         IssuedRefreshToken refreshToken = refreshTokenService.issue(user);
-        return new AuthResponse(
+        return new IssuedAuthentication(
                 userProfileMapper.toProfile(user),
                 accessToken.value(),
                 refreshToken.value(),
-                accessToken.expiresInSeconds()
+                accessToken.expiresInSeconds(), refreshToken.expiresAt()
         );
     }
 }

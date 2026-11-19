@@ -9,8 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.vodplatform.auth.dto.AuthResponse;
-import com.vodplatform.auth.dto.RefreshRequest;
+import com.vodplatform.auth.service.IssuedAuthentication;
 import com.vodplatform.auth.dto.UserProfile;
 import com.vodplatform.auth.exception.InvalidRefreshTokenException;
 import com.vodplatform.auth.persistence.RefreshTokenEntity;
@@ -54,7 +53,7 @@ class RefreshTokenRotationServiceTest {
         });
         RefreshTokenRotationService delayedService = new RefreshTokenRotationService(
                 refreshTokenRepository, refreshTokenService, jwtAccessTokenService, userProfileMapper, clock);
-        assertThatThrownBy(() -> delayedService.rotate(new RefreshRequest("raw-token")))
+        assertThatThrownBy(() -> delayedService.rotate("raw-token"))
                 .isInstanceOf(InvalidRefreshTokenException.class);
         assertThat(token.getRevokedAt()).isNull();
         verify(refreshTokenService, never()).issue(any());
@@ -87,7 +86,7 @@ class RefreshTokenRotationServiceTest {
         ));
         when(userProfileMapper.toProfile(user)).thenReturn(profile);
 
-        AuthResponse response = service.rotate(new RefreshRequest("raw-token"));
+        IssuedAuthentication response = service.rotate("raw-token");
 
         assertThat(response.user()).isEqualTo(profile);
         assertThat(response.accessToken()).isEqualTo("new-access");
@@ -110,7 +109,7 @@ class RefreshTokenRotationServiceTest {
         when(refreshTokenService.hash("raw-token")).thenReturn("stored-hash");
         when(refreshTokenRepository.findByTokenHash("stored-hash")).thenReturn(Optional.of(token));
 
-        assertThatThrownBy(() -> service.rotate(new RefreshRequest("raw-token")))
+        assertThatThrownBy(() -> service.rotate("raw-token"))
                 .isInstanceOf(InvalidRefreshTokenException.class)
                 .hasMessage("Invalid refresh token");
 
@@ -132,7 +131,7 @@ class RefreshTokenRotationServiceTest {
         when(refreshTokenService.hash("raw-token")).thenReturn("stored-hash");
         when(refreshTokenRepository.findByTokenHash("stored-hash")).thenReturn(Optional.of(token));
 
-        assertThatThrownBy(() -> service.rotate(new RefreshRequest("raw-token")))
+        assertThatThrownBy(() -> service.rotate("raw-token"))
                 .isInstanceOf(InvalidRefreshTokenException.class)
                 .hasMessage("Invalid refresh token");
 

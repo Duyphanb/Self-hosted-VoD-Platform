@@ -46,14 +46,4 @@ class AuthInputBoundsValidationTest {
         }
     }
 
-    @Test
-    void refreshTokenAcceptsIssuedLengthUpToTheBoundAndRejectsLonger() {
-        assertThat(validator.validate(new RefreshRequest("A".repeat(43)))).isEmpty();
-        assertThat(validator.validate(new RefreshRequest("A".repeat(128)))).isEmpty();
-        for (String token : new String[]{"A".repeat(129), "A".repeat(1_000_000)}) {
-            assertThat(validator.validate(new RefreshRequest(token)))
-                    .extracting(violation -> violation.getPropertyPath().toString())
-                    .containsExactly("refreshToken");
-        }
-    }
 }

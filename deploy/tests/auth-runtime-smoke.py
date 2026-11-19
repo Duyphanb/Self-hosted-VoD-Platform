@@ -4,6 +4,7 @@
 Caller creates/destroys the project; never point this at an existing database.
 Uses real HTTP, PostgreSQL constraints, and concurrent requests, not mocks.
 """
+from auth_cookies import auth_headers, capture_auth_cookie
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
@@ -40,17 +41,20 @@ def main():
 
     assert sql("SELECT count(*) FROM users;") == "0", "Database must be fresh"
 
-    def request(path, body=None, token=None, method=None, origin=None):
+    def request(path, body=None, token=None, method=None, origin="default", cookie=None):
         headers = {}
         if body is not None:
             headers["Content-Type"] = "application/json"
         if token:
             headers["Authorization"] = "Bearer " + token
-        if origin:
+        auth_headers(args.base_url, path, headers, cookie)
+        if origin is None:
+            headers.pop("Origin", None)
+        elif origin != "default":
             headers["Origin"] = origin
         req = urllib.request.Request(
             args.base_url + path, data=None if body is None else json.dumps(body).encode(),
-            headers=headers, method=method or ("POST" if body is not None else "GET")
+            headers=headers, method=method or ("POST" if body is not None or path.startswith("/api/v1/auth/") else "GET")
         )
         try:
             response = urllib.request.urlopen(req, timeout=20)
@@ -59,7 +63,7 @@ def main():
         with response:
             raw = response.read()
             data = json.loads(raw) if raw and response.headers.get_content_type() == "application/json" else None
-            return response.status, data
+            return response.status, capture_auth_cookie(response, data, path)
 
     password = "Audit-fixture-only!0917"
     email = "Viewer@example.test"
@@ -86,7 +90,7 @@ def main():
     def login(address=email, secret=password):
         return request("/api/v1/auth/login", {"email": address, "password": secret})
     def refresh(value):
-        return request("/api/v1/auth/refresh", {"refreshToken": value})
+        return request("/api/v1/auth/refresh", cookie=value)
     def concurrent(callables):
         barrier = threading.Barrier(len(callables))
         def run(fn):
@@ -130,8 +134,13 @@ def main():
     assert status == 200 and session["expiresInSeconds"] > 0
     assert request("/api/v1/auth/login", {"email": email, "password": password},
                    origin=args.base_url)[0] == 200, "Same-origin login through Nginx was rejected"
-    print("PASS same-origin login through Nginx on the published port without a CORS allowlist entry")
-    access, original = session["accessToken"], session["refreshToken"]
+    print("PASS same-origin login through Nginx on the explicitly allowed public origin")
+    for origin in (None, "https://untrusted.example"):
+        status, error = request("/api/v1/auth/refresh", origin=origin)
+        assert status == 403 and error["code"] == "ORIGIN_NOT_ALLOWED"
+    status, error = request("/api/v1/auth/refresh")
+    assert status == 401 and error["code"] == "UNAUTHORIZED"
+    access, original = session["accessToken"], session.refresh_cookie
     digest = hashlib.sha256(original.encode()).hexdigest()
     assert sql(f"SELECT count(*) FROM refresh_tokens WHERE user_id = '{user_id}' AND token_hash = '{digest}' AND revoked_at IS NULL;") == "1"
     assert request("/api/v1/users/me")[0] == 401
@@ -180,10 +189,10 @@ def main():
 
     outcomes = concurrent([lambda: refresh(original), lambda: refresh(original)])
     assert sorted(status for status, _ in outcomes) == [200, 401]
-    rotated = next(body for status, body in outcomes if status == 200)["refreshToken"]
+    rotated = next(body for status, body in outcomes if status == 200).refresh_cookie
     assert refresh(original)[0] == 401
-    assert request("/api/v1/auth/logout", {"refreshToken": rotated})[0] == 204
-    assert request("/api/v1/auth/logout", {"refreshToken": rotated})[0] == 204
+    assert request("/api/v1/auth/logout", cookie=rotated)[0] == 204
+    assert request("/api/v1/auth/logout", cookie=rotated)[0] == 204
     assert request("/api/v1/auth/logout", method="POST")[0] == 204
     assert refresh(rotated)[0] == 401
     # Existing access JWTs remain valid until expiration under the frozen model.
@@ -192,7 +201,7 @@ def main():
 
     # Hold a real PostgreSQL row lock across expiry, before the HTTP request starts.
     session = login()[1]
-    digest = hashlib.sha256(session["refreshToken"].encode()).hexdigest()
+    digest = hashlib.sha256(session.refresh_cookie.encode()).hexdigest()
     sql(f"UPDATE refresh_tokens SET expires_at = now() + interval '5 seconds' WHERE token_hash = '{digest}';")
     holder = subprocess.Popen([
         "docker", "exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
@@ -204,7 +213,7 @@ def main():
         assert holder.stdout.readline().strip() == "BEGIN"
         assert holder.stdout.readline().strip() == "t"
         assert holder.stdout.readline().strip() == "LOCKED"
-        assert refresh(session["refreshToken"])[0] == 401
+        assert refresh(session.refresh_cookie)[0] == 401
         holder.communicate(timeout=15)
         assert holder.returncode == 0
     finally:
@@ -215,11 +224,11 @@ def main():
 
     session = login()[1]
     sql(f"UPDATE refresh_tokens SET expires_at = now() - interval '1 minute' WHERE user_id = '{user_id}';")
-    assert refresh(session["refreshToken"])[0] == 401
+    assert refresh(session.refresh_cookie)[0] == 401
     session = login()[1]
     sql(f"UPDATE users SET status = 'DISABLED' WHERE id = '{user_id}';")
     assert login()[0] == 401
-    assert refresh(session["refreshToken"])[0] == 401
+    assert refresh(session.refresh_cookie)[0] == 401
     assert request("/api/v1/users/me", token=session["accessToken"])[0] == 401
     assert request("/api/v1/health", origin="https://untrusted.example")[0] == 403
     print("PASS expiry, disabled user login/refresh/profile, CORS denial")

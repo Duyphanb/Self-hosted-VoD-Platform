@@ -31,7 +31,7 @@ The first request generates a unique synthetic `testEmail` for the run. The orde
 1. registers the user;
 2. proves duplicate registration is rejected;
 3. proves invalid credentials are rejected;
-4. logs in and captures the access and refresh tokens;
+4. logs in and captures the access token plus the refresh cookie;
 5. rotates the refresh token;
 6. proves the prior refresh token cannot be replayed;
 7. calls the protected current-profile endpoint;
@@ -114,7 +114,7 @@ CI runs this collection in the full-stack step, after the Sprint 3 catalog colle
 - `testPassword` is a synthetic local-only value, not a real credential.
 - The collection generates a new synthetic email on every ordered run.
 - Synthetic users remain in the local PostgreSQL volume after a run. The Sprint 3 collection leaves its catalog fixtures, and the Sprint 4 upload collection leaves two seeded movies, an in-flight QUEUED asset/job pair and a raw object; run them only against a disposable project.
-- Access and refresh token variables start empty and are marked as secrets.
+- Access-token and refresh-cookie variables start empty and are marked as secrets.
 - Do not export or commit an environment after it has captured live tokens.
 - Do not point this collection at a shared or production deployment without an explicit test-data and cleanup plan.
 
@@ -122,10 +122,8 @@ CI runs this collection in the full-stack step, after the Sprint 3 catalog colle
 
 The notes below concern the Sprint 2 auth collection.
 
-The frozen OpenAPI contract lists logout as unauthenticated with an optional body and documents `204`, `400` and `401`. Sprint 2 Issue 2.4 and the current implementation are more specific: logout is public and idempotently returns `204` whether the submitted token is active, revoked, unknown, or omitted. This collection verifies the implemented Sprint 2 behavior without changing the frozen architecture documents.
+The collection follows ADR-012 Issue 6.9: auth requests send `Origin: {{baseUrl}}`; refresh/logout send no body. Explicit `Cookie` headers and a disabled jar make Secure cookies work under Newman 6.2.2 on loopback HTTP and prevent duplicate cookies. Login/refresh assert no refresh token in JSON and validate HttpOnly, Secure, SameSite, host-only scope, path and lifetime. Replay/401 and logout assert the clearing cookie. Runtime cookie variables are secret and never exported or printed; keep `--silent` when running Newman.
 
-The `ApiError.code` checks are implementation regression evidence. The frozen schema requires a string code but does not define those values as an enum.
-
-The contract now also declares the validation `400` responses (`VALIDATION_ERROR`, `MALFORMED_REQUEST`) that login, refresh and logout already returned through the existing request-validation layer (Issue #120). The runtime behavior did not change. The backend full-context tests validate these responses against `API-CONTRACT.yaml`; this collection does not exercise them.
+`baseUrl` must be an origin listed in `CORS_ALLOWED_ORIGINS`. A non-default edge port needs its own entry for the auth Origin check. Logout is public/idempotent 204, always clears the cookie and ignores any request body. Refresh state failures return 503 and do not clear the cookie. Backend full-context tests validate every auth response against `API-CONTRACT.yaml` and exercise the Origin/Fetch-Site matrix.
 
 The Sprint 2 collection includes no test-only RBAC probe; the admin catalog and upload authorization checks live in the Sprint 3 and Sprint 4 collections. Frontend route guards are not a backend authorization boundary.

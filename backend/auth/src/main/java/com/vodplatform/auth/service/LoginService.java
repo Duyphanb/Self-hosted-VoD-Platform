@@ -1,6 +1,5 @@
 package com.vodplatform.auth.service;
 
-import com.vodplatform.auth.dto.AuthResponse;
 import com.vodplatform.auth.dto.LoginRequest;
 import com.vodplatform.auth.exception.InvalidCredentialsException;
 import com.vodplatform.auth.persistence.UserEntity;
@@ -37,7 +36,12 @@ public class LoginService {
     }
 
     @Transactional
-    public AuthResponse login(LoginRequest request) {
+    public IssuedAuthentication login(LoginRequest request) {
+        return login(request, null);
+    }
+
+    @Transactional
+    public IssuedAuthentication login(LoginRequest request, String presentedToken) {
         Optional<UserEntity> userCandidate = userRepository.findByEmail(request.email());
         String passwordHash = userCandidate
                 .map(UserEntity::getPasswordHash)
@@ -52,13 +56,14 @@ public class LoginService {
             user.updatePasswordHash(passwordEncoder.encode(request.password()));
         }
 
+        refreshTokenService.revokeValid(presentedToken);
         IssuedAccessToken accessToken = jwtAccessTokenService.issue(user);
         IssuedRefreshToken refreshToken = refreshTokenService.issue(user);
-        return new AuthResponse(
+        return new IssuedAuthentication(
                 userProfileMapper.toProfile(user),
                 accessToken.value(),
                 refreshToken.value(),
-                accessToken.expiresInSeconds()
+                accessToken.expiresInSeconds(), refreshToken.expiresAt()
         );
     }
 }

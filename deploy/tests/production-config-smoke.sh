@@ -33,7 +33,7 @@ REDIS_PASSWORD RABBITMQ_USERNAME RABBITMQ_PASSWORD RABBITMQ_BACKEND_USERNAME RAB
 RABBITMQ_WORKER_USERNAME RABBITMQ_WORKER_PASSWORD MINIO_ACCESS_KEY MINIO_SECRET_KEY
 MINIO_BACKEND_ACCESS_KEY MINIO_BACKEND_SECRET_KEY MINIO_WORKER_ACCESS_KEY MINIO_WORKER_SECRET_KEY JWT_SECRET"
 required_names="$credential_names NGINX_HTTP_PORT"
-setting_names="$required_names MAX_UPLOAD_SIZE_MB POSTGRES_DB BACKEND_JAVA_TOOL_OPTIONS WORKER_JAVA_TOOL_OPTIONS"
+setting_names="$required_names CORS_ALLOWED_ORIGINS AUTH_COOKIE_SECURE MAX_UPLOAD_SIZE_MB POSTGRES_DB BACKEND_JAVA_TOOL_OPTIONS WORKER_JAVA_TOOL_OPTIONS"
 
 set_value() { eval "value_$1=\$2"; }
 value_for() { eval "printf '%s' \"\${value_$1}\""; }
@@ -67,6 +67,8 @@ set_synthetic_values() {
   set_value POSTGRES_DB "ci_platform_$run_token"
   set_value BACKEND_JAVA_TOOL_OPTIONS ""
   set_value WORKER_JAVA_TOOL_OPTIONS ""
+  set_value CORS_ALLOWED_ORIGINS "https://vod.example.com"
+  set_value AUTH_COOKIE_SECURE "true"
   spring_datasource_url_value=""
 }
 
@@ -98,6 +100,8 @@ set_published_defaults() {
   set_value POSTGRES_DB "vod_platform"
   set_value BACKEND_JAVA_TOOL_OPTIONS ""
   set_value WORKER_JAVA_TOOL_OPTIONS ""
+  set_value CORS_ALLOWED_ORIGINS "https://vod.example.com"
+  set_value AUTH_COOKIE_SECURE "true"
   spring_datasource_url_value=""
 }
 
@@ -147,8 +151,6 @@ run_check() (
 
 run_production_compose() (
   export_settings
-  CORS_ALLOWED_ORIGINS=
-  export CORS_ALLOWED_ORIGINS
   docker compose \
     -p "$compose_project" \
     -f deploy/docker-compose.yml \
@@ -408,6 +410,15 @@ done
 printf '%s\n' "Production edge publication checks passed"
 
 set_synthetic_values
+set_value CORS_ALLOWED_ORIGINS ""
+expect_check_rejection "An empty auth allowlist" "CORS_ALLOWED_ORIGINS must include the public origin"
+set_synthetic_values
+set_value AUTH_COOKIE_SECURE "false"
+expect_check_rejection "An insecure production cookie" "AUTH_COOKIE_SECURE must be true"
+printf '%s\n' "Production auth cookie checks passed"
+
+
+set_synthetic_values
 set_value MAX_UPLOAD_SIZE_MB "1024"
 expect_check_rejection "An upload limit different from Nginx" "MAX_UPLOAD_SIZE_MB must equal the frozen Nginx upload limit"
 if run_production_compose run --rm --no-deps production-config-check > "$log_file" 2>&1; then
@@ -578,7 +589,8 @@ expected = {
         "SPRING_JPA_HIBERNATE_DDL_AUTO": "validate",
         "MAX_UPLOAD_SIZE_MB": "2048",
         "JWT_SECRET": values["JWT_SECRET"],
-        "CORS_ALLOWED_ORIGINS": "",
+        "CORS_ALLOWED_ORIGINS": values["CORS_ALLOWED_ORIGINS"],
+        "AUTH_COOKIE_SECURE": values["AUTH_COOKIE_SECURE"],
         "REDIS_PASSWORD": values["REDIS_PASSWORD"],
         "RABBITMQ_USERNAME": values["RABBITMQ_BACKEND_USERNAME"],
         "RABBITMQ_PASSWORD": values["RABBITMQ_BACKEND_PASSWORD"],

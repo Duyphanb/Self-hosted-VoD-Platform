@@ -15,7 +15,7 @@ Frozen requirements and architecture govern implementation. Planning/status docu
 | Runtime/module boundaries | [SYSTEM-ARCHITECTURE.md](architecture/SYSTEM-ARCHITECTURE.md), relevant [ADR](architecture/adr/) |
 | Tables, fields, constraints, migrations | [ERD.md](architecture/ERD.md); use frozen names such as `people`, `movie_credits`, `watchlist_items` |
 | HTTP methods, paths, payloads, status codes | [API-CONTRACT.yaml](architecture/API-CONTRACT.yaml), affected flow in [SEQUENCE-DIAGRAMS.md](architecture/SEQUENCE-DIAGRAMS.md) |
-| Authentication, authorization, uploads, HLS access | [SECURITY.md](architecture/SECURITY.md) plus the affected API/sequence; browser session, refresh cookie and revocation in [ADR-012](architecture/adr/ADR-012.md) (planned implementation, Issues 6.9 and 6.10) |
+| Authentication, authorization, uploads, HLS access | [SECURITY.md](architecture/SECURITY.md) plus the affected API/sequence; browser session, refresh cookie and revocation in [ADR-012](architecture/adr/ADR-012.md) (Issue 6.9 implemented; Issue 6.10 planned) |
 | Upload transport, asset/current rules, encoding handoff and media cleanup | [ADR-010](architecture/adr/ADR-010.md), [ADR index](architecture/README.md#adr-index); migration and backlog specifications are planned implementation, not delivered behaviour |
 | HLS proxy responses, player rules (hls.js, token refresh, errors, start position), playback progress, completion and continue watching | [ADR-011](architecture/adr/ADR-011.md); backlog specifications are planned implementation, not delivered behaviour |
 | Movie visibility, archive retention, catalog slugs and matching | [SECURITY.md](architecture/SECURITY.md#movie-visibility), [ADR-009](architecture/adr/ADR-009.md) |

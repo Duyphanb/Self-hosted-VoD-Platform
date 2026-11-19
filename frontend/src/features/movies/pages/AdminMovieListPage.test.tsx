@@ -4,7 +4,8 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-rou
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthResponse, PageMeta, UserProfile } from '../../../lib/api/types';
 import { AuthProvider } from '../../auth/AuthContext';
-import { createAuthSession, writeAuthSession } from '../../auth/authStorage';
+import { createAuthSession} from '../../auth/authStorage';
+import { installCookieSession as writeAuthSession } from '../../../test/cookieSession';
 import { AdminRoute } from '../../auth/RouteGuards';
 import { movieKeys, type MovieSummary } from '../moviesApi';
 import { AdminMovieListPage } from './AdminMovieListPage';
@@ -331,7 +332,7 @@ describe('AdminMovieListPage', () => {
 });
 
 function renderList({ path = '/admin/movies', state = null, user = admin }: { path?: string; state?: unknown; user?: UserProfile } = {}) {
-  const response: AuthResponse = { user, accessToken: 'access-token', refreshToken: 'refresh-token', expiresInSeconds: 900 };
+  const response: AuthResponse = { user, accessToken: 'access-token', expiresInSeconds: 900 };
   writeAuthSession(createAuthSession(response), window.localStorage);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(

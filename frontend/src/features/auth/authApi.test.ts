@@ -12,7 +12,7 @@ const validUser = {
 const validAuthResponse = {
   user: validUser,
   accessToken: 'access-token',
-  refreshToken: 'refresh-token',
+
   expiresInSeconds: 900
 };
 
@@ -41,13 +41,13 @@ describe('auth API response decoding', () => {
       email: 'viewer@example.com',
       password: 'strong-password'
     })).resolves.toEqual(validAuthResponse);
-    await expect(refresh(client, 'refresh-token')).resolves.toEqual(validAuthResponse);
+    await expect(refresh(client)).resolves.toEqual(validAuthResponse);
   });
 
   it('rejects an incomplete AuthResponse before it reaches auth state', async () => {
     fetchMock.mockResolvedValue(jsonResponse({
       ...validAuthResponse,
-      refreshToken: ''
+      accessToken: '',
     }));
 
     await expect(login(client, {

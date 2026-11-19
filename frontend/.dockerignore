@@ -2,3 +2,7 @@ node_modules/
 dist/
 .vite/
 *.log
+dist-e2e/
+test-results/
+test-results-stack/
+playwright-report/

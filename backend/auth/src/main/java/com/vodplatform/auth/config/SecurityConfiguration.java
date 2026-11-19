@@ -27,6 +27,15 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @EnableConfigurationProperties(CorsProperties.class)
 public class SecurityConfiguration {
 
+    private final CorsProperties origins;
+    private final com.vodplatform.shared.error.ApiErrorFactory errors;
+    private final tools.jackson.databind.ObjectMapper mapper;
+
+    public SecurityConfiguration(CorsProperties origins, com.vodplatform.shared.error.ApiErrorFactory errors,
+                                 tools.jackson.databind.ObjectMapper mapper) {
+        this.origins = origins; this.errors = errors; this.mapper = mapper;
+    }
+
     private static final List<String> CORS_ALLOWED_METHODS = List.of(
             HttpMethod.GET.name(),
             HttpMethod.POST.name(),
@@ -117,7 +126,9 @@ public class SecurityConfiguration {
             HttpSecurity http,
             CorsConfigurationSource corsConfigurationSource
     ) throws Exception {
-        http.cors(cors -> cors.configurationSource(corsConfigurationSource))
+        http.addFilterBefore(new com.vodplatform.auth.security.AuthOriginFilter(origins, errors, mapper),
+                        org.springframework.web.filter.CorsFilter.class)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 // SECURITY.md: HSTS is deferred and remains an edge decision, on both chains.
                 .headers(headers -> headers.httpStrictTransportSecurity(hsts -> hsts.disable()))
                 .csrf(csrf -> csrf.disable())

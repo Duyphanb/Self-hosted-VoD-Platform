@@ -20,6 +20,14 @@ public class RefreshTokenService {
 
     private static final int TOKEN_BYTES = 32;
 
+    public void revokeValid(String value) {
+        if (value == null || value.isBlank() || value.length() > 128) return;
+        refreshTokenRepository.findByTokenHash(hash(value))
+                .filter(token -> token.getRevokedAt() == null && token.getExpiresAt().isAfter(clock.instant())
+                        && token.getUser().getStatus() == com.vodplatform.auth.persistence.UserStatus.ACTIVE)
+                .ifPresent(token -> token.revoke(clock.instant()));
+    }
+
     private final RefreshTokenRepository refreshTokenRepository;
     private final AuthTokenProperties properties;
     private final SecureRandom secureRandom;

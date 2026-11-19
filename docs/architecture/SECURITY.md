@@ -16,26 +16,28 @@ Status: Frozen for MVP implementation
 MVP uses bearer JWT access tokens plus persisted refresh tokens.
 
 - Access tokens are short-lived JWTs signed with `JWT_SECRET`.
-- Refresh tokens use JSON response and request bodies only.
+- Refresh tokens travel only in the HttpOnly `vod_refresh` cookie (ADR-012 Issue 6.9).
 - Refresh tokens are opaque random values stored in PostgreSQL as hashes only.
 - Refresh tokens have an expiration timestamp and can be revoked.
 - `POST /api/v1/auth/refresh` rotates the refresh token: the old token is revoked and a new token is issued.
-- `POST /api/v1/auth/logout` revokes the submitted refresh token when present; the frontend also clears local auth state.
+- `POST /api/v1/auth/logout` revokes the cookie token when present and always clears the cookie; the frontend clears its memory session immediately.
 - Passwords are hashed with BCrypt.
-- Login passwords share the registration maximum of 72 characters, and refresh and logout tokens are at most 128 characters, both counted in UTF-16 code units. Longer values return 400 `VALIDATION_ERROR` before any lookup or hashing. New hashes pre-hash the full UTF-8 password with SHA-256, so a password longer than 72 bytes is never truncated by BCrypt.
+- Login passwords share the registration maximum of 72 characters (UTF-16 code units); longer passwords return 400 `VALIDATION_ERROR`. Cookie values longer than 128 characters are rejected before hashing: refresh returns 401 `UNAUTHORIZED` and clears the cookie; logout ignores them and clears the cookie. New hashes pre-hash the full UTF-8 password with SHA-256, so a password longer than 72 bytes is never truncated by BCrypt.
 - Login failures return a generic authentication error.
 - Email identities are case-insensitive through PostgreSQL `lower(email)` for both lookup and uniqueness. Preserve stored spelling and do not collapse dots or plus tags. Existing identity collisions block migration rather than merging accounts; see [ADR-008](adr/ADR-008.md).
 
-### Browser session (ADR-012, planned: Issues 6.9 and 6.10)
+### Browser session (ADR-012, current: Issue 6.9; planned: Issue 6.10)
 
-[ADR-012](adr/ADR-012.md) replaces the body-based delivery above in two steps. Until Issue 6.9 lands, the list above is the delivered behaviour.
-
-After Issue 6.9:
+[ADR-012](adr/ADR-012.md) supersedes ADR-007. Current behaviour after Issue 6.9:
 
 - The refresh token travels only in the `vod_refresh` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, host-only, `Max-Age` equal to the token's remaining lifetime. It never appears in a body, `localStorage`, `sessionStorage` or IndexedDB. `Secure` may be disabled only for loopback-only local development; the production preflight rejects it. A request with two `vod_refresh` cookies is invalid; no subdomain of the deployment's domain may be controlled by a third party (otherwise the cookie becomes `__Host-vod_refresh` with `Path=/`).
 - The access token is kept in JavaScript memory only and sent only in the `Authorization` header. No cookie authenticates `/api/v1/*` resources or `/hls/*`.
 - `refresh` and `logout` take no body and require an allowed `Origin`; `login` and `register` reject a present, disallowed `Origin`; `Sec-Fetch-Site: cross-site` is rejected on all four (403 `ORIGIN_NOT_ALLOWED`). Login revokes a refresh token presented with it.
-- The refresh token still slides for 7 days and logout revokes the presented token, as today.
+- The refresh token still slides for 7 days. A replay returns 401 and clears the cookie without revoking the successor token. A database/pool failure during refresh returns 503 `AUTH_STATE_UNAVAILABLE` without clearing the cookie.
+- Login ignores duplicate cookies; refresh rejects them with 401; logout revokes none and clears them. Only a successful login revokes one valid presented token.
+- The SPA serializes login, refresh/bootstrap and logout with the Web Lock `vod.auth.session.v1`; request timeouts abort inside that lock. Without Web Locks only the documented single-tab fallback is supported. Storage contains only a versioned generation/user-id/logout-pending marker. Every protected request checks it before sending and committing; focus, visibility and pageshow reconcile memory with it. BroadcastChannel only wakes tabs.
+- Only refresh 401 ends the local session. Network failures, timeouts and 5xx allow retry. An unconfirmed logout stays pending across reloads and retries logout instead of restoring a session. Blocked storage falls back to memory with a visible notice.
+- Local Compose keeps `Secure=true`: Chromium and Firefox accept and send this cookie over loopback HTTP (`localhost` and `127.0.0.1`). Plain HTTP on a LAN address cannot sign in; use HTTPS (#136). The production preflight requires a nonempty public-origin allowlist and `AUTH_COOKIE_SECURE=true`.
 
 After Issue 6.10 (required before public deployment):
 
@@ -93,7 +95,7 @@ Browser -> Nginx /hls/* -> backend HLS proxy -> MinIO
 Rules:
 
 - HLS playlist and segment requests require the bearer access token.
-- The token is accepted only in the `Authorization` header, on `/hls/*` and `/api/v1/*` alike. An `access_token` query or form parameter is never accepted and no cookie carries a token, so tokens never reach URLs, logs or browser history ([ADR-011 D3](adr/ADR-011.md#player-transport-and-authentication-d1-d4)).
+- The token is accepted only in the `Authorization` header, on `/hls/*` and `/api/v1/*` alike. An `access_token` query or form parameter is never accepted and no cookie carries an access token, so access tokens never reach URLs, logs or browser history ([ADR-011 D3](adr/ADR-011.md#player-transport-and-authentication-d1-d4)).
 - Nginx forwards `Authorization` to backend for `/hls/*`.
 - Backend validates JWT, movie visibility, and current READY asset before reading from MinIO. Current is the READY asset with greatest `(created_at, id)` for the movie ([ADR-010](adr/ADR-010.md)).
 - Backend streams only objects of that current asset. Missing, hidden, non-ready and superseded assets return 404 on both playlist and segment requests. A switch may interrupt an old stream; the player reopens playback. Derive the attempt prefix from the stored master key and validate segment names; never accept an arbitrary storage key from the client.

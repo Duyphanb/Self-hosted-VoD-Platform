@@ -22,6 +22,14 @@ Use this folder for Phase 5 deployment and operations artifacts.
 
 Do not put business requirements or implementation code here. Deployment docs should describe how to operate the implemented system.
 
+## Browser session upgrade (Issue 6.9)
+
+Deploy the backend and SPA together: refresh/logout no longer accept a JSON token, and login/refresh no longer return one. Old SPA bundles sign out once after this upgrade; reload to get the new bundle and sign in again. No database migration is required.
+
+Set `CORS_ALLOWED_ORIGINS` to the browser-visible public origin (include a non-default port). Refresh/logout require an exact allowed `Origin`, independently of Nginx's forwarded origin and CORS. An empty allowlist fails production preflight. Leave `AUTH_COOKIE_SECURE=true`; production preflight rejects false. Local false is restricted at application startup to a nonempty loopback-only allowlist. Loopback HTTP works with Secure cookies in Chromium and Firefox; LAN HTTP sign-in does not. Use HTTPS (#136) for other devices.
+
+Only refresh 401 clears the browser session. A refresh state-store outage returns 503 `AUTH_STATE_UNAVAILABLE` and preserves the cookie. An unconfirmed logout stays pending in the SPA and must be retried; bearer revocation/session enforcement in Issue 6.10 remains planned before public deployment.
+
 ## First Administrator
 
 Registration always assigns `ROLE_USER`, and no administrator account or

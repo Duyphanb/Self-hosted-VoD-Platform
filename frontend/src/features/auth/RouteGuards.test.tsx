@@ -1,3 +1,4 @@
+import * as authApi from './authApi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { type PropsWithChildren, type ReactNode, useState } from 'react';
@@ -11,7 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthResponse, UserProfile } from '../../lib/api/types';
 import { AuthProvider } from './AuthContext';
 import { AdminRoute, GuestRoute, ProtectedRoute } from './RouteGuards';
-import { AUTH_SESSION_STORAGE_KEY, createAuthSession, writeAuthSession } from './authStorage';
+import { createAuthSession} from './authStorage';
+import { installCookieSession as writeAuthSession } from '../../test/cookieSession';
 
 const regularUser: UserProfile = {
   id: '3fcf25c2-f096-4462-ae63-4ba4702a9078',
@@ -23,7 +25,7 @@ const regularUser: UserProfile = {
 const authResponse: AuthResponse = {
   user: regularUser,
   accessToken: 'access-token',
-  refreshToken: 'refresh-token',
+
   expiresInSeconds: 900
 };
 
@@ -58,13 +60,13 @@ describe('route guards', () => {
 
   it('does not render or redirect until auth initialization finishes', async () => {
     persistSession(authResponse, Date.now() + 1_000);
-    fetchMock.mockReturnValue(new Promise<Response>(() => undefined));
+    vi.mocked(authApi.refresh).mockReset().mockReturnValue(new Promise(() => undefined));
     renderGuardRoutes('/account', <ProtectedRoute />);
 
     expect(await screen.findByRole('status')).toHaveTextContent('Checking authentication…');
     expect(screen.queryByText('Protected content')).not.toBeInTheDocument();
     expect(screen.queryByTestId('login-destination')).not.toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(authApi.refresh).toHaveBeenCalledTimes(1));
   });
 
   it('redirects a regular user away from an admin route', async () => {
@@ -99,8 +101,8 @@ describe('route guards', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Count 0' }));
     expect(screen.getByRole('button', { name: 'Count 1' })).toBeInTheDocument();
 
-    // Another tab rotates the tokens of the same user.
-    switchStoredSession({ ...authResponse, accessToken: 'rotated-access', refreshToken: 'rotated-refresh' });
+    // Another tab's cookie rotation does not replace this tab's in-memory access token.
+    act(() => { window.dispatchEvent(new Event('focus')); });
     expect(screen.getByRole('button', { name: 'Count 1' })).toBeInTheDocument();
 
     // Another tab signs in as someone else.
@@ -108,7 +110,7 @@ describe('route guards', () => {
       ...authResponse,
       user: { ...regularUser, id: 'b5f7c0f4-1d2e-4c3b-9a8f-7e6d5c4b3a21', email: 'other@example.com' },
       accessToken: 'other-access',
-      refreshToken: 'other-refresh'
+
     });
     expect(await screen.findByRole('button', { name: 'Count 0' })).toBeInTheDocument();
   });
@@ -144,11 +146,11 @@ describe('GuestRoute', () => {
 
   it('renders nothing but a status until auth initialization finishes', async () => {
     persistSession(authResponse, Date.now() + 1_000);
-    fetchMock.mockReturnValue(new Promise<Response>(() => undefined));
+    vi.mocked(authApi.refresh).mockReset().mockReturnValue(new Promise(() => undefined));
     renderGuestRoutes();
 
     expect(await screen.findByRole('status')).toHaveTextContent('Checking authentication…');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(authApi.refresh).toHaveBeenCalledTimes(1));
     expect(screen.queryByText('Landing content')).not.toBeInTheDocument();
     expect(screen.queryByText('Signed-in destination')).not.toBeInTheDocument();
   });
@@ -177,7 +179,7 @@ function Counter() {
 function switchStoredSession(response: AuthResponse) {
   act(() => {
     persistSession(response);
-    window.dispatchEvent(new StorageEvent('storage', { key: AUTH_SESSION_STORAGE_KEY }));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'vod.auth.marker.v2' }));
   });
 }
 

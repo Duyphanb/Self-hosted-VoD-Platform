@@ -6,7 +6,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.vodplatform.auth.dto.RefreshRequest;
 import com.vodplatform.auth.persistence.RefreshTokenEntity;
 import com.vodplatform.auth.persistence.RefreshTokenRepository;
 import com.vodplatform.auth.persistence.UserEntity;
@@ -36,7 +35,7 @@ class LogoutServiceTest {
         when(refreshTokenService.hash("raw-token")).thenReturn("stored-hash");
         when(refreshTokenRepository.findByTokenHash("stored-hash")).thenReturn(Optional.of(token));
 
-        service.logout(new RefreshRequest("raw-token"));
+        service.logout("raw-token");
 
         assertThat(token.getRevokedAt()).isEqualTo(NOW);
         verify(refreshTokenRepository).findByTokenHash("stored-hash");
@@ -54,7 +53,7 @@ class LogoutServiceTest {
         when(refreshTokenService.hash("unknown-token")).thenReturn("unknown-hash");
         when(refreshTokenRepository.findByTokenHash("unknown-hash")).thenReturn(Optional.empty());
 
-        service.logout(new RefreshRequest("unknown-token"));
+        service.logout("unknown-token");
 
         verify(refreshTokenRepository).findByTokenHash("unknown-hash");
     }
@@ -67,7 +66,7 @@ class LogoutServiceTest {
         when(refreshTokenService.hash("raw-token")).thenReturn("stored-hash");
         when(refreshTokenRepository.findByTokenHash("stored-hash")).thenReturn(Optional.of(token));
 
-        service.logout(new RefreshRequest("raw-token"));
+        service.logout("raw-token");
 
         assertThat(token.getRevokedAt()).isEqualTo(originalRevocation);
     }

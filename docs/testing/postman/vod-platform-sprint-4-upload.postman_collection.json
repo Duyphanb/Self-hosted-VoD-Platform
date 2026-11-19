@@ -33,7 +33,21 @@
               "pm.test('Administrator session includes ROLE_ADMIN', () => {",
               "  pm.expect(body.user.roles).to.include('ROLE_ADMIN');",
               "});",
-              "pm.environment.set('adminAccessToken', body.accessToken);"
+              "pm.environment.set('adminAccessToken', body.accessToken);",
+              "const cookieHeader = pm.response.headers.get('Set-Cookie') || '';",
+              "pm.test('Refresh cookie scope and security attributes', () => {",
+              "  pm.expect(/(?:^|;)\\s*HttpOnly(?:;|$)/i.test(cookieHeader)).to.equal(true);",
+              "  pm.expect(/(?:^|;)\\s*Secure(?:;|$)/i.test(cookieHeader)).to.equal(true);",
+              "  pm.expect(/SameSite=Strict/i.test(cookieHeader)).to.equal(true);",
+              "  pm.expect(/Path=\\/api\\/v1\\/auth(?:;|$)/i.test(cookieHeader)).to.equal(true);",
+              "  pm.expect(/Domain=/i.test(cookieHeader)).to.equal(false);",
+              "  const age = /Max-Age=(\\d+)/i.exec(cookieHeader);",
+              "  pm.expect(Boolean(age) && Number(age[1]) > 0 && Number(age[1]) <= 604800).to.equal(true);",
+              "});",
+              "pm.test('No refresh token in the JSON body', () => pm.expect(pm.response.json()).not.to.have.property('refreshToken'));",
+              "const cookieValue = /^vod_refresh=([^;]+)/.exec(cookieHeader);",
+              "pm.test('Opaque cookie is present', () => pm.expect(Boolean(cookieValue)).to.equal(true));",
+              "if (cookieValue) pm.environment.set('refreshCookie', cookieValue[1]);"
             ]
           }
         }
@@ -47,6 +61,11 @@
           {
             "key": "Content-Type",
             "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Origin",
+            "value": "{{baseUrl}}",
             "type": "text"
           }
         ],
@@ -70,7 +89,13 @@
               "language": "json"
             }
           }
+        },
+        "protocolProfileBehavior": {
+          "disableCookies": true
         }
+      },
+      "protocolProfileBehavior": {
+        "disableCookies": true
       }
     },
     {
@@ -98,6 +123,11 @@
             "key": "Content-Type",
             "value": "application/json",
             "type": "text"
+          },
+          {
+            "key": "Origin",
+            "value": "{{baseUrl}}",
+            "type": "text"
           }
         ],
         "url": {
@@ -120,7 +150,13 @@
               "language": "json"
             }
           }
+        },
+        "protocolProfileBehavior": {
+          "disableCookies": true
         }
+      },
+      "protocolProfileBehavior": {
+        "disableCookies": true
       }
     },
     {
@@ -134,7 +170,21 @@
               "pm.test('Status is 200', () => {",
               "  pm.response.to.have.status(200);",
               "});",
-              "pm.environment.set('accessToken', pm.response.json().accessToken);"
+              "pm.environment.set('accessToken', pm.response.json().accessToken);",
+              "const cookieHeader = pm.response.headers.get('Set-Cookie') || '';",
+              "pm.test('Refresh cookie scope and security attributes', () => {",
+              "  pm.expect(/(?:^|;)\\s*HttpOnly(?:;|$)/i.test(cookieHeader)).to.equal(true);",
+              "  pm.expect(/(?:^|;)\\s*Secure(?:;|$)/i.test(cookieHeader)).to.equal(true);",
+              "  pm.expect(/SameSite=Strict/i.test(cookieHeader)).to.equal(true);",
+              "  pm.expect(/Path=\\/api\\/v1\\/auth(?:;|$)/i.test(cookieHeader)).to.equal(true);",
+              "  pm.expect(/Domain=/i.test(cookieHeader)).to.equal(false);",
+              "  const age = /Max-Age=(\\d+)/i.exec(cookieHeader);",
+              "  pm.expect(Boolean(age) && Number(age[1]) > 0 && Number(age[1]) <= 604800).to.equal(true);",
+              "});",
+              "pm.test('No refresh token in the JSON body', () => pm.expect(pm.response.json()).not.to.have.property('refreshToken'));",
+              "const cookieValue = /^vod_refresh=([^;]+)/.exec(cookieHeader);",
+              "pm.test('Opaque cookie is present', () => pm.expect(Boolean(cookieValue)).to.equal(true));",
+              "if (cookieValue) pm.environment.set('refreshCookie', cookieValue[1]);"
             ]
           }
         }
@@ -148,6 +198,11 @@
           {
             "key": "Content-Type",
             "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Origin",
+            "value": "{{baseUrl}}",
             "type": "text"
           }
         ],
@@ -171,7 +226,13 @@
               "language": "json"
             }
           }
+        },
+        "protocolProfileBehavior": {
+          "disableCookies": true
         }
+      },
+      "protocolProfileBehavior": {
+        "disableCookies": true
       }
     },
     {

@@ -1,613 +1,223 @@
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  createContext,
-  type PropsWithChildren,
-  useCallback,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState
-} from 'react';
-import {
-  API_BASE_URL,
-  ApiClient,
-  AuthenticationSupersededError
-} from '../../lib/api/client';
-import type { AuthResponse, UserProfile } from '../../lib/api/types';
-import {
-  login as loginRequest,
-  logout as logoutRequest,
-  refresh as refreshRequest,
-  register as registerRequest,
-  type LoginRequest,
-  type RegisterRequest
-} from './authApi';
-import {
-  AUTH_GENERATION_STORAGE_KEY,
-  AUTH_SESSION_STORAGE_KEY,
-  advanceAuthGeneration,
-  clearAuthSession,
-  createAuthSession,
-  readAuthGeneration,
-  type AuthSession,
-  readAuthSession,
-  writeAuthSession
-} from './authStorage';
+import { createContext, type PropsWithChildren, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { API_BASE_URL, ApiClient, ApiRequestError, AuthenticationSupersededError } from '../../lib/api/client';
+import type { UserProfile } from '../../lib/api/types';
+import * as authApi from './authApi';
+import { AUTH_GENERATION_STORAGE_KEY, createAuthSession, createMarkerStore, type AuthSession, type SessionMarker } from './authStorage';
+import { withAuthSessionLock } from './authSessionLock';
 import { useSupersededQueryRecovery } from './supersededQueryRecovery';
 
-const REFRESH_WINDOW_MILLISECONDS = 30_000;
-const AUTH_SESSION_LOCK_NAME = 'vod.auth.session.v1';
-const REFRESH_TIMEOUT_MILLISECONDS = 10_000;
-const TOKEN_REVOCATION_TIMEOUT_MILLISECONDS = 5_000;
-
 export interface AuthContextValue {
-  user: UserProfile | null;
-  accessToken: string | null;
-  refreshToken: string | null;
-  isAuthenticated: boolean;
-  isInitializing: boolean;
-  isLoading: boolean;
-  error: Error | null;
-  login(request: LoginRequest): Promise<UserProfile>;
-  register(request: RegisterRequest): Promise<UserProfile>;
-  logout(): Promise<void>;
-  refreshTokens(): Promise<void>;
-  clearError(): void;
+  user: UserProfile | null; accessToken: string | null;
+  isAuthenticated: boolean; isInitializing: boolean; isLoading: boolean; error: Error | null;
+  login(request: authApi.LoginRequest): Promise<UserProfile>;
+  register(request: authApi.RegisterRequest): Promise<UserProfile>;
+  logout(): Promise<void>; refreshTokens(): Promise<void>; clearError(): void;
 }
-
-interface AuthProviderProps extends PropsWithChildren {
-  storage?: Storage;
-  redirectToLogin?: () => void;
-}
-
+interface AuthProviderProps extends PropsWithChildren { storage?: Storage; redirectToLogin?: () => void }
 const AuthContext = createContext<AuthContextValue | null>(null);
 const ApiClientContext = createContext<ApiClient | null>(null);
+const asError = (e: unknown) => e instanceof Error ? e : new Error('Authentication request failed');
+const sameMarker = (a: SessionMarker, b: SessionMarker) => a.generation === b.generation
+  && a.userId === b.userId && a.logoutPending === b.logoutPending;
 
-export function AuthProvider({
-  children,
-  storage = window.localStorage,
-  redirectToLogin = defaultRedirectToLogin
-}: AuthProviderProps) {
+export function AuthProvider({ children, storage, redirectToLogin = defaultRedirect }: AuthProviderProps) {
   const queryClient = useQueryClient();
+  const [store] = useState(() => createMarkerStore(storage));
   const [session, setSession] = useState<AuthSession | null>(null);
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
   const sessionRef = useRef<AuthSession | null>(null);
-  const sessionRevisionRef = useRef(0);
-  const pendingOperationsRef = useRef(0);
-  const latestOperationRef = useRef(0);
-  const logoutInProgressRef = useRef(false);
-  const refreshInFlightRef = useRef<Promise<AuthSession> | null>(null);
-  const bootstrapStartedRef = useRef(false);
-  const authenticationFailureHandledRef = useRef(false);
-  const refreshAccessTokenRef = useRef<() => Promise<string>>(
-    () => Promise.reject(new Error('Authentication provider is not ready'))
-  );
-  const authenticationFailureRef = useRef<(failure: unknown) => void>(() => undefined);
-  // eslint-disable-next-line react-hooks/refs -- created once per provider; ApiClient calls these ref-reading callbacks only while a request runs, never during render.
-  const [apiClient] = useState(() => new ApiClient(API_BASE_URL, {
+  const [isInitializing, setInitializing] = useState(true);
+  const [isLoading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const [pending, setPending] = useState(store.read().marker.logoutPending);
+  const [storageAvailable, setStorageAvailable] = useState(store.read().available);
+  const [restoreFailed, setRestoreFailed] = useState(false);
+  const channel = useRef<BroadcastChannel | null>(null);
+  const refreshing = useRef<Promise<string> | null>(null);
+  const restoring = useRef<Promise<void> | null>(null);
+  const restoreQueued = useRef(false);
+  const restoreCallback = useRef<(() => Promise<void>) | null>(null);
+  const mounted = useRef(false);
+  const bootstrapped = useRef(false);
+  const actions = useRef<{ refresh: () => Promise<string>; fail: (e: unknown) => void }>({
+    refresh: () => Promise.reject(new Error('Authentication is initializing')), fail: () => undefined
+  });
+  // eslint-disable-next-line react-hooks/refs -- ApiClient retains these callbacks; its constructor never invokes them.
+  const [client] = useState(() => new ApiClient(API_BASE_URL, {
     getAuthenticationSnapshot: () => {
-      const currentSession = sessionRef.current;
-      const persistedSession = readAuthSession(storage);
-      const currentGeneration = readAuthGeneration(storage);
-      if (!currentSession
-        || !persistedSession
-        || currentSession.authGeneration !== currentGeneration
-        || persistedSession.authGeneration !== currentGeneration
-        || currentSession.user.id !== persistedSession.user.id
-        || currentSession.accessToken !== persistedSession.accessToken
-        || currentSession.refreshToken !== persistedSession.refreshToken) {
-        return null;
-      }
-      return {
-        userId: currentSession.user.id,
-        accessToken: currentSession.accessToken,
-        generation: currentSession.authGeneration
-      };
+      const current = sessionRef.current;
+      const marker = store.read().marker;
+      if (!current || marker.logoutPending || current.authGeneration !== marker.generation
+        || current.user.id !== marker.userId) return null;
+      return { userId: current.user.id, accessToken: current.accessToken, generation: current.authGeneration };
     },
-    refreshAccessToken: () => refreshAccessTokenRef.current(),
-    onAuthenticationFailure: (failure) => authenticationFailureRef.current(failure)
+    refreshAccessToken: () => actions.current.refresh(),
+    onAuthenticationFailure: (e) => actions.current.fail(e)
   }));
-
-  // Queries cancelled by a session change run again once the new session is in place.
-  const readCurrentSession = useCallback(() => sessionRef.current, []);
-  useSupersededQueryRecovery(queryClient, session, readCurrentSession);
-
-  const commitSession = useCallback((nextSession: AuthSession, expectedGeneration: number) => {
-    if (readAuthGeneration(storage) !== expectedGeneration) {
-      throw new AuthenticationSupersededError();
-    }
-    if (sessionRef.current && sessionRef.current.user.id !== nextSession.user.id) {
-      queryClient.clear();
-    }
-    writeAuthSession(nextSession, storage);
-    if (readAuthGeneration(storage) !== expectedGeneration) {
-      clearAuthSession(storage);
-      throw new AuthenticationSupersededError();
-    }
-    sessionRevisionRef.current += 1;
-    sessionRef.current = nextSession;
-    authenticationFailureHandledRef.current = false;
-    setSession(nextSession);
-  }, [queryClient, storage]);
-
-  const restoreSession = useCallback((storedSession: AuthSession) => {
-    if (storedSession.authGeneration !== readAuthGeneration(storage)) {
-      clearAuthSession(storage);
-      sessionRevisionRef.current += 1;
-      sessionRef.current = null;
-      setSession(null);
-      queryClient.clear();
-      return null;
-    }
-    if (sessionRef.current && sessionRef.current.user.id !== storedSession.user.id) {
-      queryClient.clear();
-    }
-    sessionRevisionRef.current += 1;
-    sessionRef.current = storedSession;
-    authenticationFailureHandledRef.current = false;
-    setSession(storedSession);
-    return storedSession;
-  }, [queryClient, storage]);
-
-  const clearMemorySession = useCallback(() => {
-    sessionRevisionRef.current += 1;
-    sessionRef.current = null;
-    setSession(null);
-    queryClient.clear();
+  const readSession = useCallback(() => sessionRef.current, []);
+  useSupersededQueryRecovery(queryClient, session, readSession);
+  const commit = useCallback((next: AuthSession | null) => {
+    if (sessionRef.current?.user.id !== next?.user.id || sessionRef.current?.authGeneration !== next?.authGeneration) queryClient.clear();
+    sessionRef.current = next; setSession(next);
   }, [queryClient]);
-
-  const clearSession = useCallback(() => {
-    clearMemorySession();
-    clearAuthSession(storage);
-  }, [clearMemorySession, storage]);
-
-  const beginOperation = useCallback(() => {
-    const operationId = latestOperationRef.current + 1;
-    latestOperationRef.current = operationId;
-    pendingOperationsRef.current += 1;
-    setIsLoading(true);
-    setError(null);
-    return operationId;
-  }, []);
-
-  const finishOperation = useCallback(() => {
-    pendingOperationsRef.current = Math.max(0, pendingOperationsRef.current - 1);
-    setIsLoading(pendingOperationsRef.current > 0);
-  }, []);
-
-  const setLatestOperationError = useCallback((operationId: number, failure: unknown) => {
-    if (latestOperationRef.current === operationId) {
-      setError(asError(failure));
-    }
-  }, []);
-
-  const handleAuthenticationFailure = useCallback((failure: unknown) => {
-    if (authenticationFailureHandledRef.current) {
-      return;
-    }
-    authenticationFailureHandledRef.current = true;
-    clearSession();
-    setError(asError(failure));
-    redirectToLogin();
-  }, [clearSession, redirectToLogin]);
-
-  const performRefresh = useCallback((): Promise<AuthSession> => {
-    if (logoutInProgressRef.current) {
-      return Promise.reject(new Error('Logout is already in progress'));
-    }
-    if (refreshInFlightRef.current) {
-      return refreshInFlightRef.current;
-    }
-    const currentSession = sessionRef.current;
-    if (!currentSession) {
-      return Promise.reject(new Error('No refresh token is available'));
-    }
-
-    const startingRevision = sessionRevisionRef.current;
-    const startingGeneration = currentSession.authGeneration;
-    const attemptedRefreshToken = currentSession.refreshToken;
-    const abortController = new AbortController();
-    const timeoutId = window.setTimeout(
-      () => abortController.abort(),
-      REFRESH_TIMEOUT_MILLISECONDS
-    );
-    const refreshPromise = withAuthSessionLock(async () => {
-      if (readAuthGeneration(storage) !== startingGeneration) {
-        if (sessionRef.current?.authGeneration === startingGeneration) clearMemorySession();
-        throw new AuthenticationSupersededError();
-      }
-      if (sessionRevisionRef.current !== startingRevision) {
-        const latestSession = sessionRef.current;
-        if (latestSession) {
-          return latestSession;
-        }
-        throw new AuthenticationSupersededError();
-      }
-
-      const storedSession = readAuthSession(storage);
-      if (!storedSession) {
-        clearMemorySession();
-        throw new AuthenticationSupersededError();
-      }
-      if (storedSession.refreshToken !== attemptedRefreshToken) {
-        const restoredSession = restoreSession(storedSession);
-        if (restoredSession) {
-          return restoredSession;
-        }
-        throw new AuthenticationSupersededError();
-      }
-
-      let response: AuthResponse;
+  const publish = useCallback((marker: SessionMarker) => {
+    const result = store.write(marker);
+    setStorageAvailable(result.available); setPending(marker.logoutPending);
+    channel.current?.postMessage('changed'); // Wake-up only; never identity or token data.
+  }, [store]);
+  const signedOut = useCallback(() => {
+    const m = store.read().marker;
+    publish({ ...m, generation: m.generation + 1, userId: null, logoutPending: false });
+    commit(null);
+  }, [commit, publish, store]);
+  const performRefresh = useCallback((): Promise<string> => {
+    if (refreshing.current) return refreshing.current;
+    const expected = store.read().marker;
+    const operation = withAuthSessionLock(async (signal) => {
+      if (!sameMarker(expected, store.read().marker) || expected.logoutPending) throw new AuthenticationSupersededError();
       try {
-        response = await refreshRequest(
-          apiClient,
-          attemptedRefreshToken,
-          abortController.signal
-        );
+        const response = await authApi.refresh(client, signal);
+        if (!sameMarker(expected, store.read().marker)) throw new AuthenticationSupersededError();
+        if (expected.userId && expected.userId !== response.user.id) throw new AuthenticationSupersededError();
+        const marker = { ...expected, userId: response.user.id };
+        // Once the response is validated, a newly mounted query's 401 needs a new
+        // rotation. Queue it behind this lock instead of reusing bootstrap's token.
+        refreshing.current = null;
+        publish(marker); commit(createAuthSession(response, Date.now(), marker.generation));
+        setError(null); setRestoreFailed(false); setInitializing(false);
+        return response.accessToken;
       } catch (failure) {
-        if (readAuthGeneration(storage) !== startingGeneration) {
-          if (sessionRef.current?.authGeneration === startingGeneration) clearMemorySession();
-          throw new AuthenticationSupersededError();
-        }
-        if (sessionRevisionRef.current !== startingRevision) {
-          const latestSession = sessionRef.current;
-          if (latestSession) {
-            return latestSession;
-          }
-          throw new AuthenticationSupersededError();
-        }
-
-        const rotatedSession = readAuthSession(storage);
-        if (!rotatedSession) {
-          clearMemorySession();
-          throw new AuthenticationSupersededError();
-        }
-        if (rotatedSession.refreshToken !== attemptedRefreshToken) {
-          const restoredSession = restoreSession(rotatedSession);
-          if (restoredSession) {
-            return restoredSession;
-          }
-          throw new AuthenticationSupersededError();
-        }
+        if (!sameMarker(expected, store.read().marker)) throw new AuthenticationSupersededError();
+        if (failure instanceof ApiRequestError && failure.status === 401 && sameMarker(expected, store.read().marker)) {
+          signedOut(); setInitializing(false); setRestoreFailed(false);
+        } else if (!(failure instanceof AuthenticationSupersededError)) { setError(asError(failure)); setRestoreFailed(true); }
         throw failure;
       }
+    });
+    refreshing.current = operation;
+    void operation.finally(() => { if (refreshing.current === operation) refreshing.current = null; }).catch(() => undefined);
+    return operation;
+  }, [client, commit, publish, signedOut, store]);
 
-      const persistedSession = readAuthSession(storage);
-      if (readAuthGeneration(storage) !== startingGeneration
-        || !persistedSession
-        || persistedSession.authGeneration !== startingGeneration
-        || persistedSession.user.id !== currentSession.user.id
-        || persistedSession.refreshToken !== attemptedRefreshToken) {
-        await revokeUnusedRefreshToken(apiClient, response.refreshToken);
-        if (readAuthGeneration(storage) === persistedSession?.authGeneration
-          && persistedSession
-          && persistedSession.refreshToken !== attemptedRefreshToken
-          && sessionRef.current?.refreshToken !== persistedSession.refreshToken) {
-          restoreSession(persistedSession);
-        }
-        const latestSession = sessionRef.current;
-        if (latestSession && latestSession.refreshToken !== attemptedRefreshToken) {
-          return latestSession;
-        }
-        clearMemorySession();
-        throw new AuthenticationSupersededError();
-      }
-
-      const nextSession = createAuthSession(response, Date.now(), startingGeneration);
+  const performLogout = useCallback(async (retry = false) => {
+    if (!retry) { commit(null); publish({ ...store.read().marker, userId: null, logoutPending: true }); }
+    await withAuthSessionLock(async (signal) => {
+      const m = store.read().marker;
+      if (retry && !m.logoutPending) return; // Later explicit login cancels stale retries.
+      const next = { ...m, generation: m.generation + 1, userId: null, logoutPending: true };
+      publish(next); commit(null); setInitializing(false);
       try {
-        commitSession(nextSession, startingGeneration);
+        await authApi.logout(client, signal);
+        publish({ ...next, logoutPending: false }); setError(null); setRestoreFailed(false);
       } catch (failure) {
-        if (readAuthGeneration(storage) !== startingGeneration) {
-          if (sessionRef.current?.authGeneration === startingGeneration) clearMemorySession();
-        }
-        await revokeUnusedRefreshToken(apiClient, response.refreshToken);
+        if (sameMarker(next, store.read().marker)) setError(asError(failure));
         throw failure;
       }
-      return nextSession;
-    }, abortController.signal).finally(() => window.clearTimeout(timeoutId));
-    refreshInFlightRef.current = refreshPromise;
-    refreshPromise.then(
-      () => {
-        if (refreshInFlightRef.current === refreshPromise) {
-          refreshInFlightRef.current = null;
-        }
-      },
-      () => {
-        if (refreshInFlightRef.current === refreshPromise) {
-          refreshInFlightRef.current = null;
-        }
-      }
-    );
-    return refreshPromise;
-  }, [apiClient, clearMemorySession, commitSession, restoreSession, storage]);
+    });
+  }, [client, commit, publish, store]);
 
-  // ApiClient calls these only after awaiting a response, so publishing them during commit keeps every
-  // request on the latest callbacks without writing refs during render.
-  useLayoutEffect(() => {
-    refreshAccessTokenRef.current = async () => (await performRefresh()).accessToken;
-    authenticationFailureRef.current = handleAuthenticationFailure;
-  }, [handleAuthenticationFailure, performRefresh]);
-
-  const refreshTokens = useCallback(async () => {
-    beginOperation();
-    try {
-      await performRefresh();
-    } catch (failure) {
-      if (!(failure instanceof AuthenticationSupersededError)) {
-        handleAuthenticationFailure(failure);
-      }
-      throw failure;
-    } finally {
-      finishOperation();
-    }
-  }, [beginOperation, finishOperation, handleAuthenticationFailure, performRefresh]);
-
-  useEffect(() => {
-    if (bootstrapStartedRef.current) {
-      return;
-    }
-    bootstrapStartedRef.current = true;
-    const storedSession = readAuthSession(storage);
-    if (!storedSession) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time bootstrap: restoring a session clears storage and the query cache, so it cannot run during render.
-      setIsInitializing(false);
-      return;
-    }
-
-    if (!restoreSession(storedSession)) {
-      setIsInitializing(false);
-      return;
-    }
-    if (storedSession.accessTokenExpiresAt > Date.now() + REFRESH_WINDOW_MILLISECONDS) {
-      setIsInitializing(false);
-      return;
-    }
-
-    void refreshTokens().catch(() => undefined).finally(() => setIsInitializing(false));
-  }, [refreshTokens, restoreSession, storage]);
-
-  useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== null
-        && event.key !== AUTH_SESSION_STORAGE_KEY
-        && event.key !== AUTH_GENERATION_STORAGE_KEY) {
+  const restore = useCallback((): Promise<void> => {
+    if (restoring.current) { restoreQueued.current = true; return restoring.current; }
+    const operation = (async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+      const state = store.read(); setStorageAvailable(state.available); setPending(state.marker.logoutPending);
+      if (state.marker.logoutPending) { commit(null); await performLogout(true); return; }
+      if (state.known && state.marker.userId === null) { commit(null); setInitializing(false); return; }
+      const current = sessionRef.current;
+      if (current && current.authGeneration === state.marker.generation && current.user.id === state.marker.userId) return;
+      commit(null); setInitializing(true);
+      try { await performRefresh(); return; }
+      catch (failure) {
+        if (failure instanceof AuthenticationSupersededError) continue;
+        if (!(failure instanceof ApiRequestError && failure.status === 401)) setRestoreFailed(true);
         return;
       }
-      const externalSession = readAuthSession(storage);
-      if (externalSession) {
-        if (restoreSession(externalSession)) {
-          setError(null);
-        }
-      } else {
-        clearMemorySession();
       }
+      setRestoreFailed(true);
+    })();
+    restoring.current = operation;
+    void operation.finally(() => {
+      if (restoring.current === operation) restoring.current = null;
+      if (restoreQueued.current) {
+        restoreQueued.current = false;
+        queueMicrotask(() => { if (mounted.current) void restoreCallback.current?.().catch(() => undefined); });
+      }
+    }).catch(() => undefined);
+    return operation;
+  }, [commit, performLogout, performRefresh, store]);
+
+  useEffect(() => { restoreCallback.current = restore; }, [restore]);
+  useEffect(() => {
+    mounted.current = true;
+    if (!bootstrapped.current) { bootstrapped.current = true; void restore().catch(() => undefined); }
+    const reconcile = () => { void restore().catch(() => undefined); };
+    const onStorage = (event: StorageEvent) => { if (event.key === AUTH_GENERATION_STORAGE_KEY || event.key === null) reconcile(); };
+    window.addEventListener('storage', onStorage); window.addEventListener('pageshow', reconcile);
+    window.addEventListener('focus', reconcile); document.addEventListener('visibilitychange', reconcile);
+    try {
+      channel.current = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('vod.auth.wakeup.v2');
+      if (channel.current) channel.current.onmessage = reconcile;
+    } catch { channel.current = null; }
+    return () => {
+      mounted.current = false;
+      window.removeEventListener('storage', onStorage); window.removeEventListener('pageshow', reconcile);
+      window.removeEventListener('focus', reconcile); document.removeEventListener('visibilitychange', reconcile);
+      channel.current?.close(); channel.current = null;
     };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [clearMemorySession, restoreSession, storage]);
-
-  const login = useCallback(async (request: LoginRequest) => {
-    if (logoutInProgressRef.current) {
-      throw new Error('Logout is already in progress');
-    }
-    const operationId = beginOperation();
-    const operationGeneration = readAuthGeneration(storage);
-    try {
-      const response = await loginRequest(apiClient, request);
-      try {
-        await withAuthSessionLock(async () => {
-          if (latestOperationRef.current !== operationId) {
-            throw new AuthenticationSupersededError();
-          }
-          commitSession(
-            createAuthSession(response, Date.now(), operationGeneration),
-            operationGeneration
-          );
+  }, [restore]);
+  useEffect(() => {
+    actions.current = { refresh: performRefresh, fail: (failure) => {
+      if (failure instanceof ApiRequestError && failure.status === 401) {
+        const expected = store.read().marker;
+        commit(null); setError(asError(failure));
+        void withAuthSessionLock(async () => {
+          if (sameMarker(expected, store.read().marker)) { signedOut(); redirectToLogin(); }
         });
-      } catch (failure) {
-        if (readAuthGeneration(storage) !== operationGeneration) {
-          if (sessionRef.current?.authGeneration === operationGeneration) clearMemorySession();
-        }
-        await revokeUnusedRefreshToken(apiClient, response.refreshToken);
-        throw failure;
       }
-      return response.user;
-    } catch (failure) {
-      setLatestOperationError(operationId, failure);
-      throw failure;
-    } finally {
-      finishOperation();
-    }
-  }, [
-    apiClient,
-    beginOperation,
-    clearMemorySession,
-    commitSession,
-    finishOperation,
-    setLatestOperationError,
-    storage
-  ]);
+    } };
+  }, [commit, performRefresh, redirectToLogin, signedOut, store]);
 
-  const register = useCallback(async (request: RegisterRequest) => {
-    if (logoutInProgressRef.current) {
-      throw new Error('Logout is already in progress');
-    }
-    const operationId = beginOperation();
+  const login = async (request: authApi.LoginRequest) => {
+    setLoading(true); setError(null);
     try {
-      return await registerRequest(apiClient, request);
-    } catch (failure) {
-      setLatestOperationError(operationId, failure);
-      throw failure;
-    } finally {
-      finishOperation();
-    }
-  }, [apiClient, beginOperation, finishOperation, setLatestOperationError]);
-
-  const logout = useCallback(async () => {
-    if (logoutInProgressRef.current) {
-      return;
-    }
-    logoutInProgressRef.current = true;
-    const operationId = beginOperation();
-    let transportFailure: unknown;
-    const memoryRefreshToken = sessionRef.current?.refreshToken;
-    const beforeGenerationToken = readAuthSession(storage)?.refreshToken;
-    const logoutGeneration = advanceAuthGeneration(storage);
-    const afterGenerationToken = readAuthSession(storage)?.refreshToken;
-    clearAuthSession(storage);
-    authenticationFailureHandledRef.current = true;
-    clearMemorySession();
-    try {
-      await revokeLatestSessionTokens(
-        apiClient,
-        storage,
-        [memoryRefreshToken, beforeGenerationToken, afterGenerationToken],
-        logoutGeneration
-      );
-    } catch (failure) {
-      transportFailure = failure;
-      setLatestOperationError(operationId, failure);
-    } finally {
-      logoutInProgressRef.current = false;
-      finishOperation();
-    }
-    if (transportFailure) {
-      throw transportFailure;
-    }
-  }, [apiClient, beginOperation, clearMemorySession, finishOperation, setLatestOperationError, storage]);
-
-  const clearError = useCallback(() => setError(null), []);
-
-  const value = useMemo<AuthContextValue>(() => ({
-    user: session?.user ?? null,
-    accessToken: session?.accessToken ?? null,
-    refreshToken: session?.refreshToken ?? null,
-    isAuthenticated: session !== null,
-    isInitializing,
-    isLoading,
-    error,
-    login,
-    register,
-    logout,
-    refreshTokens,
-    clearError
-  }), [clearError, error, isInitializing, isLoading, login, logout, refreshTokens, register, session]);
-
-  return (
-    <ApiClientContext.Provider value={apiClient}>
-      <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+      return await withAuthSessionLock(async (signal) => {
+        const response = await authApi.login(client, request, signal);
+        const m = store.read().marker;
+        const next = { ...m, generation: m.generation + 1, userId: response.user.id, logoutPending: false };
+        publish(next); commit(createAuthSession(response, Date.now(), next.generation));
+        setInitializing(false); setRestoreFailed(false);
+        return response.user;
+      });
+    } catch (failure) { setError(asError(failure)); throw failure; }
+    finally { setLoading(false); }
+  };
+  const register = async (request: authApi.RegisterRequest) => {
+    setLoading(true); setError(null);
+    try { return await authApi.register(client, request); }
+    catch (failure) { setError(asError(failure)); throw failure; }
+    finally { setLoading(false); }
+  };
+  const retry = () => { void (pending ? performLogout(true) : sessionRef.current ? performRefresh() : restore()).catch(() => undefined); };
+  return <AuthContext.Provider value={{ user: session?.user ?? null, accessToken: session?.accessToken ?? null,
+    isAuthenticated: session !== null, isInitializing, isLoading, error, login, register,
+    logout: () => performLogout(), refreshTokens: async () => { await performRefresh(); }, clearError: () => setError(null) }}>
+    <ApiClientContext.Provider value={client}>
+      {!storageAvailable && <p role="note">Site data is blocked. Sign-in is available only in this tab.</p>}
+      {!navigator.locks?.request && <p role="note">This browser supports sign-in in one tab at a time.</p>}
+      {(pending || restoreFailed) && <div role="alert">
+        <p>{pending ? 'Sign-out is not confirmed.' : 'Sign-in could not be restored. Please retry.'}</p>
+        <button type="button" onClick={retry}>{pending ? 'Retry sign-out' : 'Retry sign-in'}</button>
+      </div>}
+      {children}
     </ApiClientContext.Provider>
-  );
+  </AuthContext.Provider>;
 }
-
-// eslint-disable-next-line react-refresh/only-export-components -- the hook shares this module's private context; edits here trigger a full reload instead of Fast Refresh.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
+  const value = useContext(AuthContext); if (!value) throw new Error('useAuth must be used within AuthProvider'); return value;
 }
-
-// eslint-disable-next-line react-refresh/only-export-components -- the hook shares this module's private context; edits here trigger a full reload instead of Fast Refresh.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useApiClient(): ApiClient {
-  const context = useContext(ApiClientContext);
-  if (!context) {
-    throw new Error('useApiClient must be used within AuthProvider');
-  }
-  return context;
+  const value = useContext(ApiClientContext); if (!value) throw new Error('useApiClient must be used within AuthProvider'); return value;
 }
-
-function defaultRedirectToLogin(): void {
-  if (window.location.pathname !== '/login') {
-    window.location.assign('/login');
-  }
-}
-
-function asError(value: unknown): Error {
-  return value instanceof Error ? value : new Error('Authentication request failed');
-}
-
-function withAuthSessionLock<T>(
-  task: () => Promise<T>,
-  signal?: AbortSignal
-): Promise<T> {
-  if (navigator.locks) {
-    return signal
-      ? navigator.locks.request(AUTH_SESSION_LOCK_NAME, { signal }, task)
-      : navigator.locks.request(AUTH_SESSION_LOCK_NAME, task);
-  }
-  return task();
-}
-
-async function revokeRefreshToken(client: ApiClient, refreshToken: string): Promise<void> {
-  const abortController = new AbortController();
-  const timeoutId = window.setTimeout(
-    () => abortController.abort(),
-    TOKEN_REVOCATION_TIMEOUT_MILLISECONDS
-  );
-  try {
-    await logoutRequest(client, refreshToken, abortController.signal);
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
-}
-
-async function revokeUnusedRefreshToken(client: ApiClient, refreshToken: string): Promise<void> {
-  try {
-    await revokeRefreshToken(client, refreshToken);
-  } catch {
-    // A superseded session must never replace current state, even when revocation is unavailable.
-  }
-}
-
-async function revokeLatestSessionTokens(
-  client: ApiClient,
-  storage: Storage,
-  fallbackRefreshTokens: Array<string | undefined>,
-  logoutGeneration: number
-): Promise<void> {
-  const abortController = new AbortController();
-  const timeoutId = window.setTimeout(
-    () => abortController.abort(),
-    TOKEN_REVOCATION_TIMEOUT_MILLISECONDS
-  );
-  try {
-    await withAuthSessionLock(
-      async () => {
-        const racingSession = readAuthSession(storage);
-        const racingRefreshToken = racingSession
-          && racingSession.authGeneration < logoutGeneration
-          ? racingSession.refreshToken
-          : undefined;
-        if (racingRefreshToken) {
-          clearAuthSession(storage);
-        }
-        const tokens = Array.from(new Set(
-          [racingRefreshToken, ...fallbackRefreshTokens].filter(
-            (token): token is string => Boolean(token)
-          )
-        ));
-        const results = await Promise.allSettled(tokens.map((token) => logoutRequest(
-          client,
-          token,
-          abortController.signal
-        )));
-        const failedRevocation = results.find(
-          (result): result is PromiseRejectedResult => result.status === 'rejected'
-        );
-        if (failedRevocation) {
-          throw failedRevocation.reason;
-        }
-      },
-      abortController.signal
-    );
-  } finally {
-    abortController.abort();
-    window.clearTimeout(timeoutId);
-  }
-}
+function defaultRedirect() { if (window.location.pathname !== '/login') window.location.assign('/login'); }

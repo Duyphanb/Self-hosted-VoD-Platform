@@ -12,6 +12,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Configuration(proxyBeanMethods = false)
+@org.springframework.boot.context.properties.EnableConfigurationProperties(AuthCookieProperties.class)
 @EntityScan(basePackageClasses = {UserEntity.class, RoleEntity.class})
 @EnableJpaRepositories(basePackageClasses = {UserRepository.class, RoleRepository.class})
 public class AuthConfiguration {

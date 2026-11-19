@@ -141,12 +141,12 @@ class LoginIntegrationTests implements PostgresTestDatabase {
                 .andExpect(jsonPath("$.user.email").value("viewer@example.com"))
                 .andExpect(jsonPath("$.user.roles[0]").value("ROLE_USER"))
                 .andExpect(jsonPath("$.accessToken").isString())
-                .andExpect(jsonPath("$.refreshToken").isString())
+                .andExpect(jsonPath("$.refreshToken").doesNotExist())
                 .andExpect(jsonPath("$.expiresInSeconds").value(900))
                 .andReturn();
 
         JsonNode response = objectMapper.readTree(result.getResponse().getContentAsByteArray());
-        String rawRefreshToken = response.path("refreshToken").asString();
+        String rawRefreshToken = java.net.HttpCookie.parse(result.getResponse().getHeader("Set-Cookie")).getFirst().getValue();
         List<RefreshTokenEntity> storedTokens = refreshTokenRepository.findAll();
         assertThat(storedTokens).hasSize(1);
         RefreshTokenEntity storedToken = storedTokens.getFirst();
@@ -186,7 +186,7 @@ class LoginIntegrationTests implements PostgresTestDatabase {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.user.email").value("unicode@example.com"))
                 .andExpect(jsonPath("$.accessToken").isString())
-                .andExpect(jsonPath("$.refreshToken").isString());
+                .andExpect(jsonPath("$.refreshToken").doesNotExist());
 
         // The password is 216 UTF-8 bytes. A change after byte 72 still fails, so no byte is truncated.
         mockMvc.perform(post("/api/v1/auth/login")

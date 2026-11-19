@@ -7,7 +7,8 @@ import { createQueryClient } from '../../../app/queryClient';
 import { AuthenticationSupersededError } from '../../../lib/api/client';
 import type { AuthResponse, UserProfile } from '../../../lib/api/types';
 import { AuthProvider } from '../../auth/AuthContext';
-import { AUTH_SESSION_STORAGE_KEY, createAuthSession, writeAuthSession } from '../../auth/authStorage';
+import { createAuthSession} from '../../auth/authStorage';
+import { installCookieSession as writeAuthSession } from '../../../test/cookieSession';
 import { movieKeys, type MovieDetail } from '../moviesApi';
 
 const movieId = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
@@ -320,8 +321,7 @@ describe('MovieDetailPage through AppRoutes', () => {
     fetchMock.mockReturnValue(response.promise);
     renderDetail();
 
-    const status = await screen.findByRole('status');
-    expect(status).toHaveTextContent('Loading movie…');
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Loading movie…'));
     expect(screen.getByRole('heading', { level: 1, name: 'Movie details' })).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.queryByRole('link', { name: 'Watch' })).not.toBeInTheDocument();
@@ -452,12 +452,13 @@ describe('MovieDetailPage through AppRoutes', () => {
       .mockResolvedValueOnce(jsonResponse({
         user: regularUser,
         accessToken: 'rotated-access-token',
-        refreshToken: 'rotated-refresh-token',
+
         expiresInSeconds: 900
       }))
       .mockResolvedValueOnce(jsonResponse(movieDetail()));
     renderDetail();
 
+    await waitFor(() => expect(requestPaths()).toHaveLength(3));
     expect(await screen.findByRole('heading', { level: 1, name: 'The Long Night' })).toBeInTheDocument();
     expect(requestPaths()).toEqual([
       `/api/v1/movies/${movieId}`, '/api/v1/auth/refresh', `/api/v1/movies/${movieId}`
@@ -472,7 +473,9 @@ describe('MovieDetailPage through AppRoutes', () => {
     const { redirectToLogin } = renderDetail();
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeInTheDocument();
-    expect(redirectToLogin).toHaveBeenCalledTimes(1);
+    // The provider clears its session on refresh 401; the route guard preserves
+    // this URL for sign-in without a second document-level redirect.
+    expect(redirectToLogin).not.toHaveBeenCalled();
     expect(screen.queryByRole('heading', { name: 'The Long Night' })).not.toBeInTheDocument();
   });
 
@@ -604,14 +607,14 @@ function persistSession(user: UserProfile, tokenPrefix?: string) {
   const response: AuthResponse = {
     user,
     accessToken: tokenPrefix ? `${tokenPrefix}-access-token` : 'access-token',
-    refreshToken: tokenPrefix ? `${tokenPrefix}-refresh-token` : 'refresh-token',
+
     expiresInSeconds: 900
   };
   writeAuthSession(createAuthSession(response), window.localStorage);
 }
 
 function announceStoredSession() {
-  act(() => window.dispatchEvent(new StorageEvent('storage', { key: AUTH_SESSION_STORAGE_KEY })));
+  act(() => window.dispatchEvent(new StorageEvent('storage', { key: 'vod.auth.marker.v2' })));
 }
 
 function deferredResponse() {

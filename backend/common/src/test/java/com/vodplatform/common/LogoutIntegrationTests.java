@@ -2,186 +2,45 @@ package com.vodplatform.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
-import com.vodplatform.auth.persistence.RefreshTokenEntity;
-import com.vodplatform.auth.persistence.RefreshTokenRepository;
-import com.vodplatform.auth.persistence.RoleEntity;
-import com.vodplatform.auth.persistence.RoleRepository;
-import com.vodplatform.auth.persistence.UserEntity;
-import com.vodplatform.auth.persistence.UserRepository;
-import com.vodplatform.auth.persistence.UserStatus;
-import com.vodplatform.auth.service.RefreshTokenService;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import com.vodplatform.common.support.CookieAuthFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
-import java.time.Instant;
-import java.util.UUID;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import jakarta.servlet.http.Cookie;
+import java.net.HttpCookie;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
 import org.springframework.http.MediaType;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
-import tools.jackson.databind.ObjectMapper;
 
-@SpringBootTest(
-        properties = {
-                "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
-                "auth.tokens.access-token-ttl=15m",
-                "auth.tokens.refresh-token-ttl=7d"
-        }
-)
-@AutoConfigureMockMvc
-class LogoutIntegrationTests implements PostgresTestDatabase {
-
-    @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
-
-    @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
-    private RoleRepository roleRepository;
-
-    @Autowired
-    private RefreshTokenRepository refreshTokenRepository;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    @Autowired
-    private RefreshTokenService refreshTokenService;
-
-    @BeforeEach
-    void createRegisteredUser() {
-        cleanDatabase();
-        RoleEntity role = roleRepository.findByName("ROLE_USER").orElseThrow();
-        Instant now = Instant.now();
-        UserEntity user = new UserEntity(
-                UUID.randomUUID(),
-                "viewer@example.com",
-                passwordEncoder.encode("strong-password"),
-                "Viewer",
-                UserStatus.ACTIVE,
-                now,
-                now
-        );
-        user.addRole(role);
-        userRepository.saveAndFlush(user);
+@SpringBootTest(properties={"auth.tokens.secret=test-only-secret-with-at-least-32-bytes","CORS_ALLOWED_ORIGINS=http://localhost"})
+@AutoConfigureMockMvc(print=MockMvcPrint.NONE)
+class LogoutIntegrationTests extends CookieAuthFixture implements PostgresTestDatabase {
+    @ParameterizedTest @ValueSource(strings={"missing","valid","revoked","duplicate","unknown","body"})
+    void logoutIsIdempotentClearsCookieAndIgnoresBodiesAndDuplicates(String kind) throws Exception {
+        Cookie token=issued();
+        if(kind.equals("revoked")) jdbc.update("update refresh_tokens set revoked_at=? where user_id=?",java.sql.Timestamp.from(now),user);
+        var request=post("/api/v1/auth/logout").header("Origin",ORIGIN);
+        if(kind.equals("valid")||kind.equals("revoked")||kind.equals("duplicate")) request.cookie(token);
+        if(kind.equals("duplicate")) request.cookie(new Cookie("vod_refresh","another-cookie"));
+        if(kind.equals("unknown")) request.cookie(new Cookie("vod_refresh","unknown-cookie"));
+        if(kind.equals("body")) request.contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(java.util.Map.of("refreshToken",token.getValue())));
+        var result=mvc.perform(request).andExpect(status().isNoContent()).andReturn();
+        assertThat(HttpCookie.parse(result.getResponse().getHeader("Set-Cookie")).getFirst().getMaxAge()).isZero();
+        assertThat(revoked()).isEqualTo(kind.equals("valid")||kind.equals("revoked")?1:0);
+        mvc.perform(post("/api/v1/auth/logout").header("Origin",ORIGIN)).andExpect(status().isNoContent());
     }
-
-    @AfterEach
-    void cleanDatabase() {
-        refreshTokenRepository.deleteAll();
-        userRepository.deleteAll();
+    @Test void successfulLoginRevokesASingleValidPresentedCookie() throws Exception {
+        Cookie original=issued();
+        login(original).andExpect(status().isOk());
+        assertThat(revoked()).isEqualTo(1);
     }
-
-    @Test
-    void submittedRefreshTokenIsRevokedAndReturnsNoContent() throws Exception {
-        String rawRefreshToken = loginAndReadRefreshToken();
-
-        mockMvc.perform(post("/api/v1/auth/logout")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsBytes(
-                                objectMapper.createObjectNode().put("refreshToken", rawRefreshToken)
-                        )))
-                .andExpect(status().isNoContent())
-                .andExpect(content().string(""));
-
-        String storedHash = refreshTokenService.hash(rawRefreshToken);
-        RefreshTokenEntity storedToken = refreshTokenRepository.findAll().stream()
-                .filter(token -> token.getTokenHash().equals(storedHash))
-                .findFirst()
-                .orElseThrow();
-        assertThat(storedToken.getRevokedAt()).isNotNull();
-    }
-
-    @Test
-    void replayedUnknownAndOmittedTokensAllReturnNoContent() throws Exception {
-        String rawRefreshToken = loginAndReadRefreshToken();
-        byte[] knownTokenBody = logoutBody(rawRefreshToken);
-        mockMvc.perform(post("/api/v1/auth/logout")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(knownTokenBody))
-                .andExpect(status().isNoContent());
-        Instant originalRevocation = findStoredToken(rawRefreshToken).getRevokedAt();
-
-        mockMvc.perform(post("/api/v1/auth/logout")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(knownTokenBody))
-                .andExpect(status().isNoContent());
-        mockMvc.perform(post("/api/v1/auth/logout")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(logoutBody("unknown-token")))
-                .andExpect(status().isNoContent());
-        mockMvc.perform(post("/api/v1/auth/logout"))
-                .andExpect(status().isNoContent());
-
-        assertThat(findStoredToken(rawRefreshToken).getRevokedAt()).isEqualTo(originalRevocation);
-    }
-
-    @Test
-    void loggedOutRefreshTokenCannotBeRotated() throws Exception {
-        String rawRefreshToken = loginAndReadRefreshToken();
-        byte[] requestBody = logoutBody(rawRefreshToken);
-        mockMvc.perform(post("/api/v1/auth/logout")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
-                .andExpect(status().isNoContent());
-
-        mockMvc.perform(post("/api/v1/auth/refresh")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("INVALID_REFRESH_TOKEN"));
-    }
-
-    @Test
-    void blankSubmittedRefreshTokenFailsRequestValidation() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/logout")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"refreshToken":" "}
-                                """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
-    }
-
-    private byte[] logoutBody(String refreshToken) throws Exception {
-        return objectMapper.writeValueAsBytes(
-                objectMapper.createObjectNode().put("refreshToken", refreshToken)
-        );
-    }
-
-    private RefreshTokenEntity findStoredToken(String rawRefreshToken) {
-        String storedHash = refreshTokenService.hash(rawRefreshToken);
-        return refreshTokenRepository.findAll().stream()
-                .filter(token -> token.getTokenHash().equals(storedHash))
-                .findFirst()
-                .orElseThrow();
-    }
-
-    private String loginAndReadRefreshToken() throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "email": "viewer@example.com",
-                                  "password": "strong-password"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andReturn();
-        return objectMapper.readTree(result.getResponse().getContentAsByteArray())
-                .path("refreshToken")
-                .asString();
+    @Test void loginWithDuplicateCookiesRevokesNothing() throws Exception {
+        Cookie original=issued();
+        login(original,new Cookie("vod_refresh","other-cookie")).andExpect(status().isOk());
+        assertThat(revoked()).isZero();
     }
 }

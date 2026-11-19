@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient, AuthenticationSupersededError } from '../../../lib/api/client';
 import type { AuthResponse, PageMeta, UserProfile } from '../../../lib/api/types';
 import { AuthProvider } from '../../auth/AuthContext';
-import { AUTH_SESSION_STORAGE_KEY, createAuthSession, writeAuthSession } from '../../auth/authStorage';
+import { createAuthSession} from '../../auth/authStorage';
+import { installCookieSession as writeAuthSession } from '../../../test/cookieSession';
 import { ProtectedRoute } from '../../auth/RouteGuards';
 import { movieKeys, type MovieSummary } from '../moviesApi';
 import { MovieListPage } from './MovieListPage';
@@ -644,29 +645,20 @@ describe('MovieListPage', () => {
       expect(authorizationOf(1)).toBe('Bearer rotated-access-token');
     });
 
-    it('loads the page when a request sent during a token rotation fails after the new session is in place', async () => {
-      const held = holdResponses((query) => query.page === '1' && fetchMock.mock.calls.length === 2);
-      serveMovies((query) => held.respond(query, moviePage([movieSummary(Number(query.page) + 1)], {
-        page: Number(query.page),
-        totalElements: 45,
-        totalPages: 3
-      })));
+    it('blocks protected sends until a changed marker is reconciled', async () => {
+      serveMovies((query) => moviePage([movieSummary(Number(query.page) + 1)], {
+        page: Number(query.page), totalElements: 45, totalPages: 3
+      }));
       renderMovieList();
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
-
-      // Another tab rotates the tokens, and this tab asks for page 2 before its storage event.
       persistSession(regularUser, 'rotated');
       fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-      await waitFor(() => expect(held.count()).toBe(1));
-      // Memory and storage disagree, so the request went out without a token.
-      expect(authorizationOf(1)).toBeNull();
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
       announceStoredSession();
-      held.release(new Response(null, { status: 401 }));
-
       expect(await screen.findByRole('heading', { level: 2, name: 'Movie 2' })).toBeInTheDocument();
-      expect(fetchMock).toHaveBeenCalledTimes(3);
-      expect(authorizationOf(2)).toBe('Bearer rotated-access-token');
-      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(authorizationOf(1)).toBe('Bearer rotated-access-token');
     });
 
     it("shows the other user's movies when another user signs in while the list loads", async () => {
@@ -745,7 +737,7 @@ function persistSession(user: UserProfile, tokenPrefix?: string) {
   const response: AuthResponse = {
     user,
     accessToken: tokenPrefix ? `${tokenPrefix}-access-token` : 'access-token',
-    refreshToken: tokenPrefix ? `${tokenPrefix}-refresh-token` : 'refresh-token',
+
     expiresInSeconds: 900
   };
   writeAuthSession(createAuthSession(response), window.localStorage);
@@ -754,7 +746,7 @@ function persistSession(user: UserProfile, tokenPrefix?: string) {
 /** The storage event another tab's write sends to this tab. */
 function announceStoredSession() {
   act(() => {
-    window.dispatchEvent(new StorageEvent('storage', { key: AUTH_SESSION_STORAGE_KEY }));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'vod.auth.marker.v2' }));
   });
 }
 

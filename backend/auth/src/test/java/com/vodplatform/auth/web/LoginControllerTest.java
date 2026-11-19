@@ -8,7 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.vodplatform.auth.dto.AuthResponse;
+import com.vodplatform.auth.service.IssuedAuthentication;
 import com.vodplatform.auth.dto.LoginRequest;
 import com.vodplatform.auth.dto.UserProfile;
 import com.vodplatform.auth.exception.AuthExceptionHandler;
@@ -46,7 +46,7 @@ class LoginControllerTest {
         validator.afterPropertiesSet();
         ApiErrorFactory apiErrorFactory = new ApiErrorFactory(Clock.systemUTC());
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new LoginController(loginService))
+                .standaloneSetup(new LoginController(loginService, new RefreshCookie(new com.vodplatform.auth.config.AuthCookieProperties(true), new com.vodplatform.auth.config.CorsProperties(List.of()), Clock.systemUTC())))
                 .setControllerAdvice(
                         new AuthExceptionHandler(apiErrorFactory),
                         new ApiExceptionHandler(apiErrorFactory)
@@ -63,11 +63,11 @@ class LoginControllerTest {
     @Test
     void returnsAuthResponseForValidCredentials() throws Exception {
         UUID userId = UUID.randomUUID();
-        when(loginService.login(any(LoginRequest.class))).thenReturn(new AuthResponse(
+        when(loginService.login(any(LoginRequest.class), org.mockito.ArgumentMatchers.isNull())).thenReturn(new IssuedAuthentication(
                 new UserProfile(userId, "viewer@example.com", "Viewer", List.of("ROLE_USER")),
                 "signed-access-token",
                 "opaque-refresh-token",
-                900
+                900, java.time.Instant.now().plusSeconds(604800)
         ));
 
         mockMvc.perform(post("/api/v1/auth/login")
@@ -82,13 +82,13 @@ class LoginControllerTest {
                 .andExpect(jsonPath("$.user.id").value(userId.toString()))
                 .andExpect(jsonPath("$.user.roles[0]").value("ROLE_USER"))
                 .andExpect(jsonPath("$.accessToken").value("signed-access-token"))
-                .andExpect(jsonPath("$.refreshToken").value("opaque-refresh-token"))
+                .andExpect(jsonPath("$.refreshToken").doesNotExist())
                 .andExpect(jsonPath("$.expiresInSeconds").value(900));
     }
 
     @Test
     void returnsGenericUnauthorizedResponseForInvalidCredentials() throws Exception {
-        when(loginService.login(any(LoginRequest.class))).thenThrow(new InvalidCredentialsException());
+        when(loginService.login(any(LoginRequest.class), org.mockito.ArgumentMatchers.isNull())).thenThrow(new InvalidCredentialsException());
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

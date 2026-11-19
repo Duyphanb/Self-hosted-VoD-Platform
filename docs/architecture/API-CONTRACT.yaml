@@ -7,7 +7,8 @@ info:
     Frozen MVP public contract for the modular monolith plus worker architecture.
     Browser traffic enters through Nginx. JSON APIs use /api/v1/*.
     HLS uses /hls/* through the authenticated backend proxy.
-    Refresh tokens use JSON request and response bodies only.
+    Refresh tokens travel only in the HttpOnly vod_refresh cookie scoped to /api/v1/auth
+    (ADR-012 D1-D3); access tokens are returned in JSON and sent in the Authorization header.
     Sprint 6 playback, HLS, progress and admin asset projection rules follow
     ADR-011 (2026-11-14); the bearer token is accepted only in the
     Authorization header, never in a URL.
@@ -71,11 +72,20 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "409":
           $ref: "#/components/responses/Conflict"
+        "403":
+          description: ORIGIN_NOT_ALLOWED - rejected Origin or cross-site request (ADR-012 D3).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/v1/auth/login:
     post:
       tags: [Auth]
       summary: Login with email and password
+      description: >
+        Issues a refresh token as the vod_refresh cookie; a valid refresh token
+        presented with the request is revoked first (ADR-012 D2, Issue 6.9).
       security: []
       requestBody:
         required: true
@@ -86,6 +96,11 @@ paths:
       responses:
         "200":
           description: Logged in
+          headers:
+            Set-Cookie:
+              description: "vod_refresh=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=<remaining lifetime of the refresh token> (ADR-012 D1)."
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -94,48 +109,75 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: ORIGIN_NOT_ALLOWED - rejected Origin or cross-site request (ADR-012 D3).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/v1/auth/refresh:
     post:
       tags: [Auth]
-      summary: Rotate refresh token and return new tokens
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RefreshRequest"
+      summary: Rotate refresh cookie and return a new access token
+      description: >
+        No request body. Rotates the vod_refresh cookie with sliding expiry (ADR-012 D2,
+        Issue 6.9). Missing, unknown, expired, revoked, over-long, duplicated or replayed
+        cookies return 401 UNAUTHORIZED and a clearing cookie. Replay revokes no successor
+        tokens in Issue 6.9. State-read failure returns 503 without clearing the cookie.
+      security:
+        - refreshSession: []
       responses:
         "200":
           description: Refreshed
+          headers:
+            Set-Cookie:
+              description: "vod_refresh=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=<remaining lifetime of the refresh token> (ADR-012 D1)."
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthResponse"
-        "400":
-          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: ORIGIN_NOT_ALLOWED - rejected Origin or cross-site request (ADR-012 D3).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: AUTH_STATE_UNAVAILABLE - authentication state cannot be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/v1/auth/logout:
     post:
       tags: [Auth]
-      summary: Revoke current refresh token
-      security: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RefreshRequest"
+      summary: Revoke the presented refresh token
+      description: >
+        No request body. Revokes the presented refresh token when exactly one valid
+        vod_refresh cookie is present. Always clears the cookie; idempotent (ADR-012 D2).
+      security:
+        - refreshSession: []
+        - {}
       responses:
         "204":
           description: Logged out
-        "400":
-          $ref: "#/components/responses/ValidationError"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
+          headers:
+            Set-Cookie:
+              description: "vod_refresh=; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=0"
+              schema:
+                type: string
+        "403":
+          description: ORIGIN_NOT_ALLOWED - rejected Origin or cross-site request (ADR-012 D3).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/v1/users/me:
     get:
@@ -1045,6 +1087,11 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    refreshSession:
+      type: apiKey
+      in: cookie
+      name: vod_refresh
+      description: HttpOnly refresh cookie; only auth operations consume it (ADR-012).
 
   parameters:
     MovieId:
@@ -1198,7 +1245,7 @@ components:
             UPLOAD_STORAGE_UNAVAILABLE, UPLOAD_DATABASE_ERROR, UPLOAD_OUTCOME_UNKNOWN,
             INTERNAL_ERROR, VIDEO_NOT_READY, VIDEO_ASSET_NOT_FOUND,
             VIDEO_ASSET_NOT_CURRENT,
-            HLS_STORAGE_UNAVAILABLE, VIDEO_ASSET_NOT_RETRYABLE,
+            HLS_STORAGE_UNAVAILABLE, VIDEO_ASSET_NOT_RETRYABLE, ORIGIN_NOT_ALLOWED, AUTH_STATE_UNAVAILABLE,
             UPSTREAM_UNAVAILABLE and UPSTREAM_TIMEOUT. The list is not exhaustive.
         message:
           type: string
@@ -1249,27 +1296,14 @@ components:
           maxLength: 72
           description: Same maximum as registration, counted in UTF-16 code units. A longer value returns 400 VALIDATION_ERROR before any credential check.
 
-    RefreshRequest:
-      description: JSON-body refresh token request.
-      type: object
-      required: [refreshToken]
-      properties:
-        refreshToken:
-          description: Opaque refresh token of at most 128 UTF-16 code units. A longer value returns 400 VALIDATION_ERROR before any token lookup.
-          type: string
-          maxLength: 128
-
     AuthResponse:
       description: JSON-body authentication result.
       type: object
-      required: [user, accessToken, refreshToken, expiresInSeconds]
+      required: [user, accessToken, expiresInSeconds]
       properties:
         user:
           $ref: "#/components/schemas/UserProfile"
         accessToken:
-          type: string
-        refreshToken:
-          description: Opaque refresh token.
           type: string
         expiresInSeconds:
           type: integer

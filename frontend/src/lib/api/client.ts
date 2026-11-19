@@ -81,6 +81,7 @@ export class ApiClient {
       ? this.authController.getAuthenticationSnapshot()
       : null;
     const accessToken = initialAuthentication?.accessToken ?? null;
+    if (authenticated && !initialAuthentication) throw new AuthenticationSupersededError();
     let response = await this.send(path, options, accessToken);
 
     if (authenticated && response.status === 401) {
@@ -98,7 +99,7 @@ export class ApiClient {
         try {
           await this.refreshAccessTokenOnce();
         } catch (error) {
-          if (sameAuthentication(
+          if (error instanceof ApiRequestError && error.status === 401 && sameAuthentication(
             initialAuthentication,
             this.authController.getAuthenticationSnapshot()
           )) {
@@ -113,7 +114,6 @@ export class ApiClient {
         }
         if (!refreshedAuthentication) {
           const error = new AuthenticationSupersededError();
-          this.authController.onAuthenticationFailure(error);
           throw error;
         }
 
