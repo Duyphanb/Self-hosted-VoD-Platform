@@ -6,5 +6,5 @@ import java.util.UUID;
 
 /** ADR-011 D10: client duration is accepted for compatibility and ignored. */
 public record ProgressRequest(@NotNull UUID videoAssetId, @NotNull @Min(0) Integer currentSeconds,
-                              Integer durationSeconds, @NotNull Boolean finished) {
+                              @Min(0) Integer durationSeconds, @NotNull Boolean finished) {
 }
