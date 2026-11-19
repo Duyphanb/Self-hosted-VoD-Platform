@@ -24,6 +24,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -222,6 +223,24 @@ public class MovieService {
         return movieRepository.findById(movieId)
                 .filter(found -> visibility.includes(found.getStatus()))
                 .orElseThrow(MovieNotFoundException::new);
+    }
+
+    /**
+     * Batch summaries in the caller's id order. Missing or newly hidden movies are omitted;
+     * visibility is checked again by the batch query. Genres and video statuses use the same
+     * fixed-cost mapping as the catalog's paged lists.
+     */
+    @Transactional(readOnly = true)
+    public List<MovieSummary> summaries(List<UUID> movieIds, MovieVisibility visibility) {
+        Objects.requireNonNull(movieIds, "movieIds");
+        Objects.requireNonNull(visibility, "visibility");
+        if (movieIds.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, Movie> visible = movieRepository.findByIdInAndStatusIn(movieIds, visibility.statuses())
+                .stream().collect(Collectors.toMap(Movie::getId, movie -> movie));
+        List<Movie> ordered = movieIds.stream().map(visible::get).filter(Objects::nonNull).toList();
+        return toSummaries(new PageImpl<>(ordered)).getContent();
     }
 
     /**

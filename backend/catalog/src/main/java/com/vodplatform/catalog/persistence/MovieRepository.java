@@ -49,6 +49,9 @@ public interface MovieRepository extends JpaRepository<Movie, UUID>, JpaSpecific
      */
     Page<Movie> findByStatus(MovieStatus status, Pageable pageable);
 
+    /** Batch read that rechecks visibility in SQL, including after another module's selection. */
+    List<Movie> findByIdInAndStatusIn(Collection<UUID> ids, Collection<MovieStatus> statuses);
+
     /**
      * The genre assignments of the given movies, read with one query, so a page of movies is mapped
      * without loading each movie's genres separately. A movie without genres has no row; the order
