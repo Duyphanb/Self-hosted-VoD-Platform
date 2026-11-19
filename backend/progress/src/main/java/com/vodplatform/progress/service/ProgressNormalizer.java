@@ -13,6 +13,21 @@ public final class ProgressNormalizer {
     public record Result(Optional<StoredProgress> progress, int resumeSeconds) {
     }
 
+    /**
+     * ADR-011 D11 continue-watching membership. Unknown or nonpositive duration cannot establish
+     * that the normalized position is below the end. The SQL selection has a tested twin of this
+     * predicate so filtering happens before its limit.
+     */
+    public static boolean isResumable(StoredProgress stored, Integer currentDurationSeconds) {
+        Objects.requireNonNull(stored, "stored");
+        if (stored.finished() || currentDurationSeconds == null || currentDurationSeconds <= 0) {
+            return false;
+        }
+        int position = normalize(Optional.of(stored), currentDurationSeconds)
+                .progress().orElseThrow().currentSeconds();
+        return position > 0 && position < currentDurationSeconds;
+    }
+
     public static Result normalize(Optional<StoredProgress> stored, Integer currentDurationSeconds) {
         Objects.requireNonNull(stored, "stored");
         if (stored.isEmpty()) {

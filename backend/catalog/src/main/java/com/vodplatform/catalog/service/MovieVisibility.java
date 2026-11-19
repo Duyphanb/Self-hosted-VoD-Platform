@@ -1,6 +1,8 @@
 package com.vodplatform.catalog.service;
 
 import com.vodplatform.catalog.persistence.MovieStatus;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Which movie statuses a caller may see (ADR-009, {@code SECURITY.md#movie-visibility}). This is
@@ -23,5 +25,10 @@ public enum MovieVisibility {
 
     public boolean includes(MovieStatus status) {
         return this == ANY_STATUS || status == MovieStatus.PUBLISHED;
+    }
+
+    /** Statuses to bind in set-based reads; {@link #includes} remains the catalog's one rule. */
+    public List<MovieStatus> statuses() {
+        return Arrays.stream(MovieStatus.values()).filter(this::includes).toList();
     }
 }
