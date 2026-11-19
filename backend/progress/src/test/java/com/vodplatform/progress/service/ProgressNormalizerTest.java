@@ -15,6 +15,17 @@ class ProgressNormalizerTest {
     private static final Instant LAST_PLAYED = Instant.parse("2026-11-01T10:00:00Z");
 
     @ParameterizedTest
+    @CsvSource(value = {"40,100,false,true", "0,100,false,false", "-1,100,false,false",
+            "90,100,true,false", "90,100,false,true", "100,100,false,false", "140,100,false,false",
+            "40,NULL,false,false", "40,-1,false,false", "0,0,false,false", "1,1,false,false",
+            "2147483646,2147483647,false,true", "2147483647,2147483647,false,false"}, nullValues = "NULL")
+    void resumabilityRequiresUnfinishedNormalizedPositionStrictlyInsideKnownDuration(
+            int position, Integer duration, boolean finished, boolean expected) {
+        assertThat(ProgressNormalizer.isResumable(
+                new StoredProgress(position, 999, finished, LAST_PLAYED), duration)).isEqualTo(expected);
+    }
+
+    @ParameterizedTest
     @NullSource
     @ValueSource(ints = {-1, 0, 100})
     void absentRowStaysAbsentAndResumesAtZero(Integer duration) {

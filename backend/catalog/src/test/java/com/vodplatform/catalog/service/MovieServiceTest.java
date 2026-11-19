@@ -118,6 +118,45 @@ class MovieServiceTest {
     // ---- create ----
 
     @Test
+    void batchSummariesPreserveRequestedOrderAndDropMissingOrHiddenMovies() {
+        persist(movie(1, "published-one", PUBLISHED));
+        persist(movie(2, "published-two", PUBLISHED));
+        persist(movie(3, "draft", DRAFT));
+        persist(movie(4, "archived", ARCHIVED));
+        flushAndClear();
+        assertThat(movieService.summaries(List.of(uuid(2), uuid(3), uuid(99), uuid(1), uuid(4)),
+                MovieVisibility.PUBLISHED_ONLY)).extracting(MovieSummary::id).containsExactly(uuid(2), uuid(1));
+        assertThat(movieService.summaries(List.of(uuid(4), uuid(3), uuid(1)), MovieVisibility.ANY_STATUS))
+                .extracting(MovieSummary::id).containsExactly(uuid(4), uuid(3), uuid(1));
+        assertThat(movieService.summaries(List.of(), MovieVisibility.PUBLISHED_ONLY)).isEmpty();
+    }
+
+    @Test
+    void batchSummariesUseTheSameGenreAndVideoStatusMappingAsPagedLists() {
+        Genre drama = persist(new Genre(uuid(101), "Drama", "drama"));
+        Genre action = persist(new Genre(uuid(102), "Action", "action"));
+        Movie movie = movie(1, "published", PUBLISHED);
+        movie.replaceGenres(List.of(drama, action));
+        persist(movie);
+        flushAndClear();
+        videoStatusLookup.statuses.put(uuid(1), "READY");
+        assertThat(movieService.summaries(List.of(uuid(1)), MovieVisibility.PUBLISHED_ONLY))
+                .containsExactlyElementsOf(movieService.listPublished(null, null, 0, 10, MovieSort.LATEST).getContent());
+        assertThat(movieService.summaries(List.of(uuid(1)), MovieVisibility.PUBLISHED_ONLY).getFirst().genres())
+                .containsExactly("Action", "Drama");
+        assertThat(movieService.summaries(List.of(uuid(1)), MovieVisibility.PUBLISHED_ONLY).getFirst().videoStatus())
+                .isEqualTo("READY");
+    }
+
+    @Test
+    void visibilityStatusesAlwaysAgreeWithTheCatalogPredicate() {
+        for (MovieVisibility visibility : MovieVisibility.values()) {
+            assertThat(visibility.statuses()).containsExactlyElementsOf(
+                    java.util.Arrays.stream(MovieStatus.values()).filter(visibility::includes).toList());
+        }
+    }
+
+    @Test
     void createStoresTheMovieWithItsGenresAndCreditsAndReturnsTheDetail() {
         persist(new Genre(uuid(101), "Hành Động", "hanh-dong"));
         Person director = persist(person(201, "Nguyễn Quang Dũng"));
