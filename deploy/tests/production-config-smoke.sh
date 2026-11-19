@@ -633,19 +633,22 @@ for service_name, allowed in allowed_secrets.items():
         if secret_name not in allowed:
             assert values[secret_name] not in configured, (service_name, secret_name)
 
-# #106: Nginx and the frontend share only the edge network; the data stores, init jobs and
-# worker sit only on the internal network, which has no outside route; the backend joins both.
+# #94/#106: only Nginx/backend share vod_proxy; frontend cannot reach the backend directly.
 networks = config["networks"]
 assert networks["vod_internal"].get("internal") is True, "Data network must be internal"
 assert not networks["vod_edge"].get("internal"), "Edge network must publish Nginx"
+assert not networks["vod_proxy"].get("internal"), "Proxy link preserves backend egress"
+assert not networks["vod_proxy"].get("enable_ipv6"), "Proxy link stays IPv4"
 for service_name, service in services.items():
     attached = set(service.get("networks") or {})
     if service_name == "production-config-check":
         assert service.get("network_mode") == "none" and not attached, service_name
-    elif service_name in ("nginx", "frontend"):
+    elif service_name == "frontend":
         assert attached == {"vod_edge"}, service_name
+    elif service_name == "nginx":
+        assert attached == {"vod_edge", "vod_proxy"}, service_name
     elif service_name == "backend":
-        assert attached == {"vod_edge", "vod_internal"}, service_name
+        assert attached == {"vod_proxy", "vod_internal"}, service_name
     else:
         assert attached == {"vod_internal"}, service_name
         assert not service.get("ports"), service_name

@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.tomcat.autoconfigure.TomcatServerProperties;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -30,7 +31,28 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Import(ForwardedHeadersIntegrationTests.RequestViewConfiguration.class)
 class ForwardedHeadersIntegrationTests implements PostgresTestDatabase {
     @Autowired RestTestClient client;
+    @Autowired TomcatServerProperties tomcatProperties;
     @LocalServerPort int port;
+
+    @org.junit.jupiter.api.Test
+    void standaloneDefaultTrustsOnlyLoopbackRatherThanPrivateRanges() throws Exception {
+        assertThat(tomcatProperties.getRemoteip().getInternalProxies()).isEqualTo("127.0.0.1/32,::1/128");
+        var ranges = org.apache.catalina.util.NetMaskSet.parse(tomcatProperties.getRemoteip().getInternalProxies());
+        assertThat(ranges.contains("127.0.0.1")).isTrue();
+        assertThat(ranges.contains("::1")).isTrue();
+        for (String peer : new String[]{"10.94.250.2", "172.20.0.2", "192.168.1.2", "100.64.0.2", "fc00::2"}) {
+            assertThat(ranges.contains(peer)).as("private peer %s has no standalone trust", peer).isFalse();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"http://watch.example.test:9999", "https://watch.example.test:8088"})
+    void sameHostWithDifferentPortOrSchemeIsStillCrossOrigin(String origin) {
+        login("http", 8088, origin).exchange().expectStatus().isForbidden()
+                .expectHeader().valueEquals("X-Test-Scheme", "http")
+                .expectHeader().valueEquals("X-Test-Port", "8088")
+                .expectHeader().doesNotExist("Access-Control-Allow-Origin");
+    }
 
     @ParameterizedTest
     @CsvSource({"http,80,false", "http,8088,false", "https,443,true"})

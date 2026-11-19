@@ -7,8 +7,9 @@ server:
       remote-ip-header: X-Forwarded-For
       host-header: X-Forwarded-Host
       port-header: X-Forwarded-Port
-      # Retain Boot/Tomcat's internal private/loopback proxy ranges; trusted-proxies stays unset.
-      # Only Nginx is published. Every header above is overwritten at that edge.
+      # Compose supplies only Nginx's /32 on vod_proxy; standalone defaults to loopback only.
+      # trusted-proxies stays unset: private network addresses alone confer no trust.
+      internal-proxies: ${FORWARDED_TRUSTED_PROXIES:127.0.0.1/32,::1/128}
     # Idle budget between body reads, aligned with Nginx's 60s client-body/send/proxy-send
     # defaults (INFRASTRUCTURE upload transport). Not a total deadline for a large upload.
     connection-timeout: 60s

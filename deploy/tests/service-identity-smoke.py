@@ -19,6 +19,7 @@ import re
 import secrets
 import subprocess
 import tempfile
+from proxy_network import validate_proxy_topology
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = re.compile(r"vod-auth-audit-[a-z0-9][a-z0-9_-]*\Z")
@@ -265,28 +266,26 @@ class Smoke:
 
     def static_checks(self):
         config = json.loads(self.compose_run("config", "--format", "json", label="config", record=False).stdout)
-        services, networks = config["services"], config["networks"]
-        if networks["vod_internal"].get("internal") is not True or networks["vod_edge"].get("internal"):
-            raise SmokeError("Check failed: network-internal-flags")
-        for name, service in services.items():
-            attached = set(service.get("networks") or {})
-            expected = ({"vod_edge"} if name in ("nginx", "frontend") else
-                        {"vod_edge", "vod_internal"} if name == "backend" else {"vod_internal"})
-            if attached != expected or (name != "nginx" and service.get("ports")):
-                raise SmokeError("Check failed: network-membership")
+        try:
+            validate_proxy_topology(config)
+        except (ValueError, KeyError):
+            raise SmokeError("Check failed: proxy-network-topology") from None
+        services = config["services"]
         redis = services["redis"]
         visible = json.dumps([redis.get("entrypoint"), redis.get("command")])
         if self.env["REDIS_PASSWORD"] in visible:
             raise SmokeError("Check failed: redis-password-absent-from-command")
-        print("PASS edge/internal network membership and internal data network", flush=True)
+        print("PASS edge/proxy/internal topology and Nginx-only forwarded trust", flush=True)
 
     def running_stack_checks(self):
         """Probes in a caller-started full stack after its aggregate health is UP: the apps hold
         only their scoped sessions, Redis requires its password, and Nginx reaches only the backend."""
         inspect = self.run(["docker", "network", "inspect", "--format", "{{.Internal}}",
-                            self.project + "_vod_internal", self.project + "_vod_edge"], label="network inspect")
-        if inspect.stdout.split() != ["true", "false"]:
+                            self.project + "_vod_internal", self.project + "_vod_edge",
+                            self.project + "_vod_proxy"], label="network inspect")
+        if inspect.stdout.split() != ["true", "false", "false"]:
             raise SmokeError("Check failed: running-network-internal-flags")
+        self.static_checks()
         services = json.loads(self.compose_run("config", "--format", "json", label="config", record=False).stdout)[
             "services"]
         backend, worker = services["backend"]["environment"], services["worker"]["environment"]
@@ -311,7 +310,7 @@ class Smoke:
         # Each negative probe has a positive control, so a missing tool cannot pass vacuously.
         if not (from_edge("wget", "-q", "-T", "3", "-O", "/dev/null", "http://backend:8080/api/v1/health")
                 and from_edge("getent", "hosts", "backend")
-                and from_edge("nc", "-z", "-w", "3", self.address("backend", "vod_edge"), "8080")):
+                and from_edge("nc", "-z", "-w", "3", self.address("backend", "vod_proxy"), "8080")):
             raise SmokeError("Check failed: edge-reaches-backend")
         # Docker DNS answers only for attached networks, so a resolvable name means a shared network.
         for name in ("postgres", "redis", "rabbitmq", "minio", "worker", "flyway", "minio-init", "postgres-init"):
@@ -322,6 +321,40 @@ class Smoke:
             if from_edge("nc", "-z", "-w", "3", self.address(name, "vod_internal"), port):
                 raise SmokeError("Check failed: edge-cannot-reach-internal-addresses")
         print("PASS Nginx reaches the backend but no internal service by name or address", flush=True)
+
+        def from_frontend(*command):
+            return self.compose_run("exec", "-T", "frontend", *command, check=False,
+                                    label="frontend probe").returncode == 0
+
+        if not (from_frontend("wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1/")
+                and from_frontend("getent", "hosts", "frontend")
+                and from_frontend("nc", "-z", "-w", "3", "127.0.0.1", "80")):
+            raise SmokeError("Check failed: frontend-probe-positive-controls")
+        if (from_frontend("getent", "hosts", "backend")
+                or from_frontend("wget", "-q", "-T", "3", "-O", "/dev/null", "http://backend:8080/api/v1/health")
+                or any(from_frontend("nc", "-z", "-w", "3", self.address("backend", network), "8080")
+                       for network in ("vod_proxy", "vod_internal"))):
+            raise SmokeError("Check failed: frontend-cannot-reach-backend")
+        print("PASS frontend cannot reach backend by name or either address (positive controls passed)", flush=True)
+
+        def internal_status(path, *arguments):
+            # Silo's pinned image uses curl in its healthcheck and is only on vod_internal.
+            result = self.compose_run("exec", "-T", "minio", "curl", "-sS", "--max-time", "5",
+                                      "-o", "/dev/null", "-w", "%{http_code}", *arguments,
+                                      "http://backend:8080" + path, label="internal trust probe")
+            return result.stdout.strip()
+
+        login = "/api/v1/auth/login"
+        body = ("-H", "Content-Type: application/json", "-d", "{}")
+        if internal_status("/api/v1/health") != "200" or internal_status(login, *body) != "400":
+            raise SmokeError("Check failed: internal-trust-positive-controls")
+        # Keep curl's default Host=backend:8080: only forged forwarded values could match Origin.
+        if internal_status(login, *body, "-H", "X-Forwarded-Host: forged.example.test",
+                           "-H", "X-Forwarded-Port: 9443", "-H", "X-Forwarded-Proto: https",
+                           "-H", "X-Forwarded-For: 198.51.100.7",
+                           "-H", "Origin: https://forged.example.test:9443") != "403":
+            raise SmokeError("Check failed: internal-peer-forwarded-forgery-rejected")
+        print("PASS vod_internal peer cannot forge forwarded origin; direct GET/POST controls passed", flush=True)
 
     def address(self, service, network):
         inspected = self.run(["docker", "inspect", "--format", "{{(index .NetworkSettings.Networks \""

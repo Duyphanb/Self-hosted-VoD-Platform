@@ -215,7 +215,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", default="vod-auth-audit-edge-" + secrets.token_hex(6))
     arguments = parser.parse_args()
-    assert re.fullmatch(r"(?:vod-auth-audit-|vod94-)[a-z0-9][a-z0-9_-]*", arguments.project), "Disposable audit project required"
+    assert re.fullmatch(r"vod-auth-audit-[a-z0-9][a-z0-9_-]*", arguments.project), "Disposable audit project required"
     project = arguments.project
     stub, edge = project + "-stub", project + "-edge"
     syntax_names = [project + "-syntax-" + str(index) for index in range(2)]

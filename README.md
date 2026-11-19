@@ -101,7 +101,7 @@ Nginx is the only service published to the host by the local Compose file, and b
 | `http://localhost/hls/*` | backend:8080 | Authenticated HLS proxy route |
 | `${NGINX_HTTP_PORT:-127.0.0.1:80}` | nginx:80 | Configurable host HTTP address and port, loopback only by default |
 
-These service ports are not published to the host. Nginx and the frontend share the `vod_edge` network with the backend; the data stores and the worker sit on the `internal: true` `vod_internal` network, which the backend also joins:
+These service ports are not published to the host. Nginx and the frontend share `vod_edge`; only Nginx and the backend share `vod_proxy`. The backend also joins the `internal: true` `vod_internal` network with the data stores and worker. The frontend cannot reach the backend directly. The proxy link defaults to `10.94.250.0/29`, with Nginx `.2` and backend `.3`; override `VOD_PROXY_SUBNET`, `VOD_PROXY_NGINX_IP` and `VOD_PROXY_BACKEND_IP` together if it overlaps another network (see [proxy network configuration](docs/deployment/README.md#proxy-network-configuration)):
 
 | Service | Internal port |
 |---|---:|

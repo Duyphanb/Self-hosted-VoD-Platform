@@ -168,6 +168,7 @@ services:
       APP_ENV: ${APP_ENV:-local}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
       SERVER_PORT: ${SERVER_PORT:-8080}
+      FORWARDED_TRUSTED_PROXIES: ${VOD_PROXY_NGINX_IP:-10.94.250.2}/32
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
       # Same database as FLYWAY_URL unless explicitly overridden; production rejects a different URL.
       SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-vod_platform}}
@@ -214,10 +215,11 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-    # The only service on both networks: Nginx reaches it on the edge, it reaches the data stores.
+    # Only Nginx shares vod_proxy; data peers can reach the API but cannot forge forwarded values.
     networks:
-      - vod_edge
-      - vod_internal
+      vod_proxy:
+        ipv4_address: ${VOD_PROXY_BACKEND_IP:-10.94.250.3}
+      vod_internal: {}
 
   worker:
     scale: 1
@@ -330,14 +332,22 @@ services:
       retries: 5
       start_period: 5s
     networks:
-      - vod_edge
+      vod_edge: {}
+      vod_proxy:
+        ipv4_address: ${VOD_PROXY_NGINX_IP:-10.94.250.2}
 
-# #106: Nginx and the frontend reach only the edge network. The data stores, init jobs
-# and worker sit on the internal network, which has no route outside Docker, so they
-# publish no ports and have no egress. The backend joins both.
+# #94/#106: frontend shares only vod_edge with Nginx. Only Nginx and backend share vod_proxy;
+# both addresses are static so startup/recreation cannot take or change the proxy's trusted IP.
+# Data stores, init jobs and worker remain on the internal network without egress/published ports.
 networks:
   vod_edge:
     driver: bridge
+  vod_proxy:
+    driver: bridge
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: ${VOD_PROXY_SUBNET:-10.94.250.0/29}
   vod_internal:
     driver: bridge
     internal: true

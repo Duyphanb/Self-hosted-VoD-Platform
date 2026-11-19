@@ -91,12 +91,36 @@ On a non-default port, include it in the browser URL, for example `http://localh
 Same-origin requests need no CORS allowlist entry: Nginx overwrites the forwarded host, port,
 scheme and client IP, and clears RFC `Forwarded`. The port comes from the browser's Host authority
 (including bracketed IPv6), otherwise 80 for HTTP or 443 for HTTPS, never the container port.
-Tomcat's native valve accepts these values only from its default internal proxy ranges.
+Tomcat's native valve accepts these values only from Nginx's fixed `/32` on `vod_proxy`;
+outside Compose it trusts only loopback. A private address alone confers no trust.
 Keep the backend port unpublished; only Nginx may publish service ports. Cross-origin clients
 still need the CORS allowlist. ADR-012's separate auth Origin check is implemented by Issue 6.9.
 Spring's HSTS writer is disabled; HTTPS/HSTS rollout remains an edge decision (#72, #136).
 A load balancer or CDN in front of Nginx requires explicit `real_ip` configuration and a review
 of `X-Forwarded-For` and client-IP trust before deployment (#51, #136).
+
+### Proxy Network Configuration
+
+Only Nginx/backend join `vod_proxy`; frontend stays on `vod_edge` with Nginx, and backend also
+joins `vod_internal`. The link is IPv4-only and preserves backend egress. Defaults work with plain
+`docker compose up`: `VOD_PROXY_SUBNET=10.94.250.0/29`, `VOD_PROXY_NGINX_IP=10.94.250.2`,
+`VOD_PROXY_BACKEND_IP=10.94.250.3`. Both addresses are static so backend startup cannot take the
+trusted proxy IP and backend recreation preserves Nginx's upstream address.
+
+If Docker reports `Pool overlaps` or `address already in use`, inspect existing host/Docker routes
+and choose an unused IPv4 subnet. Change **all three** variables together in the protected env
+file. Addresses must be distinct usable members, excluding network, gateway (normally `.1`) and
+broadcast. Compose derives backend trust from the Nginx address automatically. Recreate backend
+and Nginx after changing these values; changing the subnet also requires recreating the network.
+Confirm the Compose project and recoverable backups first: as in the #106 upgrade, use
+`$C down --remove-orphans` **without `--volumes` or `-v`**, then `$C up -d --wait`; named volumes
+are preserved. Never remove another project's network to resolve a collision.
+
+Upgrade from the pre-#94 topology: after preflight, `$C up -d --wait --force-recreate backend frontend nginx`
+creates `vod_proxy`, removes backend from `vod_edge` and recreates the three services. Volumes
+are untouched. Verify aggregate health, same-origin login and the frontend/internal-peer negative
+probes. Disposable smoke stacks use their own /29, excluding this deployment default; CI's main
+full stack deliberately uses the defaults.
 
 Production publishes the edge on the public interface, so `.env.production`
 must set `NGINX_HTTP_PORT=80` explicitly. The production overlay fails during
