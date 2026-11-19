@@ -16,7 +16,7 @@ class ProgressNormalizerTest {
 
     @ParameterizedTest
     @NullSource
-    @ValueSource(ints = {0, 100})
+    @ValueSource(ints = {-1, 0, 100})
     void absentRowStaysAbsentAndResumesAtZero(Integer duration) {
         var result = ProgressNormalizer.normalize(Optional.empty(), duration);
         assertThat(result.progress()).isEmpty();
@@ -57,5 +57,14 @@ class ProgressNormalizerTest {
                 Optional.of(new StoredProgress(40, null, false, LAST_PLAYED)), 100);
         assertThat(result.progress()).contains(new StoredProgress(40, 100, false, LAST_PLAYED));
         assertThat(result.resumeSeconds()).isEqualTo(40);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans={false,true})
+    void negativeDurationIsUnknown(boolean finished) {
+        var row = new StoredProgress(40, 999, finished, LAST_PLAYED);
+        var result = ProgressNormalizer.normalize(Optional.of(row), -1);
+        assertThat(result.progress()).contains(row);
+        assertThat(result.resumeSeconds()).isEqualTo(finished ? 0 : 40);
     }
 }
