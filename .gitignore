@@ -59,6 +59,10 @@ node_modules/
 target/
 build/
 dist/
+dist-e2e/
+test-results/
+test-results-stack/
+playwright-report/
 __pycache__/
 *.pyc
 

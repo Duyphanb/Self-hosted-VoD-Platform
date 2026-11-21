@@ -8,6 +8,7 @@ the first-administrator SQL documented in docs/deployment/README.md. Uses real H
 through Nginx, PostgreSQL constraints and row locks, and concurrent requests, not
 mocks. Output names the checks only, never tokens or response bodies.
 """
+from auth_cookies import auth_headers, capture_auth_cookie
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -67,13 +68,14 @@ def main():
     assert sql("SELECT (SELECT count(*) FROM movies) + (SELECT count(*) FROM genres) + (SELECT count(*) FROM people);") == "0", \
         "Catalog must be fresh"
 
-    def request(path, body=None, token=None, method=None, raw=None):
+    def request(path, body=None, token=None, method=None, raw=None, cookie=None):
         data = raw if raw is not None else None if body is None else json.dumps(body).encode()
         headers = {} if data is None else {"Content-Type": "application/json"}
+        auth_headers(args.base_url, path, headers, cookie)
         if token:
             headers["Authorization"] = "Bearer " + token
         req = urllib.request.Request(args.base_url + path, data=data, headers=headers,
-                                     method=method or ("POST" if data is not None else "GET"))
+                                     method=method or ("POST" if data is not None or path.startswith("/api/v1/auth/") else "GET"))
         try:
             response = urllib.request.urlopen(req, timeout=30)
         except urllib.error.HTTPError as error:
@@ -81,10 +83,10 @@ def main():
         with response:
             content = response.read()
             parsed = json.loads(content) if content and response.headers.get_content_type() == "application/json" else None
-            return response.status, parsed, content
+            return response.status, capture_auth_cookie(response, parsed, path), content
 
-    def call(path, body=None, token=None, method=None, raw=None):
-        status, parsed, _ = request(path, body, token, method, raw)
+    def call(path, body=None, token=None, method=None, raw=None, cookie=None):
+        status, parsed, _ = request(path, body, token, method, raw, cookie)
         return status, parsed
 
     def concurrent(callables):
@@ -164,7 +166,7 @@ def main():
                f"WHERE r.name = 'ROLE_ADMIN' AND lower(u.email) = '{viewer_email}';") == "0"
     # Roles are carried in the access token: the existing token stays ROLE_USER until a refresh.
     assert is_api_error(call(MOVIES, movie("smoke-forbidden"), candidate), 403, "FORBIDDEN")
-    status, refreshed = call("/api/v1/auth/refresh", {"refreshToken": candidate_session["refreshToken"]})
+    status, refreshed = call("/api/v1/auth/refresh", cookie=candidate_session.refresh_cookie)
     assert status == 200
     admin = refreshed["accessToken"]
     assert "ROLE_ADMIN" in call("/api/v1/users/me", token=admin)[1]["roles"]

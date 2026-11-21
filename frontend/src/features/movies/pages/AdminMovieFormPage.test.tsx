@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppRoutes } from '../../../app/AppRoutes';
 import type { AuthResponse, UserProfile } from '../../../lib/api/types';
 import { AuthProvider } from '../../auth/AuthContext';
-import { AUTH_SESSION_STORAGE_KEY, createAuthSession, writeAuthSession } from '../../auth/authStorage';
+import { createAuthSession} from '../../auth/authStorage';
+import { installCookieSession as writeAuthSession } from '../../../test/cookieSession';
 import { movieKeys, type MovieDetail } from '../moviesApi';
 
 const movieId = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
@@ -300,7 +301,7 @@ describe('AdminMovieFormPage through the data router', () => {
     const held = deferredResponse();
     serve((url) => url.pathname === `/api/v1/movies/${movieId}` ? held.promise : undefined);
     renderForm({ path: `/admin/movies/${movieId}/edit` });
-    expect(await screen.findByRole('status')).toHaveTextContent('Loading movie…');
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Loading movie…'));
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     held.release(json(movieDetail()));
     expect(await screen.findByLabelText('Title')).toHaveValue('Existing movie');
@@ -640,7 +641,7 @@ describe('AdminMovieFormPage through the data router', () => {
     change('Title', 'First admin private draft');
     const otherAdmin = { ...admin, id: 'b5f7c0f4-1d2e-4c3b-9a8f-7e6d5c4b3a21', displayName: 'Another admin' };
     persist(otherAdmin, 'other');
-    act(() => window.dispatchEvent(new StorageEvent('storage', { key: AUTH_SESSION_STORAGE_KEY })));
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: 'vod.auth.marker.v2' })));
     await waitFor(() => expect(screen.getByLabelText('Title')).toHaveValue(''));
     expect(screen.getByLabelText('Slug')).toHaveValue('');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -687,7 +688,7 @@ function errorSummary(): HTMLElement {
 }
 function mutations() { return fetchMock.mock.calls.filter(([, init]) => ['POST', 'PUT'].includes(init?.method ?? 'GET')); }
 function persist(user: UserProfile, prefix = '') {
-  const response: AuthResponse = { user, accessToken: `${prefix ? `${prefix}-` : ''}access-token`, refreshToken: `${prefix ? `${prefix}-` : ''}refresh-token`, expiresInSeconds: 900 };
+  const response: AuthResponse = { user, accessToken: `${prefix ? `${prefix}-` : ''}access-token`, expiresInSeconds: 900 };
   writeAuthSession(createAuthSession(response), window.localStorage);
 }
 function serve(override?: (url: URL, init: RequestInit | undefined) => Response | Promise<Response> | undefined) {

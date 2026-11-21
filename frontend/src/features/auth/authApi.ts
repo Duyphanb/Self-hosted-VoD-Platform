@@ -12,11 +12,14 @@ export interface RegisterRequest {
   displayName: string;
 }
 
-export async function login(client: ApiClient, request: LoginRequest): Promise<AuthResponse> {
+export async function login(client: ApiClient, request: LoginRequest, signal?: AbortSignal): Promise<AuthResponse> {
   const response = await client.request<unknown>('/auth/login', {
     method: 'POST',
-    json: request
+    json: request,
+    signal,
+    credentials: 'same-origin'
   });
+  signal?.throwIfAborted();
   return decodeAuthResponse(response);
 }
 
@@ -30,27 +33,27 @@ export async function register(client: ApiClient, request: RegisterRequest): Pro
 
 export async function refresh(
   client: ApiClient,
-  refreshToken: string,
   signal?: AbortSignal
 ): Promise<AuthResponse> {
   const response = await client.request<unknown>('/auth/refresh', {
     method: 'POST',
-    json: { refreshToken },
+    credentials: 'same-origin',
     signal
   });
+  signal?.throwIfAborted();
   return decodeAuthResponse(response);
 }
 
-export function logout(
+export async function logout(
   client: ApiClient,
-  refreshToken: string,
   signal?: AbortSignal
 ): Promise<void> {
-  return client.request('/auth/logout', {
+  await client.request('/auth/logout', {
     method: 'POST',
-    json: { refreshToken },
+    credentials: 'same-origin',
     signal
   });
+  signal?.throwIfAborted();
 }
 
 export class InvalidAuthResponseError extends Error {
@@ -68,14 +71,12 @@ function decodeAuthResponse(value: unknown): AuthResponse {
   const user = tryDecodeUserProfile(candidate.user);
   if (!user
     || !nonEmptyString(candidate.accessToken)
-    || !nonEmptyString(candidate.refreshToken)
     || !positiveInteger(candidate.expiresInSeconds)) {
     throw new InvalidAuthResponseError('AuthResponse');
   }
   return {
     user,
     accessToken: candidate.accessToken,
-    refreshToken: candidate.refreshToken,
     expiresInSeconds: candidate.expiresInSeconds
   };
 }

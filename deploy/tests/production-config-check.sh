@@ -143,6 +143,10 @@ reject_published_default \
   "${JWT_SECRET:-}" \
   "change-me-use-a-long-random-secret"
 reject_unpublished_edge "${NGINX_HTTP_PORT:-}"
+# ADR-012 D1/D3 (#230, cookie item of #138): production must support cookie refresh/logout.
+[ -n "$(printf '%s' "${CORS_ALLOWED_ORIGINS:-}" | tr -d '[:space:]')" ] \
+  || fail "CORS_ALLOWED_ORIGINS must include the public origin"
+[ "${AUTH_COOKIE_SECURE:-true}" = true ] || fail "AUTH_COOKIE_SECURE must be true in production"
 # Nginx is deliberately a frozen literal, not an env-templated config. Static
 # tests compare this value with Nginx, Spring, Compose and the SPA defaults.
 edge_upload_limit_mb=2048

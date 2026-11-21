@@ -3,7 +3,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { type PropsWithChildren, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from '../../auth/AuthContext';
-import { createAuthSession, writeAuthSession } from '../../auth/authStorage';
+import { createAuthSession} from '../../auth/authStorage';
+import { installCookieSession as writeAuthSession } from '../../../test/cookieSession';
 import type { MovieFormCredit, MovieFormErrors } from '../movieFormModel';
 import { CreditsEditor } from './CreditsEditor';
 
@@ -255,7 +256,7 @@ describe('CreditsEditor', () => {
 function renderEditor({ initial = [], errors = {}, forbidden = vi.fn() }: { initial?: MovieFormCredit[]; errors?: MovieFormErrors; forbidden?: () => void } = {}) {
   writeAuthSession(createAuthSession({
     user: { id: '3fcf25c2-f096-4462-ae63-4ba4702a9078', email: 'admin@example.com', displayName: 'Admin', roles: ['ROLE_ADMIN'] },
-    accessToken: 'access-token', refreshToken: 'refresh-token', expiresInSeconds: 900
+    accessToken: 'access-token', expiresInSeconds: 900
   }), window.localStorage);
   function ControlledEditor() {
     const [value, setValue] = useState(initial);

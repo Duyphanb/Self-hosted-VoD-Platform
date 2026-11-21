@@ -8,7 +8,7 @@ import tseslint from 'typescript-eslint';
 // CI runs `npm run lint` with --max-warnings=0, so a warning fails the build like an error.
 export default defineConfig([
   // ESLint always skips node_modules; the Vite build output must be skipped explicitly.
-  globalIgnores(['dist/']),
+  globalIgnores(['dist/', 'dist-e2e/', 'test-results/', 'test-results-stack/', 'playwright-report/']),
   {
     // Application code, tests and TypeScript config files such as vite.config.ts.
     files: ['**/*.{ts,tsx,mts,cts}'],
@@ -35,6 +35,10 @@ export default defineConfig([
     // JavaScript config files (this file, PostCSS and Tailwind).
     files: ['**/*.{js,mjs,cjs}'],
     extends: [js.configs.recommended]
+  },
+  {
+    files: ['e2e/server.mjs'],
+    languageOptions: { globals: { process: 'readonly', Buffer: 'readonly', URL: 'readonly', setTimeout: 'readonly' } }
   },
   {
     // tsc never checks JavaScript here (allowJs is false) while Vite would still bundle it.

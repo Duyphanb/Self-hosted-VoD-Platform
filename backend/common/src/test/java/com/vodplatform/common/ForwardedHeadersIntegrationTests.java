@@ -26,7 +26,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 /** HTTP, not MockMvc: Tomcat's native valve runs before this test-only request-view filter. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "auth.tokens.secret=test-only-secret-with-at-least-32-bytes", "CORS_ALLOWED_ORIGINS="})
+        "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
+        "CORS_ALLOWED_ORIGINS=http://watch.example.test,http://watch.example.test:8088,https://watch.example.test"})
 @AutoConfigureRestTestClient
 @Import(ForwardedHeadersIntegrationTests.RequestViewConfiguration.class)
 class ForwardedHeadersIntegrationTests implements PostgresTestDatabase {
@@ -74,7 +75,8 @@ class ForwardedHeadersIntegrationTests implements PostgresTestDatabase {
         login(scheme, edgePort, "https://untrusted.example.test").exchange()
                 .expectStatus().isForbidden()
                 .expectHeader().doesNotExist("Access-Control-Allow-Origin")
-                .expectHeader().doesNotExist("Strict-Transport-Security");
+                .expectHeader().doesNotExist("Strict-Transport-Security")
+                .expectBody(String.class).value(body -> assertThat(body).contains("ORIGIN_NOT_ALLOWED"));
     }
 
     @ParameterizedTest

@@ -15,13 +15,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class LoginController {
 
     private final LoginService loginService;
+    private final RefreshCookie cookie;
 
-    public LoginController(LoginService loginService) {
+    public LoginController(LoginService loginService, RefreshCookie cookie) {
         this.loginService = loginService;
+        this.cookie = cookie;
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(loginService.login(request));
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request,
+                                             jakarta.servlet.http.HttpServletRequest servletRequest) {
+        var issued = loginService.login(request, cookie.read(servletRequest));
+        return ResponseEntity.ok().header("Set-Cookie", cookie.issued(issued.refreshToken(), issued.refreshExpiresAt()))
+                .body(AuthResponse.of(issued));
     }
 }

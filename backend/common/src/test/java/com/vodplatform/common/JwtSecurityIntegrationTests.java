@@ -46,7 +46,8 @@ import tools.jackson.databind.ObjectMapper;
         properties = {
                 "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
                 "auth.tokens.access-token-ttl=15m",
-                "auth.tokens.refresh-token-ttl=7d"
+                "auth.tokens.refresh-token-ttl=7d",
+                "security.cors.allowed-origins=http://localhost:5173"
         }
 )
 @AutoConfigureMockMvc
@@ -222,16 +223,16 @@ class JwtSecurityIntegrationTests implements PostgresTestDatabase {
                                 """))
                 .andExpect(status().isCreated());
 
-        JsonNode login = loginAndReadTokens(invalidAuthorization);
-        JsonNode refresh = performAuthRequest(
+        loginAndReadTokens(invalidAuthorization);
+        performAuthRequest(
                 "/api/v1/auth/refresh",
-                objectMapper.createObjectNode().put("refreshToken", login.path("refreshToken").asString()),
+                null,
                 invalidAuthorization,
                 200
         );
         performAuthRequest(
                 "/api/v1/auth/logout",
-                objectMapper.createObjectNode().put("refreshToken", refresh.path("refreshToken").asString()),
+                null,
                 invalidAuthorization,
                 204
         );
@@ -270,21 +271,31 @@ class JwtSecurityIntegrationTests implements PostgresTestDatabase {
         );
     }
 
+    private jakarta.servlet.http.Cookie refreshCookie;
+
     private JsonNode performAuthRequest(
             String path,
             JsonNode body,
             String authorization,
             int expectedStatus
     ) throws Exception {
-        var request = post(path)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(body));
+        var request = post(path).header(HttpHeaders.ORIGIN, "http://localhost:5173");
+        if (body != null) {
+            request.contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsBytes(body));
+        }
+        if ((path.endsWith("/refresh") || path.endsWith("/logout")) && refreshCookie != null) {
+            request.cookie(refreshCookie);
+        }
         if (authorization != null) {
             request.header(HttpHeaders.AUTHORIZATION, authorization);
         }
         MvcResult result = mockMvc.perform(request)
                 .andExpect(status().is(expectedStatus))
                 .andReturn();
+        String setCookie = result.getResponse().getHeader(HttpHeaders.SET_COOKIE);
+        if (setCookie != null && expectedStatus == 200) {
+            refreshCookie = new jakarta.servlet.http.Cookie("vod_refresh", setCookie.split(";", 2)[0].substring("vod_refresh=".length()));
+        }
         byte[] responseBody = result.getResponse().getContentAsByteArray();
         return responseBody.length == 0 ? objectMapper.createObjectNode() : objectMapper.readTree(responseBody);
     }

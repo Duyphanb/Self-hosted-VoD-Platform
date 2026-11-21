@@ -215,7 +215,7 @@ sequenceDiagram
         Backend-->>Frontend: 401 on a playlist or segment request
         Frontend->>Frontend: Shared single-flight token refresh, once
         Frontend->>Nginx: Retry that request once with the new token
-        Note over Frontend: A second 401 or a failed refresh ends the session
+        Note over Frontend: A second 401 or a refresh 401 ends the session<br/>Network errors, timeouts and 5xx remain retryable (ADR-011 D2, ADR-012 D7)
     end
 ```
 
@@ -259,20 +259,35 @@ sequenceDiagram
     participant Backend
     participant PostgreSQL
 
-    Frontend->>Nginx: POST /api/v1/auth/refresh with refreshToken JSON body
-    Nginx->>Backend: Forward refresh request
-    Backend->>PostgreSQL: Validate refresh token hash, expiry, revocation
-    alt token valid
-        Backend->>PostgreSQL: Revoke old refresh token
-        Backend->>PostgreSQL: Store new refresh token hash
-        Backend-->>Nginx: JSON body with new access token and refresh token
-        Nginx-->>Frontend: JSON body with new access token and refresh token
-    else token invalid
-        Backend-->>Nginx: 401 Unauthorized
-        Nginx-->>Frontend: 401 Unauthorized
-        Frontend-->>User: Require login
+    Frontend->>Nginx: POST /api/v1/auth/refresh, no body<br/>Origin, Sec-Fetch-Site, Cookie vod_refresh
+    Nginx->>Backend: Forward request and cookie
+    Backend->>Backend: Require allowed Origin and reject Sec-Fetch-Site cross-site
+    alt Origin or Fetch-Site rejected
+        Backend-->>Nginx: 403 ApiError ORIGIN_NOT_ALLOWED
+        Nginx-->>Frontend: 403 JSON ApiError
+    else Origin and Fetch-Site accepted
+        Backend->>Backend: Reject missing, duplicate or over-long cookie before hashing
+        opt One bounded cookie present
+            Backend->>PostgreSQL: Lock token row and check hash, expiry, revocation and active user
+        end
+        alt Authentication state unavailable
+            Backend-->>Nginx: 503 ApiError AUTH_STATE_UNAVAILABLE without clearing cookie
+            Nginx-->>Frontend: 503 JSON ApiError, keep cookie
+            Frontend-->>User: Retryable error, retain local identity
+        else Cookie invalid, expired, revoked, replayed or user inactive
+            Backend-->>Nginx: 401 ApiError UNAUTHORIZED with Set-Cookie vod_refresh cleared
+            Nginx-->>Frontend: 401 JSON ApiError and clearing cookie
+            Frontend-->>User: Require login
+        else Token valid
+            Backend->>PostgreSQL: Revoke old token and store rotated hash atomically<br/>Sliding expiry remains 7 days in Issue 6.9
+            Backend-->>Nginx: 200 AuthResponse without refreshToken<br/>Set-Cookie rotated vod_refresh
+            Nginx-->>Frontend: User, accessToken, expiresInSeconds JSON<br/>HttpOnly Secure SameSite=Strict cookie
+            Frontend->>Frontend: Keep access token in memory only
+        end
     end
 ```
+
+This is the delivered [ADR-012 Issue 6.9](adr/ADR-012.md) flow. Cookie scope is host-only with `Path=/api/v1/auth`; `Max-Age` follows the token's remaining lifetime. A replay rejects only the presented token; session/family revocation belongs to Issue 6.10.
 
 ## Search
 

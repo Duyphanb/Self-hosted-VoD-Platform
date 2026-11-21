@@ -21,6 +21,7 @@ NEWMAN_ADMIN_PASSWORD; neither is printed.
 
 Output names the checks and safe identifiers only, never tokens, passwords or response bodies.
 """
+from auth_cookies import auth_headers, capture_auth_cookie
 import argparse
 import json
 import os
@@ -136,6 +137,7 @@ class Stack:
     def raw_request(self, path, token=None, body=None, content_type=None, timeout=60, extra_headers=None):
         headers = {"Authorization": "Bearer " + token} if token else {}
         headers.update(extra_headers or {})
+        auth_headers(self.base_url, path, headers)
         if content_type:
             headers["Content-Type"] = content_type
         req = urllib.request.Request(self.base_url + path, data=body, headers=headers,
@@ -148,6 +150,8 @@ class Stack:
             raise SmokeError("HTTP request failed (details withheld)") from None
         with response:
             content = response.read()
+            if path.startswith("/api/v1/auth/"):
+                capture_auth_cookie(response, json.loads(content) if content else None, path)
             return response.status, response.headers, content
 
 

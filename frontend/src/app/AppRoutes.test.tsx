@@ -4,8 +4,11 @@ import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'r
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthResponse, UserProfile } from '../lib/api/types';
 import { FakeXhr } from '../test/fakeXhr';
+import * as authApi from '../features/auth/authApi';
+import { ApiRequestError } from '../lib/api/client';
 import { AuthProvider } from '../features/auth/AuthContext';
-import { createAuthSession, writeAuthSession } from '../features/auth/authStorage';
+import { createAuthSession} from '../features/auth/authStorage';
+import { installCookieSession as writeAuthSession } from '../test/cookieSession';
 import { AppRoutes } from './AppRoutes';
 import { APP_ROUTER_FUTURE, APP_ROUTER_PROVIDER_FUTURE, createAppRoutes } from './AppRouter';
 
@@ -129,17 +132,11 @@ describe('AppRoutes guard wiring', () => {
 
   it('preserves the intended route when bootstrap refresh fails before login', async () => {
     persistUser(regularUser, Date.now() + 1_000);
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({
-        timestamp: '2026-08-21T00:00:00Z',
-        status: 401,
-        code: 'INVALID_REFRESH_TOKEN',
-        message: 'Refresh token is invalid or expired'
-      }, 401))
-      .mockResolvedValueOnce(jsonResponse({
+    vi.mocked(authApi.refresh).mockReset().mockRejectedValueOnce(new ApiRequestError(401, null));
+    fetchMock      .mockResolvedValueOnce(jsonResponse({
         user: regularUser,
         accessToken: 'new-access-token',
-        refreshToken: 'new-refresh-token',
+
         expiresInSeconds: 900
       }));
     renderProductionRoutes('/account?tab=security#sessions');
@@ -191,7 +188,7 @@ function persistUser(user: UserProfile, accessTokenExpiresAt?: number) {
   const response: AuthResponse = {
     user,
     accessToken: 'access-token',
-    refreshToken: 'refresh-token',
+
     expiresInSeconds: 900
   };
   writeAuthSession({

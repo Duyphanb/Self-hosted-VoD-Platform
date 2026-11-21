@@ -1,6 +1,5 @@
 package com.vodplatform.auth.web;
 
-import com.vodplatform.auth.dto.RefreshRequest;
 import com.vodplatform.auth.service.LogoutService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -14,16 +13,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class LogoutController {
 
     private final LogoutService logoutService;
+    private final RefreshCookie cookie;
 
-    public LogoutController(LogoutService logoutService) {
+    public LogoutController(LogoutService logoutService, RefreshCookie cookie) {
         this.logoutService = logoutService;
+        this.cookie = cookie;
     }
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
-            @Valid @RequestBody(required = false) RefreshRequest request
+            jakarta.servlet.http.HttpServletRequest request
     ) {
-        logoutService.logout(request);
-        return ResponseEntity.noContent().build();
+        String token = cookie.read(request);
+        if (token != null) logoutService.logout(token);
+        return ResponseEntity.noContent().header("Set-Cookie", cookie.cleared()).build();
     }
 }

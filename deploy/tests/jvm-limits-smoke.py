@@ -108,7 +108,7 @@ def new_environment():
         env[prefix + "_SECRET_KEY"] = secrets.token_urlsafe(48)
     # Nginx is not started; the preflight still requires a non-loopback edge setting.
     env.update({"JWT_SECRET": secrets.token_urlsafe(48), "NGINX_HTTP_PORT": "0.0.0.0:18089",
-                "MAX_UPLOAD_SIZE_MB": "2048", "CORS_ALLOWED_ORIGINS": ""})
+                "MAX_UPLOAD_SIZE_MB": "2048", "CORS_ALLOWED_ORIGINS": "https://jvm-fixture.example.com", "AUTH_COOKIE_SECURE": "true"})
     # Disposable JVM fixture only. Production media deadlines await #124.
     env.update({"WORKER_FFPROBE_TIMEOUT_SECONDS": "15", "WORKER_FFMPEG_TIMEOUT_MIN_SECONDS": "60",
                 "WORKER_FFMPEG_TIMEOUT_FACTOR": "8"})

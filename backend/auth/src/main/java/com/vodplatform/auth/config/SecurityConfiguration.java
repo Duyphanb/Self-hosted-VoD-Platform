@@ -3,6 +3,7 @@ package com.vodplatform.auth.config;
 import com.vodplatform.auth.security.AccessTokenAuthenticationConverter;
 import com.vodplatform.auth.security.ApiAccessDeniedHandler;
 import com.vodplatform.auth.security.ApiAuthenticationEntryPoint;
+import com.vodplatform.auth.security.AuthEndpoints;
 import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -27,6 +28,15 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @EnableConfigurationProperties(CorsProperties.class)
 public class SecurityConfiguration {
 
+    private final CorsProperties origins;
+    private final com.vodplatform.shared.error.ApiErrorFactory errors;
+    private final tools.jackson.databind.ObjectMapper mapper;
+
+    public SecurityConfiguration(CorsProperties origins, com.vodplatform.shared.error.ApiErrorFactory errors,
+                                 tools.jackson.databind.ObjectMapper mapper) {
+        this.origins = origins; this.errors = errors; this.mapper = mapper;
+    }
+
     private static final List<String> CORS_ALLOWED_METHODS = List.of(
             HttpMethod.GET.name(),
             HttpMethod.POST.name(),
@@ -41,10 +51,7 @@ public class SecurityConfiguration {
     );
 
     private static final RequestMatcher PUBLIC_ENDPOINTS = new OrRequestMatcher(
-            post("/api/v1/auth/register"),
-            post("/api/v1/auth/login"),
-            post("/api/v1/auth/refresh"),
-            post("/api/v1/auth/logout"),
+            AuthEndpoints.POSTS,
             get("/api/v1/health"),
             get("/actuator/health"),
             get("/actuator/health/**")
@@ -117,7 +124,9 @@ public class SecurityConfiguration {
             HttpSecurity http,
             CorsConfigurationSource corsConfigurationSource
     ) throws Exception {
-        http.cors(cors -> cors.configurationSource(corsConfigurationSource))
+        http.addFilterBefore(new com.vodplatform.auth.security.AuthOriginFilter(origins, errors, mapper),
+                        org.springframework.web.filter.CorsFilter.class)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 // SECURITY.md: HSTS is deferred and remains an edge decision, on both chains.
                 .headers(headers -> headers.httpStrictTransportSecurity(hsts -> hsts.disable()))
                 .csrf(csrf -> csrf.disable())

@@ -7,7 +7,8 @@ import type { AuthResponse, UserProfile } from '../../../lib/api/types';
 import { FakeXhr } from '../../../test/fakeXhr';
 import { AuthProvider } from '../../auth/AuthContext';
 import { AdminRoute } from '../../auth/RouteGuards';
-import { createAuthSession, writeAuthSession } from '../../auth/authStorage';
+import { createAuthSession} from '../../auth/authStorage';
+import { installCookieSession as writeAuthSession } from '../../../test/cookieSession';
 import { movieKeys, type MovieDetail } from '../moviesApi';
 import { MAX_UPLOAD_SIZE_BYTES } from '../uploadLimits';
 import { AdminMovieUploadPage } from './AdminMovieUploadPage';
@@ -184,7 +185,7 @@ describe('AdminMovieUploadPage through the data router', () => {
   it('refreshes only a submit GET 401 and then sends exactly one upload', async () => {
     let movieCalls = 0;
     fetchMock.mockImplementation(async (input) => {
-      if (String(input) === '/api/v1/auth/refresh') return json({ user: admin, accessToken: 'renewed-access', refreshToken: 'renewed-refresh', expiresInSeconds: 900 });
+      if (String(input) === '/api/v1/auth/refresh') return json({ user: admin, accessToken: 'renewed-access', expiresInSeconds: 900 });
       if (String(input) === `/api/v1/movies/${movieId}`) return ++movieCalls === 2 ? apiError(401, 'UNAUTHORIZED') : json(detail());
       throw new Error('Unexpected request in upload refresh test');
     });
@@ -424,7 +425,7 @@ function renderUpload({ path = uploadPath, returnTo, cached, strict = false }: {
   return { ...render(<RouterProvider future={{ v7_startTransition: true }} router={router} />), router, queryClient };
 }
 function persist(prefix = '') {
-  const response: AuthResponse = { user: admin, accessToken: `${prefix}access`, refreshToken: `${prefix}refresh`, expiresInSeconds: 900 };
+  const response: AuthResponse = { user: admin, accessToken: `${prefix}access`, expiresInSeconds: 900 };
   writeAuthSession(createAuthSession(response), window.localStorage);
 }
 function serve(get?: () => Response | Promise<Response>) {

@@ -5,6 +5,7 @@ The fixture only has a recognized signature. It is not decodable video, and this
 measures transport/storage rather than encoding or target-VPS capacity.
 All subprocess output is captured because Compose/HTTP/SQL can contain credentials.
 """
+from auth_cookies import auth_headers, capture_auth_cookie
 import argparse
 from datetime import datetime, timezone
 import http.client
@@ -90,7 +91,7 @@ def new_environment(port):
         env[prefix + "_ACCESS_KEY"] = "audit_" + secrets.token_hex(12)
         env[prefix + "_SECRET_KEY"] = secrets.token_urlsafe(48)
     env.update({"JWT_SECRET": secrets.token_urlsafe(48), "NGINX_HTTP_PORT": f"0.0.0.0:{port}",
-                "NGINX_HTTPS_PORT": "0.0.0.0:18444", "MAX_UPLOAD_SIZE_MB": "2048"})
+                "NGINX_HTTPS_PORT": "0.0.0.0:18444", "CORS_ALLOWED_ORIGINS": f"http://127.0.0.1:{port}", "AUTH_COOKIE_SECURE": "true", "MAX_UPLOAD_SIZE_MB": "2048"})
     env.update(disposable_proxy_environment())
     return env
 
@@ -272,10 +273,10 @@ def json_request(port, path, body=None):
     try:
         connection.request("POST" if body is not None else "GET", path,
                            body=None if body is None else json.dumps(body),
-                           headers={} if body is None else {"Content-Type": "application/json"})
+                           headers=auth_headers(f"http://127.0.0.1:{port}", path, {} if body is None else {"Content-Type": "application/json"}))
         response = connection.getresponse()
         raw = response.read(1024 * 1024)
-        return response.status, json.loads(raw)
+        return response.status, capture_auth_cookie(response, json.loads(raw), path)
     finally:
         connection.close()
 

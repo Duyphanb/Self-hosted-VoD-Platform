@@ -7,23 +7,12 @@ export function AppLayout() {
   const { isAuthenticated, isInitializing, logout, user } = useAuth();
   const isAdmin = user?.roles.includes('ROLE_ADMIN') ?? false;
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [logoutError, setLogoutError] = useState<string | null>(null);
-  const [wasAuthenticated, setWasAuthenticated] = useState(isAuthenticated);
   const logoutInFlight = useRef(false);
   const formExitGuard = useRef<FormExitGuard | null>(null);
   const registerFormExitGuard = useCallback((guard: FormExitGuard) => {
     formExitGuard.current = guard;
     return () => { if (formExitGuard.current === guard) formExitGuard.current = null; };
   }, []);
-
-  // Clear a stale sign-out warning as soon as a session appears, adjusting state during render
-  // (https://react.dev/learn/you-might-not-need-an-effect) instead of an extra effect pass.
-  if (isAuthenticated !== wasAuthenticated) {
-    setWasAuthenticated(isAuthenticated);
-    if (isAuthenticated) {
-      setLogoutError(null);
-    }
-  }
 
   const signOut = async () => {
     if (logoutInFlight.current) {
@@ -33,10 +22,9 @@ export function AppLayout() {
     try {
       if (formExitGuard.current && !await formExitGuard.current()) return;
       setIsLoggingOut(true);
-      setLogoutError(null);
       await logout();
     } catch {
-      setLogoutError('Signed out locally, but server token revocation could not be confirmed.');
+      // AuthProvider persists the pending sign-out and provides its retry control.
     } finally {
       logoutInFlight.current = false;
       setIsLoggingOut(false);
@@ -87,16 +75,6 @@ export function AppLayout() {
           </nav>
         </div>
       </header>
-      {logoutError ? (
-        <div className="mx-auto mt-4 max-w-6xl px-6">
-          <p
-            className="rounded-md border border-amber-600/60 bg-amber-950/50 p-3 text-sm text-amber-200"
-            role="alert"
-          >
-            {logoutError}
-          </p>
-        </div>
-      ) : null}
       <main className="mx-auto max-w-6xl px-6 py-12">
         <Outlet />
       </main>

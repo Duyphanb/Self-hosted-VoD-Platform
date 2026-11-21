@@ -42,10 +42,12 @@ class RefreshAndLogoutControllerTest {
         validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
         ApiErrorFactory apiErrorFactory = new ApiErrorFactory(Clock.systemUTC());
+        RefreshCookie cookie = new RefreshCookie(new com.vodplatform.auth.config.AuthCookieProperties(true),
+                new com.vodplatform.auth.config.CorsProperties(java.util.List.of()), Clock.systemUTC());
         mockMvc = MockMvcBuilders
                 .standaloneSetup(
-                        new RefreshTokenController(refreshTokenRotationService),
-                        new LogoutController(logoutService)
+                        new RefreshTokenController(refreshTokenRotationService, cookie, apiErrorFactory),
+                        new LogoutController(logoutService, cookie)
                 )
                 .setControllerAdvice(
                         new AuthExceptionHandler(apiErrorFactory),
@@ -66,11 +68,8 @@ class RefreshAndLogoutControllerTest {
         String oversizedToken = "t".repeat(129);
 
         mockMvc.perform(post(path)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"refreshToken\": \"" + oversizedToken + "\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
-                .andExpect(content().string(Matchers.not(Matchers.containsString(oversizedToken))));
+                        .cookie(new jakarta.servlet.http.Cookie("vod_refresh", oversizedToken)))
+                .andExpect(status().is(path.endsWith("/refresh") ? 401 : 204));
         verifyNoInteractions(refreshTokenRotationService, logoutService);
     }
 }

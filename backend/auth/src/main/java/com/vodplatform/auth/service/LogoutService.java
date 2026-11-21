@@ -1,6 +1,5 @@
 package com.vodplatform.auth.service;
 
-import com.vodplatform.auth.dto.RefreshRequest;
 import com.vodplatform.auth.persistence.RefreshTokenEntity;
 import com.vodplatform.auth.persistence.RefreshTokenRepository;
 import java.time.Clock;
@@ -25,12 +24,12 @@ public class LogoutService {
     }
 
     @Transactional
-    public void logout(RefreshRequest request) {
-        if (request == null) {
+    public void logout(String value) {
+        if (value == null || value.isBlank() || value.length() > 128) {
             return;
         }
 
-        String tokenHash = refreshTokenService.hash(request.refreshToken());
+        String tokenHash = refreshTokenService.hash(value);
         refreshTokenRepository.findByTokenHash(tokenHash)
                 .filter(token -> token.getRevokedAt() == null)
                 .ifPresent(this::revoke);

@@ -1,6 +1,7 @@
 import { act, fireEvent, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAuthSession, writeAuthSession } from './features/auth/authStorage';
+import { createAuthSession} from './features/auth/authStorage';
+import { installCookieSession as writeAuthSession } from './test/cookieSession';
 
 const entry = vi.hoisted(() => ({
   roots: [] as Array<{ unmount(): void }>,
@@ -33,7 +34,7 @@ describe('production main entry', () => {
     window.history.replaceState(null, '', '/admin/movies/new');
     writeAuthSession(createAuthSession({
       user: { id: '3fcf25c2-f096-4462-ae63-4ba4702a9078', email: 'admin@example.com', displayName: 'Admin', roles: ['ROLE_ADMIN'] },
-      accessToken: 'access-token', refreshToken: 'refresh-token', expiresInSeconds: 900
+      accessToken: 'access-token', expiresInSeconds: 900
     }), window.localStorage);
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const path = new URL(String(input), 'http://localhost').pathname;

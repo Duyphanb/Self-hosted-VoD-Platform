@@ -4,7 +4,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthResponse, UserProfile } from '../lib/api/types';
 import { AuthProvider } from '../features/auth/AuthContext';
-import { createAuthSession, writeAuthSession } from '../features/auth/authStorage';
+import { createAuthSession} from '../features/auth/authStorage';
+import { installCookieSession as writeAuthSession } from '../test/cookieSession';
 import { AppLayout } from './AppLayout';
 
 const regularUser: UserProfile = {
@@ -58,7 +59,7 @@ describe('AppLayout auth navigation', () => {
     expect(screen.getByRole('link', { name: 'Movies' })).toHaveAttribute('href', '/movies');
   });
 
-  it('sends the refresh token once and keeps a stable disabled control while logout is pending', async () => {
+  it('sends one cookie logout and keeps a stable disabled control while logout is pending', async () => {
     persistUser(regularUser);
     let resolveLogout: ((response: Response) => void) | undefined;
     fetchMock.mockReturnValue(new Promise<Response>((resolve) => {
@@ -90,7 +91,7 @@ describe('AppLayout auth navigation', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Signed out locally, but server token revocation could not be confirmed.'
+      'Sign-out is not confirmed.'
     );
     expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
@@ -119,7 +120,7 @@ function persistUser(user: UserProfile) {
   const response: AuthResponse = {
     user,
     accessToken: 'access-token',
-    refreshToken: 'refresh-token',
+
     expiresInSeconds: 900
   };
   writeAuthSession(createAuthSession(response), window.localStorage);
@@ -129,6 +130,7 @@ function expectLogoutRequest(call: [input: RequestInfo | URL, init?: RequestInit
   const [input, init] = call;
   expect(input).toBe('/api/v1/auth/logout');
   expect(init?.method).toBe('POST');
-  expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
-  expect(JSON.parse(init?.body?.toString() ?? '{}')).toEqual({ refreshToken: 'refresh-token' });
+  expect(new Headers(init?.headers).get('Content-Type')).toBeNull();
+  expect(init?.body).toBeUndefined();
+  expect(init?.credentials).toBe('same-origin');
 }
