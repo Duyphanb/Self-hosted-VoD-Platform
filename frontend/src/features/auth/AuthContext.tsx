@@ -78,8 +78,12 @@ export function AuthProvider({ children, storage, redirectToLogin = defaultRedir
       try {
         const response = await authApi.refresh(client, signal);
         if (!sameMarker(expected, store.read().marker)) throw new AuthenticationSupersededError();
-        if (expected.userId && expected.userId !== response.user.id) throw new AuthenticationSupersededError();
-        const marker = { ...expected, userId: response.user.id };
+        const identityChanged = expected.userId !== null && expected.userId !== response.user.id;
+        const marker = {
+          ...expected,
+          generation: identityChanged ? expected.generation + 1 : expected.generation,
+          userId: response.user.id
+        };
         // Once the response is validated, a newly mounted query's 401 needs a new
         // rotation. Queue it behind this lock instead of reusing bootstrap's token.
         refreshing.current = null;
@@ -131,30 +135,55 @@ export function AuthProvider({ children, storage, redirectToLogin = defaultRedir
   }, [client, commit, publish, store]);
 
   const restore = useCallback((bootstrap = false): Promise<void> => {
-    if (restoring.current) { restoreQueued.current = true; return restoring.current; }
+    if (restoring.current) {
+      restoreQueued.current = true;
+      return restoring.current;
+    }
     const operation = (async () => {
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-      const state = store.read(); setStorageAvailable(state.available); setPending(state.marker.logoutPending);
-      if (state.marker.logoutPending) {
-        commit(null);
+      try {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const state = store.read();
+          setStorageAvailable(state.available);
+          setPending(state.marker.logoutPending);
+          if (state.marker.logoutPending) {
+            commit(null);
+            setInitializing(false);
+            // Wake-ups only align memory. Bootstrap gets one pending logout retry.
+            if (bootstrap) {
+              await performLogout(true);
+            }
+            return;
+          }
+          // Without persistent coordination, a reload cannot distinguish a failed
+          // logout from a valid cookie. Only explicit sign-in may start a session.
+          if (!state.available) return;
+          if (state.known && state.marker.userId === null) {
+            commit(null);
+            return;
+          }
+          const current = sessionRef.current;
+          if (current && current.authGeneration === state.marker.generation
+            && current.user.id === state.marker.userId) return;
+          commit(null);
+          setInitializing(true);
+          try {
+            await performRefresh();
+            return;
+          } catch (failure) {
+            if (failure instanceof AuthenticationSupersededError) {
+              continue;
+            }
+            if (!(failure instanceof ApiRequestError && failure.status === 401)) {
+              setRestoreFailed(true);
+            }
+            return;
+          }
+        }
+        setError(new AuthenticationSupersededError());
+        setRestoreFailed(true);
+      } finally {
         setInitializing(false);
-        // Wake-ups only reconcile memory and the pending notice. Bootstrap gets
-        // one retry; subsequent attempts require the explicit retry action.
-        if (bootstrap) await performLogout(true);
-        return;
       }
-      if (state.known && state.marker.userId === null) { commit(null); setInitializing(false); return; }
-      const current = sessionRef.current;
-      if (current && current.authGeneration === state.marker.generation && current.user.id === state.marker.userId) return;
-      commit(null); setInitializing(true);
-      try { await performRefresh(); return; }
-      catch (failure) {
-        if (failure instanceof AuthenticationSupersededError) continue;
-        if (!(failure instanceof ApiRequestError && failure.status === 401)) setRestoreFailed(true);
-        return;
-      }
-      }
-      setRestoreFailed(true);
     })();
     restoring.current = operation;
     void operation.finally(() => {
@@ -223,7 +252,11 @@ export function AuthProvider({ children, storage, redirectToLogin = defaultRedir
     isAuthenticated: session !== null, isInitializing, isLoading, error, login, register,
     logout: () => performLogout(), refreshTokens: async () => { await performRefresh(); }, clearError: () => setError(null) }}>
     <ApiClientContext.Provider value={client}>
-      {!storageAvailable && <p role="note">Site data is blocked. Sign-in is available only in this tab.</p>}
+      {!storageAvailable && (
+        <p role="note">
+          Site data is blocked. Sign-in is available only in this tab. Sign in again after a reload.
+        </p>
+      )}
       {!navigator.locks?.request && <p role="note">This browser supports sign-in in one tab at a time.</p>}
       {(pending || restoreFailed) && <div role="alert">
         <p>{pending ? 'Sign-out is not confirmed.' : 'Sign-in could not be restored. Please retry.'}</p>

@@ -19,6 +19,9 @@ export function createMarkerStore(provided?: Storage) {
     storage = provided ?? window.localStorage;
     storage.removeItem(AUTH_SESSION_STORAGE_KEY);
     storage.removeItem('vod.auth.generation.v1');
+    const probeKey = `${AUTH_GENERATION_STORAGE_KEY}.probe`;
+    storage.setItem(probeKey, '');
+    storage.removeItem(probeKey);
   }
   catch { available = false; }
   const read = () => {

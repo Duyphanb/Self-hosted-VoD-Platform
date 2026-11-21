@@ -42,7 +42,7 @@ describe('cookie-backed memory session',()=>{
     knownUser();const failure=typeof kind==='number'?new ApiRequestError(kind,null):new Error(kind);
     refresh.mockRejectedValueOnce(failure);
     const {result}=setup();await waitFor(()=>expect(result.current.auth.error).toBe(failure));
-    expect(result.current.auth.isInitializing).toBe(true);
+    expect(result.current.auth.isInitializing).toBe(false);
     expect(JSON.parse(window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY)!).userId).toBe(user.id);
     await act(async()=>{await result.current.auth.refreshTokens();});expect(result.current.auth.user?.id).toBe(user.id);
   });
@@ -138,9 +138,96 @@ describe('cookie-backed memory session',()=>{
     await expect(result.current.client.request('/movies',{authenticated:true})).rejects.toBeInstanceOf(AuthenticationSupersededError);
     expect(fetch).not.toHaveBeenCalled();
   });
-  it('does not crash when web storage is blocked and keeps the session in memory',async()=>{
-    const blocked={getItem(){throw Error('blocked');},setItem(){throw Error('blocked');},removeItem(){throw Error('blocked');}} as unknown as Storage;
-    const {result}=setup(blocked);await waitFor(()=>expect(result.current.auth.isAuthenticated).toBe(true));
-    expect(result.current.auth.accessToken===response.accessToken).toBe(true);
+  describe('startup without persistent coordination', () => {
+    it.each(['unreadable', 'unwritable'])('requires explicit sign-in after a failed logout and %s storage reload',
+      async (storageFailure) => {
+        const blockedStorage = {
+          getItem() {
+            if (storageFailure === 'unreadable') {
+              throw new Error('Storage reads are blocked');
+            }
+            return null;
+          },
+          setItem() {
+            if (storageFailure === 'unwritable') {
+              throw new Error('Storage writes are blocked');
+            }
+          },
+          removeItem() {}
+        } as unknown as Storage;
+        const first = setup(blockedStorage);
+        await waitFor(() => expect(first.result.current.auth.isInitializing).toBe(false));
+        expect(first.result.current.auth.isAuthenticated).toBe(false);
+        expect(refresh).not.toHaveBeenCalled();
+
+        await act(async () => {
+          await first.result.current.auth.login({ email: user.email, password: 'fixture-password' });
+          await first.result.current.auth.refreshTokens();
+        });
+        expect(first.result.current.auth.accessToken).toBe(response.accessToken);
+        logout.mockRejectedValueOnce(new Error('Logout could not reach the server'));
+        await act(async () => {
+          await expect(first.result.current.auth.logout()).rejects.toThrow('could not reach the server');
+        });
+        first.unmount();
+        refresh.mockClear();
+
+        const reloaded = setup(blockedStorage);
+        await waitFor(() => expect(reloaded.result.current.auth.isInitializing).toBe(false));
+        expect(reloaded.result.current.auth.isAuthenticated).toBe(false);
+        expect(refresh).not.toHaveBeenCalled();
+        expect(screen.getByRole('note')).toHaveTextContent('Sign in again after a reload.');
+      });
+  });
+
+  describe('cookie identity recovery', () => {
+    it('accepts the cookie identity with a new generation when its recorded marker stays unchanged', async () => {
+      knownUser();
+      const cookieUser = { ...user, id: 'cookie-viewer', email: 'cookie@example.com' };
+      refresh.mockResolvedValueOnce({ ...response, user: cookieUser });
+      const { result } = setup();
+
+      await waitFor(() => expect(result.current.auth.user?.id).toBe(cookieUser.id));
+      expect(result.current.auth.isInitializing).toBe(false);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY)!)).toEqual({
+        ...emptyMarker(), generation: 1, userId: cookieUser.id
+      });
+    });
+
+    it('discards a cookie identity when another marker is published during the refresh', async () => {
+      knownUser();
+      const { result } = setup();
+      await waitFor(() => expect(result.current.auth.isAuthenticated).toBe(true));
+      const newerMarker = { ...emptyMarker(), generation: 2, userId: 'newer-viewer' };
+      refresh.mockImplementationOnce(async () => {
+        window.localStorage.setItem(AUTH_GENERATION_STORAGE_KEY, JSON.stringify(newerMarker));
+        return { ...response, user: { ...user, id: 'stale-cookie-viewer' } };
+      });
+
+      await act(async () => {
+        await expect(result.current.auth.refreshTokens()).rejects.toBeInstanceOf(AuthenticationSupersededError);
+      });
+      expect(JSON.parse(window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY)!)).toEqual(newerMarker);
+      expect(result.current.auth.user?.id).not.toBe('stale-cookie-viewer');
+    });
+
+    it('finishes initialization and offers retry after three superseded restore attempts', async () => {
+      knownUser();
+      let generation = 0;
+      refresh.mockImplementation(async () => {
+        generation += 1;
+        window.localStorage.setItem(AUTH_GENERATION_STORAGE_KEY, JSON.stringify({
+          ...emptyMarker(), generation, userId: 'concurrent-viewer'
+        }));
+        return response;
+      });
+      const { result } = setup();
+
+      await screen.findByRole('button', { name: 'Retry sign-in' });
+      expect(refresh).toHaveBeenCalledTimes(3);
+      expect(result.current.auth.isInitializing).toBe(false);
+      expect(result.current.auth.isAuthenticated).toBe(false);
+    });
   });
 });

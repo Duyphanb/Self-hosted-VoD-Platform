@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
 import { URL } from 'node:url';
+import { clearTimeout, setTimeout } from 'node:timers';
 const root=resolve('dist-e2e');
 let sessions=new Map(),access=new Map(),active=0,maxWriters=0,counts={},control={};
 let gates=[];
@@ -14,10 +15,38 @@ function error(res,status,code){json(res,status,{timestamp:new Date().toISOStrin
 function cookie(req){const found=(req.headers.cookie??'').split(';').map(v=>v.trim()).filter(v=>v.startsWith('vod_refresh='));
   return found.length===1?found[0].slice('vod_refresh='.length):null;}
 function setCookie(res,value,age=604800){res.setHeader('Set-Cookie',`vod_refresh=${value}; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=${age}`);}
-function issue(req,res,id){const old=cookie(req);if(old)sessions.delete(old);
-  const refresh='refresh-cookie-test-'+randomUUID(), token='access-cookie-test-'+randomUUID();
-  sessions.set(refresh,id);access.set(token,id);setCookie(res,refresh);
-  json(res,200,{user:users[id],accessToken:token,expiresInSeconds:900});}
+function issue(request, response, userId, bodyDelayMs = 0) {
+  const previousCookie = cookie(request);
+  if (previousCookie) {
+    sessions.delete(previousCookie);
+  }
+  const refreshValue = 'refresh-cookie-test-' + randomUUID();
+  const accessValue = 'access-cookie-test-' + randomUUID();
+  sessions.set(refreshValue, userId);
+  access.set(accessValue, userId);
+  setCookie(response, refreshValue);
+  const payload = { user: users[userId], accessToken: accessValue, expiresInSeconds: 900 };
+  if (bodyDelayMs <= 0) {
+    json(response, 200, payload);
+    return;
+  }
+  response.writeHead(200, { 'Content-Type': 'application/json' });
+  response.flushHeaders();
+  // Start the response without delivering the JSON document before its delayed body.
+  response.write(' ');
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      if (!response.destroyed) {
+        response.end(JSON.stringify(payload));
+      }
+      resolve();
+    }, bodyDelayMs);
+    response.once('close', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
 async function body(req){let raw='';for await(const chunk of req)raw+=chunk;return raw?JSON.parse(raw):{};}
 async function waitGate(res){await new Promise(done=>{gates.push(done);res.once('close',done);});}
 const server=http.createServer(async(req,res)=>{
@@ -42,7 +71,11 @@ const server=http.createServer(async(req,res)=>{
         const failure=control[name+'Status'];
         if(failure==='drop'){res.destroy();return;}
         if(typeof failure==='number')return error(res,failure,failure===503?'AUTH_STATE_UNAVAILABLE':'INTERNAL_ERROR');
-        if(name==='login')return issue(req,res,payload.email?.startsWith('bob')?'bob':'alice');
+        if (name === 'login') {
+          const userId = payload.email?.startsWith('bob') ? 'bob' : 'alice';
+          await issue(req, res, userId, control.loginBodyDelayMs ?? 0);
+          return;
+        }
         if(name==='refresh'){
           const id=sessions.get(cookie(req));
           if(!id){setCookie(res,'',0);return error(res,401,'UNAUTHORIZED');}

@@ -80,7 +80,7 @@ describe('real auth transport timeouts', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
-    expect(result.current.isInitializing).toBe(true);
+    expect(result.current.isInitializing).toBe(false);
     expect(result.current.error?.name).toBe('TimeoutError');
     expect(JSON.parse(window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY)!).userId).toBe(user.id);
     expect(screen.getByRole('button', { name: 'Retry sign-in' })).toBeInTheDocument();

@@ -122,6 +122,7 @@ test('two pending tabs do not retry failed logout on wake-ups', async ({ page, c
     await identity(tab, 'signed-out');
     await expect(tab.getByRole('button', { name: 'Retry sign-out' })).toBeVisible();
   }
+  await expect.poll(async () => (await state(request)).counts.logout).toBe(1);
   await expect.poll(async () => (await state(request)).active).toBe(0);
   const before = (await state(request)).counts.logout;
   const pending = await page.evaluate(key => localStorage.getItem(key), markerKey);
@@ -167,4 +168,62 @@ test('blocked localStorage keeps a visible single-tab memory session',async({con
   const page=await context.newPage();await signIn(page);await expect(page.getByRole('note')).toContainText('Site data is blocked');
   await page.getByRole('button',{name:'Refresh session'}).click();await identity(page,'alice');
   expect(await page.evaluate(()=>sessionStorage.length)).toBe(0);
+});
+
+test.describe('session recovery', () => {
+  test('blocked storage never restores a cookie after a failed logout and reload',
+    async ({ page, context, request }) => {
+      await context.addInitScript(() => {
+        Object.defineProperty(window, 'localStorage', {
+          get() {
+            throw new DOMException('Storage is blocked', 'SecurityError');
+          }
+        });
+      });
+      await signIn(page);
+      await control(request, { logoutStatus: 503 });
+      await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+      await identity(page, 'signed-out');
+      await expect(page.getByRole('alert')).toContainText('Sign-out is not confirmed.');
+      await expect.poll(async () => (await state(request)).active).toBe(0);
+      const refreshesBeforeReload = (await state(request)).counts.refresh ?? 0;
+
+      await page.reload();
+      await expect(page.getByTestId('initializing')).toHaveText('false');
+      await identity(page, 'signed-out');
+      await expect(page.getByRole('note')).toContainText('Sign in again after a reload.');
+      expect((await state(request)).counts.refresh ?? 0).toBe(refreshesBeforeReload);
+      const cookieIdentity = await page.evaluate(() => fetch('/api/v1/auth/probe').then(result => result.json()));
+      expect(cookieIdentity.userId).toBe('alice');
+    });
+
+  test('recovers the cookie account in every tab after login headers arrive but its body times out',
+    async ({ page, context, request }) => {
+      await signIn(page);
+      const other = await context.newPage();
+      await other.goto('/');
+      await identity(other, 'alice');
+      const initialMarker = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), markerKey);
+      const initialLogins = (await state(request)).counts.login;
+      await control(request, { loginBodyDelayMs: 30_000 });
+
+      await page.getByRole('button', { name: 'Sign in Bob' }).click();
+      await expect.poll(async () => (await state(request)).counts.login).toBe(initialLogins + 1);
+      await expect.poll(async () => {
+        const cookieIdentity = await page.evaluate(() => fetch('/api/v1/auth/probe').then(result => result.json()));
+        return cookieIdentity.userId;
+      }).toBe('bob');
+      await expect.poll(async () => (await state(request)).active, { timeout: 15_000 }).toBe(0);
+      expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).userId, markerKey)).toBe('alice');
+      await control(request, { loginBodyDelayMs: 0 });
+
+      await page.reload();
+      await assertCookieAndMemory(context, [page, other], 'bob');
+      for (const tab of [page, other]) {
+        await expect(tab.getByTestId('initializing')).toHaveText('false');
+        await noTokens(tab);
+      }
+      const recoveredMarker = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), markerKey);
+      expect(recoveredMarker.generation).toBe(initialMarker.generation + 1);
+    });
 });
