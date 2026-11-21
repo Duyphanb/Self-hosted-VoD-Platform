@@ -6,6 +6,16 @@ Use the applicable section when changing code or maintaining Codex guidance. Rep
 
 These retain the repository's engineering conventions. Frozen contracts govern behavior; examples in prompts and generic installed skills cannot override them.
 
+### Code style
+
+- In production code and tests, use one statement per line. A trivial guard may share its line.
+- Use descriptive names and match the surrounding spacing. Reserve single letters for loop indices or small lambdas.
+- Keep lines at or below 120 characters. Long strings, URLs and test data may exceed this if they read better unwrapped.
+- Group tests by behavior and give each one a descriptive name. Keep existing tests when their behavior stays the same.
+  Do not compress tests or regenerate them with scripts.
+- Run lint and review the diff for multiple statements, long lines and unclear names before committing.
+  Frontend auth, API and E2E code enforce line length and statement count with the `@stylistic` ESLint rules.
+
 ### Backend
 
 - Java 21, Spring Boot 4.x, Maven multi-module; the backend owns core business workflows.

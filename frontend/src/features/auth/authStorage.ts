@@ -2,8 +2,19 @@ import type { AuthResponse } from '../../lib/api/types';
 
 export const AUTH_SESSION_STORAGE_KEY = 'vod.auth.session.v1'; // Legacy, deleted on startup.
 export const AUTH_GENERATION_STORAGE_KEY = 'vod.auth.marker.v2';
-export interface AuthSession extends AuthResponse { accessTokenExpiresAt: number; authGeneration: number }
-export interface SessionMarker { version: 2; generation: number; userId: string | null; logoutPending: boolean }
+
+export interface AuthSession extends AuthResponse {
+  accessTokenExpiresAt: number;
+  authGeneration: number;
+}
+
+export interface SessionMarker {
+  version: 2;
+  generation: number;
+  userId: string | null;
+  logoutPending: boolean;
+}
+
 export function createAuthSession(response: AuthResponse, now = Date.now(), authGeneration = 0): AuthSession {
   return { ...response, accessTokenExpiresAt: now + response.expiresInSeconds * 1000, authGeneration };
 }
@@ -22,19 +33,29 @@ export function createMarkerStore(provided?: Storage) {
     const probeKey = `${AUTH_GENERATION_STORAGE_KEY}.probe`;
     storage.setItem(probeKey, '');
     storage.removeItem(probeKey);
+  } catch {
+    available = false;
   }
-  catch { available = false; }
   const read = () => {
     if (available && storage) {
       try {
         const raw = storage.getItem(AUTH_GENERATION_STORAGE_KEY);
         const parsed: unknown = raw ? JSON.parse(raw) : null;
         if (isMarker(parsed)) {
-          memory = { version: 2, generation: parsed.generation, userId: parsed.userId, logoutPending: parsed.logoutPending };
+          memory = {
+            version: 2,
+            generation: parsed.generation,
+            userId: parsed.userId,
+            logoutPending: parsed.logoutPending
+          };
           known = true;
+        } else {
+          memory = emptyMarker();
+          known = false;
         }
-        else { memory = emptyMarker(); known = false; }
-      } catch { available = false; }
+      } catch {
+        available = false;
+      }
     }
     return { marker: { ...memory }, known, available };
   };
@@ -42,8 +63,11 @@ export function createMarkerStore(provided?: Storage) {
     memory = { version: 2, generation: marker.generation, userId: marker.userId, logoutPending: marker.logoutPending };
     known = true;
     if (available && storage) {
-      try { storage.setItem(AUTH_GENERATION_STORAGE_KEY, JSON.stringify(memory)); }
-      catch { available = false; }
+      try {
+        storage.setItem(AUTH_GENERATION_STORAGE_KEY, JSON.stringify(memory));
+      } catch {
+        available = false;
+      }
     }
     return read();
   };
@@ -51,7 +75,7 @@ export function createMarkerStore(provided?: Storage) {
 }
 function isMarker(value: unknown): value is SessionMarker {
   if (!value || typeof value !== 'object') return false;
-  const m = value as Partial<SessionMarker>;
-  return m.version === 2 && Number.isSafeInteger(m.generation) && (m.generation ?? -1) >= 0
-    && (m.userId === null || typeof m.userId === 'string') && typeof m.logoutPending === 'boolean';
+  const marker = value as Partial<SessionMarker>;
+  return marker.version === 2 && Number.isSafeInteger(marker.generation) && (marker.generation ?? -1) >= 0
+    && (marker.userId === null || typeof marker.userId === 'string') && typeof marker.logoutPending === 'boolean';
 }

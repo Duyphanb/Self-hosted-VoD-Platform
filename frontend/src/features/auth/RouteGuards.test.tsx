@@ -102,7 +102,9 @@ describe('route guards', () => {
     expect(screen.getByRole('button', { name: 'Count 1' })).toBeInTheDocument();
 
     // Another tab's cookie rotation does not replace this tab's in-memory access token.
-    act(() => { window.dispatchEvent(new Event('focus')); });
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
     expect(screen.getByRole('button', { name: 'Count 1' })).toBeInTheDocument();
 
     // Another tab signs in as someone else.

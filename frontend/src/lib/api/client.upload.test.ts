@@ -12,7 +12,9 @@ describe('ApiClient upload', () => {
     FakeXhr.instances = [];
     vi.stubGlobal('XMLHttpRequest', FakeXhr);
   });
-  afterEach(() => { vi.unstubAllGlobals(); });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   it('sends once to the shared URL with authentication and upload listeners, leaving the boundary to the browser', async () => {
     const { client } = setup();
@@ -121,7 +123,8 @@ describe('ApiClient upload', () => {
   });
 
   it('does not create an XHR without a current authentication snapshot or for a pre-aborted signal', async () => {
-    await expect(setup(null).client.upload('/upload', new FormData())).rejects.toBeInstanceOf(AuthenticationSupersededError);
+    await expect(setup(null).client.upload('/upload', new FormData()))
+      .rejects.toBeInstanceOf(AuthenticationSupersededError);
     await expect(setup({ ...authentication, accessToken: '' }).client.upload('/upload', new FormData()))
       .rejects.toBeInstanceOf(AuthenticationSupersededError);
     const controller = new AbortController();
