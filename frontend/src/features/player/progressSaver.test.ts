@@ -4,6 +4,7 @@ import type { ProgressSave } from './playbackApi';
 import { ProgressSaver } from './progressSaver';
 
 const ASSET_ID = 'b1f4c6a8-2d3e-4f50-8a9b-0c1d2e3f4a5b';
+const OTHER_ASSET_ID = 'c2a5d7b9-3e4f-4a61-9bac-1d2e3f4a5b6c';
 
 describe('ProgressSaver', () => {
   describe('deduplication', () => {
@@ -68,9 +69,8 @@ describe('ProgressSaver', () => {
   describe('stopping', () => {
     it.each([
       ['404 MOVIE_NOT_FOUND', 404, 'MOVIE_NOT_FOUND'],
-      ['409 VIDEO_NOT_READY', 409, 'VIDEO_NOT_READY'],
-      ['401 after the retry', 401, 'UNAUTHORIZED']
-    ])('stops saving after %s', async (_name, status, code) => {
+      ['409 VIDEO_NOT_READY', 409, 'VIDEO_NOT_READY']
+    ])('stops saving the asset after %s', async (_name, status, code) => {
       const harness = createHarness();
 
       harness.saver.request(position(10));
@@ -80,6 +80,30 @@ describe('ProgressSaver', () => {
 
       expect(harness.save).toHaveBeenCalledTimes(1);
       expect(harness.onAssetNotCurrent).not.toHaveBeenCalled();
+    });
+
+    it('keeps saving after a 401, which may answer an older token of a valid session', async () => {
+      const harness = createHarness();
+
+      harness.saver.request(position(10));
+      await harness.failSave(new ApiRequestError(401, apiError(401, 'UNAUTHORIZED')));
+      harness.saver.request(position(20));
+
+      expect(harness.save).toHaveBeenCalledTimes(2);
+      expect(harness.save).toHaveBeenLastCalledWith(position(20));
+    });
+
+    it('accepts saves for a new asset after the old asset stopped', async () => {
+      const harness = createHarness();
+      const newAssetSave = { ...position(30), videoAssetId: OTHER_ASSET_ID };
+
+      harness.saver.request(position(10));
+      await harness.failSave(new ApiRequestError(409, apiError(409, 'VIDEO_ASSET_NOT_CURRENT')));
+      harness.saver.request(position(20));
+      harness.saver.request(newAssetSave);
+
+      expect(harness.save).toHaveBeenCalledTimes(2);
+      expect(harness.save).toHaveBeenLastCalledWith(newAssetSave);
     });
 
     it('stops saving and asks for the playback info after 409 VIDEO_ASSET_NOT_CURRENT', async () => {

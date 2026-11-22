@@ -17,6 +17,11 @@ export interface AuthRequestController {
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   authenticated?: boolean;
   json?: unknown;
+  /**
+   * For an authenticated request that belongs to one identity, such as a player's progress save: when
+   * another identity is signed in, nothing is sent and AuthenticationSupersededError is thrown.
+   */
+  identity?: AuthenticationSnapshot;
 }
 
 export interface UploadOptions {
@@ -82,10 +87,18 @@ export class ApiClient {
       : null;
     const accessToken = initialAuthentication?.accessToken ?? null;
     if (authenticated && !initialAuthentication) throw new AuthenticationSupersededError();
+    if (options.identity && !sameIdentity(options.identity, initialAuthentication)) {
+      throw new AuthenticationSupersededError();
+    }
     let response = await this.send(path, options, accessToken);
 
     if (initialAuthentication && response.status === 401) {
-      const retryAuthentication = await this.recoverAuthentication(initialAuthentication);
+      await this.recoverAuthentication(initialAuthentication);
+      // Read the session again right before sending: it may have changed while the recovery settled.
+      const retryAuthentication = this.authController.getAuthenticationSnapshot();
+      if (!retryAuthentication || !sameIdentity(initialAuthentication, retryAuthentication)) {
+        throw new AuthenticationSupersededError();
+      }
       response = await this.send(path, options, retryAuthentication.accessToken);
       if (response.status === 401) {
         await this.throwAuthenticationFailure(response, retryAuthentication);
@@ -278,7 +291,13 @@ export class ApiClient {
     options: ApiRequestOptions,
     accessToken: string | null
   ): Promise<Response> {
-    const { authenticated: _authenticated, json, headers: initialHeaders, ...requestInit } = options;
+    const {
+      authenticated: _authenticated,
+      identity: _identity,
+      json,
+      headers: initialHeaders,
+      ...requestInit
+    } = options;
     const headers = new Headers(initialHeaders);
     if (json !== undefined) {
       headers.set('Content-Type', 'application/json');

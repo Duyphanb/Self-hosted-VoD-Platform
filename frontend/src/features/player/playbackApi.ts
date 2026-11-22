@@ -46,11 +46,20 @@ export async function fetchPlaybackInfo(
   return playbackInfo;
 }
 
-/** A regular save through the shared authentication recovery (ADR-011 D13). The stored state is not needed. */
-export async function saveProgress(client: ApiClient, movieId: string, save: ProgressSave): Promise<void> {
+/**
+ * A regular save through the shared authentication recovery (ADR-011 D13). It is sent only while `identity`
+ * is signed in, so a save of one viewer never lands in another account. The stored state is not needed.
+ */
+export async function saveProgress(
+  client: ApiClient,
+  movieId: string,
+  save: ProgressSave,
+  identity: AuthenticationSnapshot
+): Promise<void> {
   await client.request<unknown>(progressPath(movieId), {
     method: 'PUT',
     authenticated: true,
+    identity,
     json: save
   });
 }
@@ -63,6 +72,11 @@ export function saveProgressOnUnload(
   identity: AuthenticationSnapshot
 ): void {
   client.sendOnUnload(progressPath(movieId), { method: 'PUT', json: save }, identity);
+}
+
+/** The same-origin path of an asset's HLS playlist (API contract `PlaybackInfo.hlsManifestUrl`). */
+export function hlsManifestPath(videoAssetId: string): string {
+  return `/hls/video-assets/${videoAssetId}/master.m3u8`;
 }
 
 function progressPath(movieId: string): string {
@@ -78,12 +92,12 @@ export function decodePlaybackInfo(value: unknown): PlaybackInfo | null {
   const durationSeconds = candidate.durationSeconds ?? null;
   const validResume = Number.isInteger(resumeSeconds) && (resumeSeconds as number) >= 0;
   const validDuration = durationSeconds === null || Number.isInteger(durationSeconds);
-  const validManifest = typeof candidate.hlsManifestUrl === 'string' && candidate.hlsManifestUrl.length > 0;
-  if (!isCanonicalUuid(candidate.movieId)
-    || !isCanonicalUuid(candidate.videoAssetId)
-    || !validManifest
-    || !validResume
-    || !validDuration) {
+  if (!isCanonicalUuid(candidate.movieId) || !isCanonicalUuid(candidate.videoAssetId)) {
+    return null;
+  }
+  // The bearer token goes only to the same-origin HLS proxy of this asset (ADR-011 D3, D4).
+  const validManifest = candidate.hlsManifestUrl === hlsManifestPath(candidate.videoAssetId);
+  if (!validManifest || !validResume || !validDuration) {
     return null;
   }
   return {

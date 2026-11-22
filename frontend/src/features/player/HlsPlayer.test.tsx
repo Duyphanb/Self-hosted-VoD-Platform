@@ -25,7 +25,7 @@ const ASSET_ID = '5f1e2d3c-4b5a-4968-8776-655443322110';
 const NEW_ASSET_ID = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 const MANIFEST_URL = `/hls/video-assets/${ASSET_ID}/master.m3u8`;
 const NEW_MANIFEST_URL = `/hls/video-assets/${NEW_ASSET_ID}/master.m3u8`;
-const SEGMENT_URL = `http://localhost/hls/video-assets/${ASSET_ID}/segments/seg_00003.ts`;
+const SEGMENT_URL = `${window.location.origin}/hls/video-assets/${ASSET_ID}/segments/seg_00003.ts`;
 const TITLE = 'Big Buck Bunny';
 const ALICE: UserProfile = { id: 'alice-id', email: 'alice@example.com', displayName: 'Alice', roles: ['ROLE_USER'] };
 const BOB: UserProfile = { id: 'bob-id', email: 'bob@example.com', displayName: 'Bob', roles: ['ROLE_USER'] };
@@ -103,6 +103,7 @@ describe('HlsPlayer', () => {
       await expect(video.play()).rejects.toBe(notAllowed);
       await settle();
 
+      expect(video.paused).toBe(true);
       expect(playerAlert()).toBeNull();
       expect(FakeHls.latest().destroyed).toBe(false);
       expect(progressSaves()).toEqual([]);
@@ -151,16 +152,37 @@ describe('HlsPlayer', () => {
     });
 
     it('recovers the first fatal media error and shows the playback error on the second', async () => {
-      await renderPlayer();
+      const { video } = await renderPlayer();
+      seekTo(video, 64);
       const mediaError = { type: FakeHls.ErrorTypes.MEDIA_ERROR, details: 'bufferAppendError', fatal: true };
 
       emitError(mediaError);
       expect(FakeHls.latest().recoverMediaErrorCount).toBe(1);
+      expect(FakeHls.latest().startLoadPositions).toEqual([64]);
       expect(playerAlert()).toBeNull();
 
       emitError(mediaError);
       expect(FakeHls.latest().recoverMediaErrorCount).toBe(1);
       expect(FakeHls.latest().destroyed).toBe(true);
+      expect(playerAlert()).toHaveTextContent('This video cannot be played right now.');
+    });
+
+    it('counts a recovery that hls.js already ran for the same error as the one recovery', async () => {
+      const { video } = await renderPlayer();
+      seekTo(video, 64);
+      const resetByLibrary = { action: 0, flags: 16 };
+
+      emitError({
+        type: FakeHls.ErrorTypes.MEDIA_ERROR,
+        details: FakeHls.ErrorDetails.MEDIA_SOURCE_REQUIRES_RESET,
+        fatal: true,
+        errorAction: resetByLibrary
+      });
+      expect(FakeHls.latest().recoverMediaErrorCount).toBe(0);
+      expect(FakeHls.latest().startLoadPositions).toEqual([64]);
+
+      emitError({ type: FakeHls.ErrorTypes.MEDIA_ERROR, details: 'bufferAppendError', fatal: true });
+      expect(FakeHls.latest().recoverMediaErrorCount).toBe(0);
       expect(playerAlert()).toHaveTextContent('This video cannot be played right now.');
     });
 
@@ -211,8 +233,10 @@ describe('HlsPlayer', () => {
     });
 
     it('keeps the resume position for a reload before the video has reached it', async () => {
-      const reloadPlaybackInfo = vi.fn(async () => playbackInfo({ videoAssetId: NEW_ASSET_ID }));
-      const { video } = await renderPlayer({ playbackInfo: playbackInfo({ resumeSeconds: 754 }), reloadPlaybackInfo });
+      const replacement = playbackInfo({ videoAssetId: NEW_ASSET_ID, durationSeconds: 3600 });
+      const reloadPlaybackInfo = vi.fn(async () => replacement);
+      const initial = playbackInfo({ resumeSeconds: 754, durationSeconds: 3600 });
+      const { video } = await renderPlayer({ playbackInfo: initial, reloadPlaybackInfo });
       // hls.js has not moved the video to its start position yet, so currentTime still reads 0.
       setPlayback(video, { time: 0, paused: true });
       fireEvent(video, new Event('timeupdate'));
@@ -378,7 +402,7 @@ describe('HlsPlayer', () => {
       expect(screen.getByTestId('identity')).toHaveTextContent(ALICE.id);
     });
 
-    it('recovers a fatal 401 that the load policy did not see, then restarts loading on the same instance', async () => {
+    it('restarts loading on the same instance after recovering an unhandled fatal 401', async () => {
       const { video } = await renderPlayer();
       seekTo(video, 42);
       FakeHls.latest().levels = [{}];
@@ -549,6 +573,95 @@ describe('HlsPlayer', () => {
       expect(progressSaves().at(-1)).toEqual({ ...save(75), videoAssetId: NEW_ASSET_ID });
     });
   });
+
+  describe('review findings of #241', () => {
+    it('never sends the viewer\'s progress with the account that signs in next', async () => {
+      const { video } = await renderPlayer();
+      startPlaying(video, 5);
+      setPlayback(video, { time: 42 });
+      vi.spyOn(authApi, 'login').mockResolvedValue(authResponse(BOB, 'bob-token'));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in Bob' }));
+      await waitFor(() => expect(screen.getByTestId('identity')).toHaveTextContent(BOB.id));
+      await settle();
+
+      const progressWithBobToken = fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith('/progress')
+        && new Headers(init?.headers).get('Authorization') === 'Bearer bob-token');
+      expect(progressWithBobToken).toEqual([]);
+    });
+
+    it('keeps reporting finished after the end until the viewer plays again', async () => {
+      const { video, unmount } = await renderPlayer();
+      startPlaying(video, 590);
+      const pauseSave = deferredResponse();
+      fetchMock.mockImplementationOnce(() => pauseSave.promise);
+
+      setPlayback(video, { time: 596.4, paused: true });
+      fireEvent(video, new Event('pause'));
+      setPlayback(video, { time: 596.7, paused: true, ended: true });
+      fireEvent(video, new Event('ended'));
+      hidePage();
+      pauseSave.resolve(jsonResponse(progressResponse()));
+      await settle();
+      unmount();
+      await settle();
+
+      expect(progressSaves()).toEqual([save(596), save(596, true)]);
+    });
+
+    it('keeps saves in order across a Retry', async () => {
+      const { video } = await renderPlayer();
+      startPlaying(video, 5);
+      const slowSave = deferredResponse();
+      fetchMock.mockImplementationOnce(() => slowSave.promise);
+      setPlayback(video, { time: 40, paused: true });
+      fireEvent(video, new Event('pause'));
+      emitError(fatalNetworkError(SEGMENT_URL, 503));
+      await settle();
+
+      fireEvent.click(within(playerAlert()!).getByRole('button', { name: 'Retry' }));
+      await waitFor(() => expect(FakeHls.instances).toHaveLength(2));
+      seekTo(screen.getByLabelText(TITLE) as HTMLVideoElement, 50);
+      await settle();
+      expect(progressSaves()).toEqual([save(40)]);
+
+      slowSave.resolve(jsonResponse(progressResponse()));
+      await settle();
+      expect(progressSaves()).toEqual([save(40), save(50)]);
+    });
+
+    it('fetches the playback info again for an HLS 404 after a failed refetch for a progress 409', async () => {
+      const reloadPlaybackInfo = vi.fn<() => Promise<PlaybackInfo>>()
+        .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+        .mockResolvedValueOnce(playbackInfo({ videoAssetId: NEW_ASSET_ID }));
+      const { video } = await renderPlayer({ reloadPlaybackInfo });
+      startPlaying(video, 5);
+      const notCurrent = apiError(409, 'VIDEO_ASSET_NOT_CURRENT');
+      fetchMock.mockImplementationOnce(async () => jsonResponse(notCurrent, 409));
+      setPlayback(video, { time: 30, paused: true });
+      fireEvent(video, new Event('pause'));
+      await settle();
+      expect(reloadPlaybackInfo).toHaveBeenCalledTimes(1);
+      expect(playerAlert()).toBeNull();
+
+      emitError(fatalNetworkError(SEGMENT_URL, 404));
+
+      await waitFor(() => expect(FakeHls.instances).toHaveLength(2));
+      expect(reloadPlaybackInfo).toHaveBeenCalledTimes(2);
+      expect(FakeHls.latest().loadedSources).toEqual([NEW_MANIFEST_URL]);
+    });
+
+    it('starts a shorter replacement at its resume position when the viewer was beyond its end', async () => {
+      const replacement = playbackInfo({ videoAssetId: NEW_ASSET_ID, durationSeconds: 30, resumeSeconds: 0 });
+      const { video } = await renderPlayer({ reloadPlaybackInfo: vi.fn(async () => replacement) });
+      seekTo(video, 120);
+
+      emitError(fatalNetworkError(SEGMENT_URL, 404));
+
+      await waitFor(() => expect(FakeHls.instances).toHaveLength(2));
+      expect(FakeHls.latest().config.startPosition).toBe(-1);
+    });
+  });
 });
 
 interface RenderOptions {
@@ -671,6 +784,14 @@ function setPlayback(
 function seekTo(video: HTMLVideoElement, time: number): void {
   setPlayback(video, { time, paused: true });
   fireEvent(video, new Event('seeked'));
+}
+
+function deferredResponse() {
+  let resolve: (response: Response) => void = () => undefined;
+  const promise = new Promise<Response>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve: (response: Response) => resolve(response) };
 }
 
 function startPlaying(video: HTMLVideoElement, time: number): void {

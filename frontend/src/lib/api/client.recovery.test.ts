@@ -141,6 +141,40 @@ describe('ApiClient shared authentication recovery', () => {
     });
   });
 
+  describe('identity of a request', () => {
+    it('sends nothing for a request bound to another identity', async () => {
+      current = snapshot('bob', 'bob-token', 2);
+
+      const request = client.request('/movies/movie-1/progress', {
+        method: 'PUT',
+        authenticated: true,
+        identity: snapshot('alice', 'token-1', 1),
+        json: { currentSeconds: 42 }
+      });
+
+      await expect(request).rejects.toBeInstanceOf(AuthenticationSupersededError);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('checks the identity again right before the retry is sent', async () => {
+      fetchMock.mockResolvedValue(new Response(null, { status: 401 }));
+      let snapshotReads = 0;
+      controller.getAuthenticationSnapshot = () => {
+        snapshotReads += 1;
+        // The refresh succeeded for Alice, then Bob signed in before the retry left.
+        if (snapshotReads <= 3) {
+          return current;
+        }
+        return snapshot('bob', 'bob-token', 2);
+      };
+
+      await expect(client.request('/users/me', { authenticated: true }))
+        .rejects.toBeInstanceOf(AuthenticationSupersededError);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('sendOnUnload', () => {
     it('sends a keepalive request with the current token in the Authorization header', () => {
       fetchMock.mockResolvedValue(new Response(null, { status: 200 }));

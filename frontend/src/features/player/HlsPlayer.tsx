@@ -1,9 +1,10 @@
 import Hls from 'hls.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AuthenticationSnapshot } from '../../lib/api/client';
+import { AuthenticationSupersededError, type AuthenticationSnapshot } from '../../lib/api/client';
 import { useApiClient, useAuth } from '../auth/AuthContext';
-import type { PlaybackInfo } from './playbackApi';
-import { startPlaybackRun, type PlayerSource, type PlayerStatus } from './playbackRun';
+import { saveProgress, saveProgressOnUnload, type PlaybackInfo } from './playbackApi';
+import { startPlaybackRun, type PlayerMemory, type PlayerSource, type PlayerStatus } from './playbackRun';
+import { ProgressSaver } from './progressSaver';
 
 export interface HlsPlayerProps {
   movieId: string;
@@ -60,9 +61,32 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
     attempt: 0
   }));
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hasPlayed = useRef(false);
-  const lastPosition = useRef(playbackInfo.resumeSeconds);
+  const memory = useRef<PlayerMemory>({
+    hasPlayed: false,
+    lastPosition: playbackInfo.resumeSeconds,
+    endedAt: null
+  });
   const reloadPlaybackInfoRef = useRef(reloadPlaybackInfo);
+  // One saver for the player's whole life keeps every save in order across reloads and asset changes.
+  // The running load sets what a 409 VIDEO_ASSET_NOT_CURRENT does.
+  const [{ saver, assetNotCurrentHandler }] = useState(() => {
+    const handler = { current: () => undefined as void };
+    const progressSaver = new ProgressSaver({
+      save: (snapshot) => {
+        if (!playerIdentity) {
+          return Promise.reject(new AuthenticationSupersededError());
+        }
+        return saveProgress(client, movieId, snapshot, playerIdentity);
+      },
+      saveOnUnload: (snapshot) => {
+        if (playerIdentity) {
+          saveProgressOnUnload(client, movieId, snapshot, playerIdentity);
+        }
+      },
+      onAssetNotCurrent: () => handler.current()
+    });
+    return { saver: progressSaver, assetNotCurrentHandler: handler };
+  });
 
   useEffect(() => {
     reloadPlaybackInfoRef.current = reloadPlaybackInfo;
@@ -70,6 +94,13 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
 
   const identityLost = !playerIdentity || !currentIdentity || !sameIdentity(playerIdentity, currentIdentity);
   const signedOut = !currentIdentity;
+
+  useEffect(() => {
+    if (identityLost) {
+      // A save of this viewer must never be sent with another account's token.
+      saver.stop();
+    }
+  }, [identityLost, saver]);
 
   const reload = useCallback((startSeconds: number, nextPlaybackInfo?: PlaybackInfo) => {
     setStatus('loading');
@@ -91,20 +122,20 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
       video,
       client,
       identity: playerIdentity,
-      movieId,
       source,
-      hasPlayed,
-      lastPosition,
+      memory: memory.current,
+      saver,
+      assetNotCurrentHandler,
       setStatus,
       setBuffering,
       reload,
       reloadPlaybackInfo: () => reloadPlaybackInfoRef.current()
     });
-  }, [client, identityLost, movieId, playerIdentity, reload, source, supported]);
+  }, [assetNotCurrentHandler, client, identityLost, playerIdentity, reload, saver, source, supported]);
 
   const shownStatus = displayedStatus(supported, identityLost, signedOut, status);
   const fatalMessage = FATAL_MESSAGES[shownStatus];
-  const retry = () => reload(lastPosition.current);
+  const retry = () => reload(memory.current.lastPosition);
 
   return (
     <div className="relative overflow-hidden rounded-lg bg-black">

@@ -193,7 +193,8 @@ function playback(request, response, movieId) {
     videoAssetId,
     status: 'READY',
     hlsManifestUrl: `/hls/video-assets/${videoAssetId}/master.m3u8`,
-    resumeSeconds: 12,
+    // The replacement asset has no saved position, so a reload that keeps 12 s took it from the player.
+    resumeSeconds: videoAssetId === ASSET_B ? 0 : 12,
     durationSeconds: SEGMENT_COUNT * 6
   });
 }

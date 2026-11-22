@@ -7,10 +7,10 @@ import {
   type AuthRequestController
 } from '../../lib/api/client';
 import { FakeXhr } from '../../test/fakeXhr';
-import { HlsRequestAuthenticator } from './hlsAuthentication';
+import { HlsRequestAuthenticator, RETRY_WINDOW_MS } from './hlsAuthentication';
 
-const MANIFEST_URL = 'http://localhost/hls/video-assets/asset-1/master.m3u8';
-const SEGMENT_URL = 'http://localhost/hls/video-assets/asset-1/segments/seg_00001.ts';
+const MANIFEST_URL = `${window.location.origin}/hls/video-assets/asset-1/master.m3u8`;
+const SEGMENT_URL = `${window.location.origin}/hls/video-assets/asset-1/segments/seg_00001.ts`;
 
 describe('HlsRequestAuthenticator', () => {
   let current: AuthenticationSnapshot | null;
@@ -124,6 +124,17 @@ describe('HlsRequestAuthenticator', () => {
       expect(onAuthenticationFailure).not.toHaveBeenCalled();
     });
 
+    it('keeps the session when the refresh fails by a network error or a timeout', async () => {
+      refresh.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      await failWith(await setUp(SEGMENT_URL), 401);
+
+      authenticator.shouldRetry(null, 0, false, { url: SEGMENT_URL, code: 401 }, false);
+      const decision = await authenticator.resolveLoadFailure(SEGMENT_URL, 0);
+
+      expect(decision).toEqual({ kind: 'failed', failure: 'unavailable' });
+      expect(onAuthenticationFailure).not.toHaveBeenCalled();
+    });
+
     it('reports the session as ended when the refresh is rejected with 401', async () => {
       refresh.mockRejectedValueOnce(new ApiRequestError(401, null));
       await failWith(await setUp(SEGMENT_URL), 401);
@@ -221,6 +232,52 @@ describe('HlsRequestAuthenticator', () => {
 
       expect(decision).toEqual({ kind: 'failed', failure: 'unavailable' });
       expect(onAuthenticationFailure).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('budget lifetime', () => {
+    it('gives a new load a new budget after hls.js aborted the retry, for example after a seek', async () => {
+      await failWith(await setUp(SEGMENT_URL), 401);
+      authenticator.shouldRetry(null, 0, false, { url: SEGMENT_URL, code: 401 }, false);
+      const abortedRetry = await setUp(SEGMENT_URL);
+      abortedRetry.fire('abort');
+
+      const newLoad = await setUp(SEGMENT_URL);
+      await failWith(newLoad, 401);
+
+      expect(authenticator.isTerminalLoadError(SEGMENT_URL, 401, newLoad)).toBe(false);
+      expect(authenticator.shouldRetry(null, 0, false, { url: SEGMENT_URL, code: 401 }, false)).toBe(true);
+    });
+
+    it('gives a load long after the recovery a new budget, because its token may have expired', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        await failWith(await setUp(SEGMENT_URL), 401);
+        authenticator.shouldRetry(null, 0, false, { url: SEGMENT_URL, code: 401 }, false);
+        await setUp(SEGMENT_URL);
+        vi.setSystemTime(Date.now() + RETRY_WINDOW_MS + 1);
+
+        const laterLoad = await setUp(SEGMENT_URL);
+        await failWith(laterLoad, 401);
+
+        expect(authenticator.isTerminalLoadError(SEGMENT_URL, 401, laterLoad)).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('HLS proxy only', () => {
+    it.each([
+      ['another origin', 'https://media.example.net/hls/video-assets/asset-1/segments/seg_00001.ts'],
+      ['another path on this origin', `${window.location.origin}/api/v1/users/me`]
+    ])('never sends the token to %s and stops loading', async (_name, url) => {
+      const xhr = new FakeXhr();
+
+      await expect(authenticator.setUpRequest(xhr as unknown as XMLHttpRequest, url)).rejects.toThrow();
+
+      expect(xhr.headers.authorization).toBeUndefined();
+      expect(authenticator.isTerminalLoadError(url, 0, xhr)).toBe(true);
     });
   });
 

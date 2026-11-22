@@ -11,11 +11,14 @@ import {
   type FailedRequest,
   type HlsAuthenticationFailure
 } from './hlsAuthentication';
-import { saveProgress, saveProgressOnUnload, type PlaybackInfo, type ProgressSave } from './playbackApi';
-import { ProgressSaver } from './progressSaver';
+import type { PlaybackInfo, ProgressSave } from './playbackApi';
+import type { ProgressSaver } from './progressSaver';
 
 /** ADR-011 D13: within the 5-10 second target of NFR progress durability. */
 export const PROGRESS_SAVE_INTERVAL_MS = 10_000;
+
+/** hls.js 1.7.4 `ErrorActionFlags.ResetMediaSource`: the library already ran `recoverMediaError()`. */
+const RESET_MEDIA_SOURCE_FLAG = 16;
 
 export type PlayerStatus =
   | 'loading'
@@ -37,17 +40,27 @@ export interface PlayerSource {
   attempt: number;
 }
 
+/** State that outlives one run: the same player keeps it across reloads and asset changes. */
+export interface PlayerMemory {
+  /** No save happens before playback first started. */
+  hasPlayed: boolean;
+  /** The last known position, kept when hls.js detaches the video. */
+  lastPosition: number;
+  /** The position where playback reached the end; saves report `finished` until the viewer leaves it. */
+  endedAt: number | null;
+}
+
 export interface PlaybackRunOptions {
   video: HTMLVideoElement;
   client: ApiClient;
   /** The identity that was signed in when the player mounted. */
   identity: AuthenticationSnapshot;
-  movieId: string;
   source: PlayerSource;
-  /** Shared by all runs of one player: no save happens before playback first started. */
-  hasPlayed: { current: boolean };
-  /** Shared by all runs of one player: the last known position, kept when hls.js detaches the video. */
-  lastPosition: { current: number };
+  memory: PlayerMemory;
+  /** The player's one progress saver, shared by all runs so that saves stay in order. */
+  saver: ProgressSaver;
+  /** Set by the run: what to do when a save answers 409 VIDEO_ASSET_NOT_CURRENT. */
+  assetNotCurrentHandler: { current: () => void };
   setStatus(status: PlayerStatus): void;
   setBuffering(buffering: boolean): void;
   /** Start a new run at `startSeconds`, with the asset of `playbackInfo` when given. */
@@ -57,18 +70,11 @@ export interface PlaybackRunOptions {
 
 /**
  * One hls.js instance for one source: authentication (ADR-011 D2), error states (D7), start position
- * (D8) and progress saves (D13). Returns the cleanup, which saves progress and destroys hls.js.
+ * (D8) and progress save triggers (D13). Returns the cleanup, which saves progress and destroys hls.js.
  */
 export function startPlaybackRun(options: PlaybackRunOptions): () => void {
-  const { video, source } = options;
+  const { video, source, memory, saver } = options;
   const authenticator = new HlsRequestAuthenticator(options.client, options.identity);
-  const saver = new ProgressSaver({
-    save: (snapshot) => saveProgress(options.client, options.movieId, snapshot),
-    saveOnUnload: (snapshot) => saveProgressOnUnload(options.client, options.movieId, snapshot, options.identity),
-    onAssetNotCurrent: () => {
-      void checkCurrentAsset().then((result) => applyAssetCheck(result, 'progress'));
-    }
-  });
   const hls = new Hls(createHlsConfig(authenticator, source.startSeconds));
   let disposed = false;
   let hlsDestroyed = false;
@@ -77,27 +83,26 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   let reloadRequested = false;
   let networkFailureActive = false;
   let saveTimer: ReturnType<typeof setInterval> | null = null;
-
   // Until hls.js has moved the video to its start position, `video.currentTime` is still 0, so the last
   // known position (the resume position at first) stays authoritative for a reload.
   let mediaPositionKnown = false;
 
   const currentPosition = (): number => {
     if (!hlsDestroyed && mediaPositionKnown) {
-      options.lastPosition.current = video.currentTime;
+      memory.lastPosition = video.currentTime;
     }
-    return options.lastPosition.current;
+    return memory.lastPosition;
   };
 
-  const snapshot = (finished: boolean): ProgressSave => ({
+  const snapshot = (): ProgressSave => ({
     videoAssetId: source.videoAssetId,
     currentSeconds: Math.floor(currentPosition()),
-    finished
+    finished: memory.endedAt !== null
   });
 
-  const save = (finished = false) => {
-    if (options.hasPlayed.current) {
-      saver.request(snapshot(finished));
+  const save = () => {
+    if (memory.hasPlayed) {
+      saver.request(snapshot());
     }
   };
 
@@ -127,7 +132,8 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
     waiting: () => options.setBuffering(true),
     playing: () => {
       mediaPositionKnown = true;
-      options.hasPlayed.current = true;
+      memory.hasPlayed = true;
+      memory.endedAt = null;
       options.setBuffering(false);
       startSaveTimer();
     },
@@ -138,11 +144,17 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
     },
     seeked: () => {
       mediaPositionKnown = true;
+      currentPosition();
+      const leftTheEnd = memory.endedAt !== null && video.currentTime < memory.endedAt - 1;
+      if (leftTheEnd) {
+        memory.endedAt = null;
+      }
       save();
     },
     ended: () => {
       stopSaveTimer();
-      save(true);
+      memory.endedAt = currentPosition();
+      save();
     },
     timeupdate: () => {
       currentPosition();
@@ -156,8 +168,8 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   };
 
   const onPageHide = () => {
-    if (options.hasPlayed.current) {
-      saver.requestOnUnload(snapshot(false));
+    if (memory.hasPlayed) {
+      saver.requestOnUnload(snapshot());
     }
   };
 
@@ -182,10 +194,19 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
     options.setStatus(status);
   };
 
-  /** ADR-011 D7 (HLS 404) and D13 (progress 409 VIDEO_ASSET_NOT_CURRENT): one refetch per run. */
+  /**
+   * ADR-011 D7 (HLS 404) and D13 (progress 409 VIDEO_ASSET_NOT_CURRENT) share a refetch that is running or
+   * succeeded; a refetch that failed does not answer a later trigger, which fetches again.
+   */
   const checkCurrentAsset = (): Promise<AssetCheckResult> => {
     if (!assetCheck) {
-      assetCheck = fetchCurrentAsset(options.reloadPlaybackInfo, source.videoAssetId);
+      const check = fetchCurrentAsset(options.reloadPlaybackInfo, source.videoAssetId);
+      assetCheck = check;
+      void check.then((result) => {
+        if (result.kind === 'failed' && assetCheck === check) {
+          assetCheck = null;
+        }
+      });
     }
     return assetCheck;
   };
@@ -200,8 +221,9 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
     }
     if (result.kind === 'newAsset') {
       reloadRequested = true;
-      saver.stop();
-      options.reload(currentPosition(), result.playbackInfo);
+      const startSeconds = startOnReplacement(currentPosition(), result.playbackInfo);
+      memory.lastPosition = startSeconds;
+      options.reload(startSeconds, result.playbackInfo);
       return;
     }
     if (result.kind === 'unavailable') {
@@ -264,6 +286,27 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
       && authenticator.isTerminalLoadError(request.url, request.status, data.networkDetails);
   };
 
+  /**
+   * ADR-011 D7: one `recoverMediaError()` per run. hls.js may already have run it for this error (and then
+   * stopped loading because the error is fatal), which counts as that one recovery. Loading restarts at the
+   * position from before the video was detached.
+   */
+  const recoverFromMediaError = (data: ErrorData) => {
+    if (mediaRecoveryUsed) {
+      fail('playbackError');
+      return;
+    }
+    mediaRecoveryUsed = true;
+    const recoveredByLibrary = ((data.errorAction?.flags ?? 0) & RESET_MEDIA_SOURCE_FLAG) !== 0;
+    const position = recoveredByLibrary ? memory.lastPosition : currentPosition();
+    if (!recoveredByLibrary) {
+      hls.recoverMediaError();
+    }
+    // The detach reset the video to 0 until hls.js seeks back to `position`.
+    mediaPositionKnown = false;
+    hls.startLoad(position);
+  };
+
   const onHlsError = (_event: string, data: ErrorData) => {
     if (disposed || hlsDestroyed || networkFailureActive) {
       return;
@@ -284,12 +327,7 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
       return;
     }
     if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-      if (mediaRecoveryUsed) {
-        fail('playbackError');
-        return;
-      }
-      mediaRecoveryUsed = true;
-      hls.recoverMediaError();
+      recoverFromMediaError(data);
       return;
     }
     fail('playbackError');
@@ -300,6 +338,9 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   }
   document.addEventListener('visibilitychange', onVisibilityChange);
   window.addEventListener('pagehide', onPageHide);
+  options.assetNotCurrentHandler.current = () => {
+    void checkCurrentAsset().then((result) => applyAssetCheck(result, 'progress'));
+  };
   hls.on(Hls.Events.ERROR, onHlsError);
   hls.attachMedia(video);
   hls.loadSource(source.manifestUrl);
@@ -307,6 +348,7 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   return () => {
     save();
     disposed = true;
+    options.assetNotCurrentHandler.current = () => undefined;
     document.removeEventListener('visibilitychange', onVisibilityChange);
     window.removeEventListener('pagehide', onPageHide);
     destroyHls();
@@ -339,6 +381,18 @@ async function fetchCurrentAsset(
     }
     return { kind: 'failed' };
   }
+}
+
+/**
+ * Where a replacement asset starts: the current position while it lies inside the new duration, otherwise
+ * the server's resume position, which ADR-011 D11 normalizes for a shorter replacement.
+ */
+function startOnReplacement(position: number, playbackInfo: PlaybackInfo): number {
+  const duration = playbackInfo.durationSeconds;
+  if (duration !== null && position >= duration) {
+    return playbackInfo.resumeSeconds;
+  }
+  return position;
 }
 
 /** hls.js load errors that carry the HTTP status of a playlist or fragment request. */

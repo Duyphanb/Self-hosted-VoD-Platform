@@ -35,23 +35,36 @@ interface RequestBudget {
   recoveryUsed: boolean;
   /** The recovery that the retried attempt waits for in `xhrSetup`. */
   recovery: Promise<AuthenticationSnapshot> | null;
+  /** When the recovery succeeded, in milliseconds since the epoch. */
+  recoveredAt: number | null;
   failure: HlsAuthenticationFailure | null;
 }
+
+/**
+ * How long after its recovery an attempt still counts as the D2 retry. hls.js sends the retry within its
+ * retry delay (at most 8 seconds). A later attempt is a new load, for example after the viewer seeked away
+ * and back, whose token may have expired meanwhile (5-minute access tokens, ADR-012 D5), so it gets a new
+ * budget instead of ending the session on its first 401.
+ */
+export const RETRY_WINDOW_MS = 60_000;
 
 type ShouldRetry = NonNullable<RetryConfig['shouldRetry']>;
 
 /**
  * Bearer authentication for the requests hls.js sends (ADR-011 D2 and its 2026-11-22 addendum).
  *
- * - Every attempt reads the current access token in `xhrSetup`; no cookie and no token in a URL.
- * - A request, identified by its URL, has one budget: one shared ApiClient recovery and one retry.
+ * - Every attempt reads the current access token in `xhrSetup`; no cookie and no token in a URL. The
+ *   token goes only to the same-origin HLS proxy (`/hls/video-assets/...`).
+ * - A request, identified by its URL, has one budget: one shared ApiClient recovery and one retry. The
+ *   budget lives as long as hls.js loads that URL: a response with 2xx, an aborted attempt (for example
+ *   after a seek) or the end of `RETRY_WINDOW_MS` clears it, so a later load of the same segment gets a
+ *   new one.
  * - The load-policy `shouldRetry` hook spends the budget on the first 401, and the retried attempt
  *   waits for the recovery in `xhrSetup`.
  * - `isTerminalLoadError` names the failures that must stop loading at once, although hls.js 1.7.4 would
  *   still retry a fragment of a single-level stream: a 404, a 401 on the retry, and a failed recovery.
  * - `resolveLoadFailure` decides such a failure, and any fatal network error: a 401 on the retry ends the
  *   session through `ApiClient.rejectAuthentication` only while the token that attempt sent is current.
- * - A successful response clears the budget, so a later load of the same segment gets a new one.
  *
  * One instance serves one hls.js instance and the identity that was signed in when it was created.
  */
@@ -68,12 +81,21 @@ export class HlsRequestAuthenticator {
   /** hls.js `xhrSetup`. A rejection makes hls.js report a network error for the request. */
   readonly setUpRequest = async (xhr: XMLHttpRequest, url: string): Promise<void> => {
     this.throwIfDisposed();
-    const budget = this.budgetFor(url);
+    let budget = this.budgetFor(url);
+    if (!isHlsProxyUrl(url)) {
+      // A playlist naming another origin or path never receives the bearer token (ADR-011 D3, D4).
+      budget.failure = 'unavailable';
+      throw new Error('HLS request outside the HLS proxy');
+    }
     if (budget.recovery) {
       await budget.recovery;
     }
     // The player may have stopped while this attempt waited for the recovery.
     this.throwIfDisposed();
+    if (budget.recoveredAt !== null && Date.now() - budget.recoveredAt > RETRY_WINDOW_MS) {
+      this.budgets.delete(url);
+      budget = this.budgetFor(url);
+    }
     const authentication = this.currentAuthentication(budget);
     const attempt: RequestAttempt = { authentication, afterRecovery: budget.recoveryUsed };
     budget.latestAttempt = attempt;
@@ -83,10 +105,12 @@ export class HlsRequestAuthenticator {
     xhr.setRequestHeader('Authorization', `Bearer ${authentication.accessToken}`);
     xhr.addEventListener('load', () => {
       const succeeded = xhr.status >= 200 && xhr.status < 300;
-      if (succeeded && this.budgets.get(url) === budget) {
-        this.budgets.delete(url);
+      if (succeeded) {
+        this.releaseBudget(url, budget);
       }
     });
+    // hls.js aborts an attempt when it stops loading that URL, for example after a seek or a timeout.
+    xhr.addEventListener('abort', () => this.releaseBudget(url, budget));
   };
 
   /** The `shouldRetry` hook of the manifest, playlist and fragment load policies. */
@@ -168,10 +192,16 @@ export class HlsRequestAuthenticator {
     this.budgets.clear();
   }
 
+  private releaseBudget(url: string, budget: RequestBudget): void {
+    if (this.budgets.get(url) === budget && !budget.failure) {
+      this.budgets.delete(url);
+    }
+  }
+
   private budgetFor(url: string): RequestBudget {
     let budget = this.budgets.get(url);
     if (!budget) {
-      budget = { latestAttempt: null, recoveryUsed: false, recovery: null, failure: null };
+      budget = { latestAttempt: null, recoveryUsed: false, recovery: null, recoveredAt: null, failure: null };
       this.budgets.set(url, budget);
     }
     return budget;
@@ -207,9 +237,14 @@ export class HlsRequestAuthenticator {
     budget.recoveryUsed = true;
     const recovery = this.client.recoverAuthentication(budget.latestAttempt.authentication);
     budget.recovery = recovery;
-    recovery.catch((failure: unknown) => {
-      budget.failure = this.identityChanged() ? 'superseded' : classifyRecoveryFailure(failure);
-    });
+    recovery.then(
+      () => {
+        budget.recoveredAt = Date.now();
+      },
+      (failure: unknown) => {
+        budget.failure = this.identityChanged() ? 'superseded' : classifyRecoveryFailure(failure);
+      }
+    );
     return true;
   }
 
@@ -249,6 +284,16 @@ export function failedRequest(data: {
     url: data.response?.url ?? data.context?.url ?? data.frag?.url ?? data.url,
     status: data.response?.code
   };
+}
+
+/** Whether `url` is a request to this origin's authenticated HLS proxy. */
+function isHlsProxyUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url, window.location.href);
+    return parsed.origin === window.location.origin && parsed.pathname.startsWith('/hls/video-assets/');
+  } catch {
+    return false;
+  }
 }
 
 function classifyRecoveryFailure(failure: unknown): HlsAuthenticationFailure {
