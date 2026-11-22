@@ -1,6 +1,6 @@
 import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppRoutes } from '../../../app/AppRoutes';
 import { AuthenticationSupersededError } from '../../../lib/api/client';
@@ -37,6 +37,7 @@ vi.mock('../HlsPlayer', async () => {
 });
 
 const MOVIE_ID = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
+const SECOND_MOVIE_ID = '7334b2f1-664f-4bc1-b8f1-10de58c1d74a';
 const ASSET_ID = '5f1e2d3c-4b5a-4968-8776-655443322110';
 const NEW_ASSET_ID = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 const VIEWER: UserProfile = {
@@ -272,6 +273,40 @@ describe('WatchPage through AppRoutes', () => {
       expect(playbackRequests()).toBe(2);
     });
 
+    it('rechecks once for each movie, also after another movie used its recheck', async () => {
+      let firstMovieAnswers = 0;
+      let secondMovieAnswers = 0;
+      fetchMock.mockImplementation(async (input) => {
+        const path = new URL(String(input), 'http://localhost').pathname;
+        if (path === `/api/v1/movies/${MOVIE_ID}`) {
+          return jsonResponse(movieDetail());
+        }
+        if (path === `/api/v1/movies/${SECOND_MOVIE_ID}`) {
+          return jsonResponse(movieDetail({ id: SECOND_MOVIE_ID, title: 'Second Movie' }));
+        }
+        if (path === `/api/v1/movies/${MOVIE_ID}/playback`) {
+          firstMovieAnswers += 1;
+          return apiError(409, 'VIDEO_NOT_READY', 'Video is not ready');
+        }
+        if (path === `/api/v1/movies/${SECOND_MOVIE_ID}/playback`) {
+          secondMovieAnswers += 1;
+          return secondMovieAnswers === 1
+            ? apiError(409, 'VIDEO_NOT_READY', 'Video is not ready')
+            : jsonResponse(playbackInfo({ movieId: SECOND_MOVIE_ID }));
+        }
+        return apiError(404, 'NOT_FOUND', 'Unexpected request');
+      });
+      renderWatchPage(`/movies/${MOVIE_ID}/watch`, { withSecondMovieLink: true });
+      await screen.findByRole('heading', { level: 2, name: 'Not available' }, LOAD_TIMEOUT);
+      await waitFor(() => expect(firstMovieAnswers).toBe(2));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Go to the second movie' }));
+
+      expect(await screen.findByRole('application', { name: 'Player for Second Movie' }, LOAD_TIMEOUT))
+        .toBeInTheDocument();
+      expect(secondMovieAnswers).toBe(2);
+    });
+
     it('plays after Check again once the video became ready', async () => {
       answers.movie = () => jsonResponse(movieDetail({ videoStatus: 'PROCESSING' }));
       answers.playback = () => apiError(409, 'VIDEO_NOT_READY', 'Video is not ready');
@@ -389,7 +424,10 @@ describe('WatchPage through AppRoutes', () => {
   });
 });
 
-function renderWatchPage(path = `/movies/${MOVIE_ID}/watch`, { withSignInOtherViewer = false } = {}) {
+function renderWatchPage(
+  path = `/movies/${MOVIE_ID}/watch`,
+  { withSignInOtherViewer = false, withSecondMovieLink = false } = {}
+) {
   installCookieSession(
     createAuthSession({ user: VIEWER, accessToken: 'access-token', expiresInSeconds: 900 }),
     window.localStorage
@@ -400,12 +438,23 @@ function renderWatchPage(path = `/movies/${MOVIE_ID}/watch`, { withSignInOtherVi
       <QueryClientProvider client={queryClient}>
         <AuthProvider redirectToLogin={() => undefined}>
           {withSignInOtherViewer ? <SignInOtherViewer /> : null}
+          {withSecondMovieLink ? <GoToSecondMovie /> : null}
           <AppRoutes />
         </AuthProvider>
       </QueryClientProvider>
     </MemoryRouter>
   );
   return { ...view, queryClient };
+}
+
+/** In-app navigation to another watch address: the same page component stays mounted. */
+function GoToSecondMovie() {
+  const navigate = useNavigate();
+  return (
+    <button onClick={() => navigate(`/movies/${SECOND_MOVIE_ID}/watch`)} type="button">
+      Go to the second movie
+    </button>
+  );
 }
 
 function SignInOtherViewer() {
