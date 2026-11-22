@@ -35,16 +35,22 @@ interface RequestBudget {
   recoveryUsed: boolean;
   /** The recovery that the retried attempt waits for in `xhrSetup`. */
   recovery: Promise<AuthenticationSnapshot> | null;
-  /** When the recovery succeeded, in milliseconds since the epoch. */
-  recoveredAt: number | null;
+  /** When the recovery settled (succeeded or failed), in milliseconds since the epoch. */
+  settledAt: number | null;
   failure: HlsAuthenticationFailure | null;
 }
 
 /**
- * How long after its recovery an attempt still counts as the D2 retry. hls.js schedules the retry when the
- * 401 arrives, at most `maxRetryDelayMs` (8 seconds in 1.7.4) later, so it is sent no later than 8 seconds
- * after the recovery. A later attempt is a new load, for example after the viewer seeked away while the
- * retry was scheduled and came back, so it gets a new budget instead of ending the session on its first 401.
+ * How long a settled recovery stays with its request. hls.js schedules the retry when the 401 arrives, at
+ * most `maxRetryDelayMs` (8 seconds in 1.7.4) later, so the D2 retry follows its recovery within that time.
+ * A later attempt gets a new budget: a load after the viewer seeked away while the retry was scheduled and
+ * came back, or one after a failed refresh, which then recovers again instead of failing at once.
+ *
+ * Inside the window, a 401 for the recovered token ends the session even when hls.js abandoned the original
+ * retry: that token is at most 15 seconds old, far below the shortest access-token lifetime in use (one
+ * minute in the #125 stack, five minutes by default, ADR-012 D5), so the 401 is a rejection, not an expiry.
+ * After a longer stall, for example a suspended tab, a retry may recover once more; it still never ends a
+ * session for a token that could have expired, and the next 401 inside the window ends it.
  */
 export const RETRY_WINDOW_MS = 15_000;
 
@@ -79,20 +85,22 @@ export class HlsRequestAuthenticator {
   ) {}
 
   /**
-   * hls.js `xhrSetup`. A rejection makes hls.js report a network error for the request. `isCancelled`
-   * tells whether hls.js gave the attempt up while it waited for the recovery, for example after a seek.
+   * hls.js `xhrSetup`. A rejection makes hls.js report a network error for the request. `loader` is the
+   * hls.js loader that called it, which tells whether hls.js gave the attempt up while it waited for the
+   * recovery, for example after a seek.
    */
-  readonly setUpRequest = async (
-    xhr: XMLHttpRequest,
-    url: string,
-    isCancelled: () => boolean = () => false
-  ): Promise<void> => {
+  readonly setUpRequest = async (xhr: XMLHttpRequest, url: string, loader?: unknown): Promise<void> => {
+    const isCancelled = () => isAttemptAbandoned(loader, xhr);
     this.throwIfDisposed();
     let budget = this.budgetFor(url);
     if (!isHlsProxyUrl(url)) {
       // A playlist naming another origin or path never receives the bearer token (ADR-011 D3, D4).
       budget.failure = 'unavailable';
       throw new Error('HLS request outside the HLS proxy');
+    }
+    if (budget.settledAt !== null && Date.now() - budget.settledAt > RETRY_WINDOW_MS) {
+      this.budgets.delete(url);
+      budget = this.budgetFor(url);
     }
     if (budget.recovery) {
       try {
@@ -106,10 +114,6 @@ export class HlsRequestAuthenticator {
     this.throwIfDisposed();
     if (this.forgetIfCancelled(url, budget, isCancelled)) {
       throw new Error('HLS load cancelled');
-    }
-    if (budget.recoveredAt !== null && Date.now() - budget.recoveredAt > RETRY_WINDOW_MS) {
-      this.budgets.delete(url);
-      budget = this.budgetFor(url);
     }
     const authentication = this.currentAuthentication(budget);
     const attempt: RequestAttempt = { authentication, afterRecovery: budget.recoveryUsed };
@@ -227,7 +231,7 @@ export class HlsRequestAuthenticator {
   private budgetFor(url: string): RequestBudget {
     let budget = this.budgets.get(url);
     if (!budget) {
-      budget = { latestAttempt: null, recoveryUsed: false, recovery: null, recoveredAt: null, failure: null };
+      budget = { latestAttempt: null, recoveryUsed: false, recovery: null, settledAt: null, failure: null };
       this.budgets.set(url, budget);
     }
     return budget;
@@ -265,10 +269,11 @@ export class HlsRequestAuthenticator {
     budget.recovery = recovery;
     recovery.then(
       () => {
-        budget.recoveredAt = Date.now();
+        budget.settledAt = Date.now();
       },
       (failure: unknown) => {
         budget.failure = this.identityChanged() ? 'superseded' : classifyRecoveryFailure(failure);
+        budget.settledAt = Date.now();
       }
     );
     return true;
@@ -310,6 +315,22 @@ export function failedRequest(data: {
     url: data.response?.url ?? data.context?.url ?? data.frag?.url ?? data.url,
     status: data.response?.code
   };
+}
+
+/**
+ * Whether hls.js gave up the attempt on `xhr`. It is the check that the hls.js 1.7.4 XHR loader makes itself
+ * after `xhrSetup` (`this.loader !== xhr || this.stats.aborted`), plus a destroyed loader, whose `stats` is
+ * null. `loader` is the `this` of the `xhrSetup` call; without one nothing counts as abandoned.
+ */
+export function isAttemptAbandoned(loader: unknown, xhr: XMLHttpRequest): boolean {
+  if (typeof loader !== 'object' || loader === null) {
+    return false;
+  }
+  const xhrLoader = loader as { loader?: unknown; stats?: { aborted?: boolean } | null };
+  if (xhrLoader.stats === null || xhrLoader.stats?.aborted === true) {
+    return true;
+  }
+  return 'loader' in xhrLoader && xhrLoader.loader !== xhr;
 }
 
 /** Whether `url` is a request to this origin's authenticated HLS proxy. */

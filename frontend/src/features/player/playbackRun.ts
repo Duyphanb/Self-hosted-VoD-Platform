@@ -17,7 +17,7 @@ import type { ProgressSaver } from './progressSaver';
 /** ADR-011 D13: within the 5-10 second target of NFR progress durability. */
 export const PROGRESS_SAVE_INTERVAL_MS = 10_000;
 
-/** hls.js 1.7.4 `ErrorActionFlags.ResetMediaSource`: the library already ran `recoverMediaError()`. */
+/** hls.js 1.7.4 `ErrorActionFlags.ResetMediaSource`: the library asked for `recoverMediaError()`. */
 const RESET_MEDIA_SOURCE_FLAG = 16;
 
 export type PlayerStatus =
@@ -81,6 +81,8 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   let disposed = false;
   let hlsDestroyed = false;
   let mediaRecoveryUsed = false;
+  let mediaRecoveryRefused = false;
+  let positionBeforeRecovery: number | null = null;
   let assetCheck: Promise<AssetCheckResult> | null = null;
   let reloadRequested = false;
   let networkFailureActive = false;
@@ -291,28 +293,43 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   };
 
   /**
-   * ADR-011 D7: one `recoverMediaError()` per run. hls.js may already have run it for this error (and then
-   * stopped loading because the error is fatal), which counts as that one recovery. Loading restarts at the
-   * position from before the video was detached.
+   * ADR-011 D7: one `recoverMediaError()` per hls.js instance, whoever calls it. hls.js 1.7.4 calls it itself
+   * for an error whose action resets the media source, before any listener sees the error, so the limit is
+   * enforced on the instance's method: a second call is refused and the player shows the playback error.
    */
-  const recoverFromMediaError = (data: ErrorData) => {
+  const recoverMediaErrorOnce = hls.recoverMediaError.bind(hls);
+  hls.recoverMediaError = () => {
     if (mediaRecoveryUsed) {
-      fail('playbackError');
+      mediaRecoveryRefused = true;
       return;
     }
     mediaRecoveryUsed = true;
+    // The detach resets the video to 0, so keep the position from before it.
+    positionBeforeRecovery = currentPosition();
+    mediaPositionKnown = false;
+    recoverMediaErrorOnce();
+  };
+
+  /** A fatal media error: recover once, then restart loading where playback was. */
+  const recoverFromMediaError = (data: ErrorData) => {
     const recoveredByLibrary = ((data.errorAction?.flags ?? 0) & RESET_MEDIA_SOURCE_FLAG) !== 0;
-    const position = recoveredByLibrary ? memory.lastPosition : currentPosition();
     if (!recoveredByLibrary) {
+      if (mediaRecoveryUsed) {
+        fail('playbackError');
+        return;
+      }
       hls.recoverMediaError();
     }
-    // The detach reset the video to 0 until hls.js seeks back to `position`.
-    mediaPositionKnown = false;
-    hls.startLoad(position);
+    // A fatal error stopped loading, and hls.js restarts a stopped load only on request.
+    hls.startLoad(positionBeforeRecovery ?? memory.lastPosition);
   };
 
   const onHlsError = (_event: string, data: ErrorData) => {
     if (disposed || hlsDestroyed || networkFailureActive) {
+      return;
+    }
+    if (mediaRecoveryRefused) {
+      fail('playbackError');
       return;
     }
     if (stopsLoadingNow(data)) {
@@ -416,10 +433,9 @@ function createHlsConfig(authenticator: HlsRequestAuthenticator, startSeconds: n
   return {
     // -1 is the hls.js default: a VOD playlist starts at its beginning.
     startPosition: startSeconds > 0 ? startSeconds : -1,
-    // hls.js calls xhrSetup with its loader as `this`; `stats.aborted` marks an attempt it gave up.
+    // hls.js calls xhrSetup with its loader as `this`, which tells whether it gave the attempt up.
     xhrSetup(this: unknown, xhr: XMLHttpRequest, url: string) {
-      const loader = this as { stats?: { aborted?: boolean } } | undefined;
-      return authenticator.setUpRequest(xhr, url, () => loader?.stats?.aborted === true);
+      return authenticator.setUpRequest(xhr, url, this);
     },
     manifestLoadPolicy: authenticator.withAuthenticationRetry(Hls.DefaultConfig.manifestLoadPolicy),
     playlistLoadPolicy: authenticator.withAuthenticationRetry(Hls.DefaultConfig.playlistLoadPolicy),

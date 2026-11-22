@@ -7,10 +7,12 @@ import {
   type AuthRequestController
 } from '../../lib/api/client';
 import { FakeXhr } from '../../test/fakeXhr';
-import { HlsRequestAuthenticator, RETRY_WINDOW_MS } from './hlsAuthentication';
+import { HlsRequestAuthenticator, isAttemptAbandoned, RETRY_WINDOW_MS } from './hlsAuthentication';
 
 const MANIFEST_URL = `${window.location.origin}/hls/video-assets/asset-1/master.m3u8`;
 const SEGMENT_URL = `${window.location.origin}/hls/video-assets/asset-1/segments/seg_00001.ts`;
+/** An hls.js loader that gave its attempt up, as `this` of the `xhrSetup` call. */
+const ABORTED_LOADER = { stats: { aborted: true } };
 
 describe('HlsRequestAuthenticator', () => {
   let current: AuthenticationSnapshot | null;
@@ -270,6 +272,26 @@ describe('HlsRequestAuthenticator', () => {
     });
   });
 
+  describe('a failed recovery', () => {
+    it('lets a load after the retry window recover again instead of failing at once', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        refresh.mockRejectedValueOnce(new ApiRequestError(503, null));
+        await failWith(await setUp(SEGMENT_URL), 401);
+        authenticator.shouldRetry(null, 0, false, { url: SEGMENT_URL, code: 401 }, false);
+        await expect(setUp(SEGMENT_URL)).rejects.toMatchObject({ status: 503 });
+        vi.setSystemTime(Date.now() + RETRY_WINDOW_MS + 1);
+
+        const laterLoad = await setUp(SEGMENT_URL);
+
+        expect(laterLoad.headers.authorization).toBe('Bearer token-1');
+        expect(authenticator.isTerminalLoadError(SEGMENT_URL, 0, laterLoad)).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('a retry that hls.js gave up', () => {
     it('ends the budget when hls.js cancelled the retry while it waited for the recovery', async () => {
       await failWith(await setUp(SEGMENT_URL), 401);
@@ -277,7 +299,7 @@ describe('HlsRequestAuthenticator', () => {
       const abandoned = new FakeXhr();
 
       const abandonedRequest = abandoned as unknown as XMLHttpRequest;
-      const cancelledRetry = authenticator.setUpRequest(abandonedRequest, SEGMENT_URL, () => true);
+      const cancelledRetry = authenticator.setUpRequest(abandonedRequest, SEGMENT_URL, ABORTED_LOADER);
 
       await expect(cancelledRetry).rejects.toThrow('HLS load cancelled');
       expect(abandoned.method).toBe('');
@@ -293,11 +315,36 @@ describe('HlsRequestAuthenticator', () => {
       const abandoned = new FakeXhr();
 
       const abandonedRequest = abandoned as unknown as XMLHttpRequest;
-      const cancelledRetry = authenticator.setUpRequest(abandonedRequest, SEGMENT_URL, () => true);
+      const cancelledRetry = authenticator.setUpRequest(abandonedRequest, SEGMENT_URL, ABORTED_LOADER);
 
       await expect(cancelledRetry).rejects.toMatchObject({ status: 503 });
       const newLoad = await setUp(SEGMENT_URL);
       expect(newLoad.headers.authorization).toBe('Bearer token-1');
+    });
+  });
+
+  describe('isAttemptAbandoned', () => {
+    it('keeps an attempt that the hls.js loader still owns', () => {
+      const xhr = new FakeXhr() as unknown as XMLHttpRequest;
+
+      expect(isAttemptAbandoned({ loader: xhr, stats: { aborted: false } }, xhr)).toBe(false);
+    });
+
+    it.each([
+      ['the loader aborted it', (xhr: XMLHttpRequest) => ({ loader: xhr, stats: { aborted: true } })],
+      ['the loader was destroyed', () => ({ loader: null, stats: null })],
+      ['the loader cleared its stats', (xhr: XMLHttpRequest) => ({ loader: xhr, stats: null })],
+      ['the loader moved on to another attempt', () => ({ loader: new FakeXhr(), stats: { aborted: false } })]
+    ])('treats an attempt as abandoned when %s', (_name, loaderFor) => {
+      const xhr = new FakeXhr() as unknown as XMLHttpRequest;
+
+      expect(isAttemptAbandoned(loaderFor(xhr), xhr)).toBe(true);
+    });
+
+    it('never treats an attempt as abandoned without a loader', () => {
+      const xhr = new FakeXhr() as unknown as XMLHttpRequest;
+
+      expect(isAttemptAbandoned(undefined, xhr)).toBe(false);
     });
   });
 

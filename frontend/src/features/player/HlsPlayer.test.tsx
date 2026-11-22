@@ -167,22 +167,24 @@ describe('HlsPlayer', () => {
       expect(playerAlert()).toHaveTextContent('This video cannot be played right now.');
     });
 
-    it('counts a recovery that hls.js already ran for the same error as the one recovery', async () => {
+    it('counts the reset hls.js runs itself as the one recovery and refuses a second one', async () => {
       const { video } = await renderPlayer();
       seekTo(video, 64);
-      const resetByLibrary = { action: 0, flags: 16 };
 
-      emitError({
-        type: FakeHls.ErrorTypes.MEDIA_ERROR,
-        details: FakeHls.ErrorDetails.MEDIA_SOURCE_REQUIRES_RESET,
-        fatal: true,
-        errorAction: resetByLibrary
+      // hls.js 1.7.4 resets the media source itself before its listeners see the error.
+      act(() => {
+        FakeHls.latest().recoverMediaError();
       });
-      expect(FakeHls.latest().recoverMediaErrorCount).toBe(0);
+      emitError(libraryResetError());
+      expect(FakeHls.latest().recoverMediaErrorCount).toBe(1);
       expect(FakeHls.latest().startLoadPositions).toEqual([64]);
+      expect(playerAlert()).toBeNull();
 
-      emitError({ type: FakeHls.ErrorTypes.MEDIA_ERROR, details: 'bufferAppendError', fatal: true });
-      expect(FakeHls.latest().recoverMediaErrorCount).toBe(0);
+      act(() => {
+        FakeHls.latest().recoverMediaError();
+      });
+      emitError(libraryResetError());
+      expect(FakeHls.latest().recoverMediaErrorCount).toBe(1);
       expect(playerAlert()).toHaveTextContent('This video cannot be played right now.');
     });
 
@@ -387,15 +389,19 @@ describe('HlsPlayer', () => {
       expect(FakeHls.latest().destroyed).toBe(true);
     });
 
-    it('keeps the session and shows Retry when the refresh fails with 503', async () => {
+    it.each([
+      ['503', new ApiRequestError(503, apiError(503, 'AUTH_STATE_UNAVAILABLE'))],
+      ['a network error', new TypeError('Failed to fetch')],
+      ['a timeout', new DOMException('Authentication request timed out', 'TimeoutError')]
+    ])('keeps the session and shows Retry when the refresh fails with %s', async (_name, refreshFailure) => {
       await renderPlayer();
       mockRefresh(async () => {
-        throw new ApiRequestError(503, apiError(503, 'AUTH_STATE_UNAVAILABLE'));
+        throw refreshFailure;
       });
       respond(await setUpRequest(SEGMENT_URL), 401);
       FakeHls.latest().shouldRetry('fragLoadPolicy', { url: SEGMENT_URL, code: 401 });
 
-      await expect(setUpRequest(SEGMENT_URL)).rejects.toMatchObject({ status: 503 });
+      await expect(setUpRequest(SEGMENT_URL)).rejects.toBe(refreshFailure);
       emitError(fatalNetworkError(SEGMENT_URL, 0));
 
       expect(await findPlayerAlert()).toHaveTextContent('The video could not be loaded.');
@@ -571,6 +577,28 @@ describe('HlsPlayer', () => {
       fireEvent(newVideo, new Event('seeked'));
       await settle();
       expect(progressSaves().at(-1)).toEqual({ ...save(75), videoAssetId: NEW_ASSET_ID });
+    });
+  });
+
+  describe('review findings of #241, round 3', () => {
+    it('fetches the playback info again for an HLS 404 after a progress 409 found the same asset', async () => {
+      const reloadPlaybackInfo = vi.fn<() => Promise<PlaybackInfo>>()
+        .mockResolvedValueOnce(playbackInfo())
+        .mockResolvedValueOnce(playbackInfo({ videoAssetId: NEW_ASSET_ID }));
+      const { video } = await renderPlayer({ reloadPlaybackInfo });
+      startPlaying(video, 5);
+      const notCurrent = apiError(409, 'VIDEO_ASSET_NOT_CURRENT');
+      fetchMock.mockImplementationOnce(async () => jsonResponse(notCurrent, 409));
+      setPlayback(video, { time: 30, paused: true });
+      fireEvent(video, new Event('pause'));
+      await settle();
+      expect(reloadPlaybackInfo).toHaveBeenCalledTimes(1);
+
+      emitError(fatalNetworkError(SEGMENT_URL, 404));
+
+      await waitFor(() => expect(FakeHls.instances).toHaveLength(2));
+      expect(reloadPlaybackInfo).toHaveBeenCalledTimes(2);
+      expect(FakeHls.latest().loadedSources).toEqual([NEW_MANIFEST_URL]);
     });
   });
 
@@ -844,6 +872,15 @@ function setPlayback(
 function seekTo(video: HTMLVideoElement, time: number): void {
   setPlayback(video, { time, paused: true });
   fireEvent(video, new Event('seeked'));
+}
+
+function libraryResetError(): Record<string, unknown> {
+  return {
+    type: FakeHls.ErrorTypes.MEDIA_ERROR,
+    details: FakeHls.ErrorDetails.MEDIA_SOURCE_REQUIRES_RESET,
+    fatal: true,
+    errorAction: { action: 0, flags: 16 }
+  };
 }
 
 function deferredResponse() {
