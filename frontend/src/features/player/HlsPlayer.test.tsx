@@ -1,12 +1,19 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  XhrLoader,
+  type Loader,
+  type LoaderCallbacks,
+  type LoaderConfiguration,
+  type LoaderContext
+} from 'hls.js';
 import { type PropsWithChildren, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiRequestError } from '../../lib/api/client';
 import type { UserProfile } from '../../lib/api/types';
 import { installCookieSession } from '../../test/cookieSession';
 import { FakeHls } from '../../test/fakeHls';
-import { FakeXhr } from '../../test/fakeXhr';
+import { FakeLoaderXhr } from '../../test/fakeLoaderXhr';
 import { AuthProvider, useAuth } from '../auth/AuthContext';
 import * as authApi from '../auth/authApi';
 import { createAuthSession } from '../auth/authStorage';
@@ -36,6 +43,8 @@ const fetchMock = vi.fn<typeof fetch>();
 describe('HlsPlayer', () => {
   beforeEach(() => {
     FakeHls.reset();
+    FakeLoaderXhr.reset();
+    vi.stubGlobal('XMLHttpRequest', FakeLoaderXhr);
     fetchMock.mockReset();
     fetchMock.mockImplementation(async () => jsonResponse(progressResponse()));
     vi.stubGlobal('fetch', fetchMock);
@@ -293,49 +302,50 @@ describe('HlsPlayer', () => {
       expect(reloadPlaybackInfo).toHaveBeenCalledTimes(1);
     });
 
-    it('ends the session at once on a non-fatal 401 of the retry', async () => {
+    it('stops at once and ends the session when the resend after the recovery gets 401', async () => {
       await renderPlayer();
       mockRefresh(async () => authResponse(ALICE, 'alice-token-2'));
-      respond(await setUpRequest(SEGMENT_URL), 401);
-      FakeHls.latest().shouldRetry('fragLoadPolicy', { url: SEGMENT_URL, code: 401 });
-      const retry = await setUpRequest(SEGMENT_URL);
-      respond(retry, 401);
+      const load = loadThroughPlayer(SEGMENT_URL);
+      await waitFor(() => expect(FakeLoaderXhr.sentRequests()).toHaveLength(1));
+      FakeLoaderXhr.latestSent().respond(401);
+      await waitFor(() => expect(FakeLoaderXhr.sentRequests()).toHaveLength(2));
 
-      emitError(nonFatalLoadError(SEGMENT_URL, 401, retry));
+      // hls.js reports the load error before React renders the ended session, as in the browser.
+      act(() => {
+        FakeLoaderXhr.latestSent().respond(401);
+        FakeHls.latest().emitError(nonFatalLoadError(SEGMENT_URL, 401, load.lastErrorDetails()));
+      });
 
+      expect(load.callbacks.onError).toHaveBeenCalledTimes(1);
       expect(FakeHls.latest().stopLoadCount).toBe(1);
       expect(await findPlayerAlert()).toHaveTextContent('Your session has ended.');
       await waitFor(() => expect(screen.getByTestId('identity')).toHaveTextContent('signed-out'));
     });
 
-    it('keeps loading on a non-fatal 401 of the first attempt, whose retry hls.js has scheduled', async () => {
-      await renderPlayer();
-      mockRefresh(async () => authResponse(ALICE, 'alice-token-2'));
-      const first = await setUpRequest(SEGMENT_URL);
-      respond(first, 401);
-      FakeHls.latest().shouldRetry('fragLoadPolicy', { url: SEGMENT_URL, code: 401 });
-
-      emitError(nonFatalLoadError(SEGMENT_URL, 401, first));
-      await settle();
-
-      expect(FakeHls.latest().stopLoadCount).toBe(0);
-      expect(playerAlert()).toBeNull();
-    });
-
-    it('stops at once and shows Retry when the recovery failed with 503', async () => {
+    it.each([
+      ['503', new ApiRequestError(503, apiError(503, 'AUTH_STATE_UNAVAILABLE'))],
+      ['a network error', new TypeError('Failed to fetch')],
+      ['a timeout', new DOMException('Authentication request timed out', 'TimeoutError')]
+    ])('stops at once and shows Retry, keeping the session, when the refresh fails with %s', async (
+      _name,
+      refreshFailure
+    ) => {
       await renderPlayer();
       mockRefresh(async () => {
-        throw new ApiRequestError(503, apiError(503, 'AUTH_STATE_UNAVAILABLE'));
+        throw refreshFailure;
       });
-      respond(await setUpRequest(SEGMENT_URL), 401);
-      FakeHls.latest().shouldRetry('fragLoadPolicy', { url: SEGMENT_URL, code: 401 });
-      await expect(setUpRequest(SEGMENT_URL)).rejects.toMatchObject({ status: 503 });
+      const load = loadThroughPlayer(SEGMENT_URL);
+      await waitFor(() => expect(FakeLoaderXhr.sentRequests()).toHaveLength(1));
+      FakeLoaderXhr.latestSent().respond(401);
+      await waitFor(() => expect(load.callbacks.onError).toHaveBeenCalledTimes(1));
 
-      emitError(nonFatalLoadError(SEGMENT_URL, 0, new FakeXhr()));
+      emitError(nonFatalLoadError(SEGMENT_URL, 0, load.lastErrorDetails()));
 
       expect(FakeHls.latest().stopLoadCount).toBe(1);
       expect(await findPlayerAlert()).toHaveTextContent('The video could not be loaded.');
+      expect(within(playerAlert()!).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
       expect(screen.getByTestId('identity')).toHaveTextContent(ALICE.id);
+      expect(FakeLoaderXhr.sentRequests()).toHaveLength(1);
     });
 
     it('leaves a non-fatal fragment 503 to the hls.js backoff', async () => {
@@ -350,78 +360,50 @@ describe('HlsPlayer', () => {
   });
 
   describe('authentication (ADR-011 D2)', () => {
-    it('sends the current token on every HLS request', async () => {
+    it('shows Retry for a fatal 401 that authentication did not decide', async () => {
       await renderPlayer();
-
-      const xhr = await setUpRequest(SEGMENT_URL);
-
-      expect(xhr.headers.authorization).toBe('Bearer alice-token-1');
-      expect(xhr.url).not.toContain('token');
-      expect(xhr.withCredentials).toBe(false);
-    });
-
-    it('recovers a 401 once through the shared refresh and retries with the new token', async () => {
-      await renderPlayer();
-      const refresh = mockRefresh(async () => authResponse(ALICE, 'alice-token-2'));
-
-      respond(await setUpRequest(SEGMENT_URL), 401);
-      const retryAllowed = FakeHls.latest().shouldRetry('fragLoadPolicy', { url: SEGMENT_URL, code: 401 });
-      const retry = await setUpRequest(SEGMENT_URL);
-
-      expect(retryAllowed).toBe(true);
-      expect(refresh).toHaveBeenCalledTimes(1);
-      expect(retry.headers.authorization).toBe('Bearer alice-token-2');
-    });
-
-    it('ends the session when the retry with the refreshed token gets 401', async () => {
-      await renderPlayer();
-      mockRefresh(async () => authResponse(ALICE, 'alice-token-2'));
-      respond(await setUpRequest(MANIFEST_URL), 401);
-      FakeHls.latest().shouldRetry('manifestLoadPolicy', { url: MANIFEST_URL, code: 401 });
-      respond(await setUpRequest(MANIFEST_URL), 401);
-
-      const secondRetry = FakeHls.latest().shouldRetry('manifestLoadPolicy', { url: MANIFEST_URL, code: 401 });
-      emitError(fatalNetworkError(MANIFEST_URL, 401));
-
-      expect(secondRetry).toBe(false);
-      expect(await findPlayerAlert()).toHaveTextContent('Your session has ended.');
-      await waitFor(() => expect(screen.getByTestId('identity')).toHaveTextContent('signed-out'));
-      expect(FakeHls.latest().destroyed).toBe(true);
-    });
-
-    it.each([
-      ['503', new ApiRequestError(503, apiError(503, 'AUTH_STATE_UNAVAILABLE'))],
-      ['a network error', new TypeError('Failed to fetch')],
-      ['a timeout', new DOMException('Authentication request timed out', 'TimeoutError')]
-    ])('keeps the session and shows Retry when the refresh fails with %s', async (_name, refreshFailure) => {
-      await renderPlayer();
-      mockRefresh(async () => {
-        throw refreshFailure;
-      });
-      respond(await setUpRequest(SEGMENT_URL), 401);
-      FakeHls.latest().shouldRetry('fragLoadPolicy', { url: SEGMENT_URL, code: 401 });
-
-      await expect(setUpRequest(SEGMENT_URL)).rejects.toBe(refreshFailure);
-      emitError(fatalNetworkError(SEGMENT_URL, 0));
-
-      expect(await findPlayerAlert()).toHaveTextContent('The video could not be loaded.');
-      expect(within(playerAlert()!).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-      expect(screen.getByTestId('identity')).toHaveTextContent(ALICE.id);
-    });
-
-    it('restarts loading on the same instance after recovering an unhandled fatal 401', async () => {
-      const { video } = await renderPlayer();
-      seekTo(video, 42);
-      FakeHls.latest().levels = [{}];
-      const refresh = mockRefresh(async () => authResponse(ALICE, 'alice-token-2'));
-      respond(await setUpRequest(SEGMENT_URL), 401);
 
       emitError(fatalNetworkError(SEGMENT_URL, 401));
 
-      await waitFor(() => expect(FakeHls.latest().startLoadPositions).toEqual([42]));
+      expect(await findPlayerAlert()).toHaveTextContent('The video could not be loaded.');
+      expect(screen.getByTestId('identity')).toHaveTextContent(ALICE.id);
+    });
+
+    it('loads playlists and fragments through the authenticated loader', async () => {
+      await renderPlayer();
+      const config = FakeHls.latest().config;
+
+      expect(config.pLoader).toBe(config.fLoader);
+      expect((config.fLoader as unknown as { prototype: object }).prototype).toBeInstanceOf(XhrLoader);
+      expect(config.xhrSetup).toBeUndefined();
+    });
+
+    it('sends the current token on every HLS request', async () => {
+      await renderPlayer();
+
+      loadThroughPlayer(SEGMENT_URL);
+      await waitFor(() => expect(FakeLoaderXhr.sentRequests()).toHaveLength(1));
+
+      const request = FakeLoaderXhr.latestSent();
+      expect(request.headers.authorization).toBe('Bearer alice-token-1');
+      expect(request.url).not.toContain('token');
+      expect(request.withCredentials).toBe(false);
+    });
+
+    it('recovers a 401 once through the shared refresh and resends with the new token', async () => {
+      await renderPlayer();
+      const refresh = mockRefresh(async () => authResponse(ALICE, 'alice-token-2'));
+      const load = loadThroughPlayer(SEGMENT_URL);
+      await waitFor(() => expect(FakeLoaderXhr.sentRequests()).toHaveLength(1));
+
+      FakeLoaderXhr.latestSent().respond(401);
+      await waitFor(() => expect(FakeLoaderXhr.sentRequests()).toHaveLength(2));
+      FakeLoaderXhr.latestSent().respond(200, 'segment');
+
       expect(refresh).toHaveBeenCalledTimes(1);
-      expect(FakeHls.instances).toHaveLength(1);
-      expect(FakeHls.latest().destroyed).toBe(false);
+      expect(FakeLoaderXhr.latestSent().headers.authorization).toBe('Bearer alice-token-2');
+      expect(load.callbacks.onSuccess).toHaveBeenCalledTimes(1);
+      expect(load.callbacks.onError).not.toHaveBeenCalled();
     });
 
     it('destroys the player when another account signs in, and the new session stays', async () => {
@@ -581,19 +563,7 @@ describe('HlsPlayer', () => {
     });
   });
 
-  describe('review findings of #241, round 4', () => {
-    it('passes the hls.js loader to the authentication, so an abandoned attempt is not sent', async () => {
-      await renderPlayer();
-      const xhr = new FakeXhr();
-      const abortedLoader = { loader: xhr, stats: { aborted: true } };
-      const context = { url: SEGMENT_URL, responseType: 'arraybuffer' } as never;
-
-      const setUp = FakeHls.latest().config.xhrSetup!.call(abortedLoader, xhr as never, SEGMENT_URL, context);
-
-      await expect(setUp).rejects.toThrow('HLS load cancelled');
-      expect(xhr.headers.authorization).toBeUndefined();
-    });
-
+  describe('progress saves at the end of the video (ADR-011 D13)', () => {
     it('leaves the end on a seek to an earlier second, even less than one second back', async () => {
       const { video } = await renderPlayer();
       startPlaying(video, 90);
@@ -608,7 +578,7 @@ describe('HlsPlayer', () => {
     });
   });
 
-  describe('review findings of #241, round 3', () => {
+  describe('asset checks shared by HLS 404 and progress 409 (ADR-011 D7, D13)', () => {
     it('fetches the playback info again for an HLS 404 after a progress 409 found the same asset', async () => {
       const reloadPlaybackInfo = vi.fn<() => Promise<PlaybackInfo>>()
         .mockResolvedValueOnce(playbackInfo())
@@ -630,7 +600,7 @@ describe('HlsPlayer', () => {
     });
   });
 
-  describe('review findings of #241, round 2', () => {
+  describe('asset replacement (ADR-011 D7, D11, D13)', () => {
     it('does not carry finished over to a replacement of an asset that ended', async () => {
       const replacement = playbackInfo({ videoAssetId: NEW_ASSET_ID, durationSeconds: 900 });
       const { video } = await renderPlayer({ reloadPlaybackInfo: vi.fn(async () => replacement) });
@@ -690,7 +660,7 @@ describe('HlsPlayer', () => {
     });
   });
 
-  describe('review findings of #241', () => {
+  describe('progress and asset changes across reloads and accounts (ADR-011 D7, D11, D13)', () => {
     it('never sends the viewer\'s progress with the account that signs in next', async () => {
       const { video } = await renderPlayer();
       startPlaying(video, 5);
@@ -862,7 +832,7 @@ function fatalNetworkError(url: string, code: number | undefined): Record<string
   };
 }
 
-function nonFatalLoadError(url: string, code: number, networkDetails?: FakeXhr): Record<string, unknown> {
+function nonFatalLoadError(url: string, code: number, networkDetails?: unknown): Record<string, unknown> {
   return {
     type: FakeHls.ErrorTypes.NETWORK_ERROR,
     details: FakeHls.ErrorDetails.FRAG_LOAD_ERROR,
@@ -872,15 +842,33 @@ function nonFatalLoadError(url: string, code: number, networkDetails?: FakeXhr):
   };
 }
 
-async function setUpRequest(url: string): Promise<FakeXhr> {
-  const xhr = new FakeXhr();
-  await FakeHls.latest().setUpRequest(xhr as unknown as XMLHttpRequest, url);
-  return xhr;
+/** A playlist or fragment load through the loader class that the player installed in hls.js. */
+function loadThroughPlayer(url: string) {
+  const LoaderClass = FakeHls.latest().config.fLoader as unknown as new (config: object) => Loader<LoaderContext>;
+  const loader = new LoaderClass({});
+  const callbacks = {
+    onSuccess: vi.fn(),
+    onError: vi.fn(),
+    onTimeout: vi.fn(),
+    onAbort: vi.fn()
+  };
+  const context = { url, responseType: 'text', type: 'media-fragment' } as LoaderContext;
+  loader.load(context, loaderConfiguration(), callbacks as unknown as LoaderCallbacks<LoaderContext>);
+  return {
+    loader,
+    callbacks,
+    lastErrorDetails: (): unknown => callbacks.onError.mock.calls.at(-1)?.[2]
+  };
 }
 
-function respond(xhr: FakeXhr, status: number): void {
-  xhr.status = status;
-  xhr.fire('load');
+function loaderConfiguration(): LoaderConfiguration {
+  return {
+    loadPolicy: { maxTimeToFirstByteMs: 10_000, maxLoadTimeMs: 20_000, timeoutRetry: null, errorRetry: null },
+    timeout: 20_000,
+    maxRetry: 0,
+    retryDelay: 0,
+    maxRetryDelay: 0
+  };
 }
 
 function mockRefresh(implementation: () => Promise<ReturnType<typeof authResponse>>) {

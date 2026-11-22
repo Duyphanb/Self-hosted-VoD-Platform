@@ -1779,7 +1779,7 @@ After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening
 | 2026-11-03 | 1.3 | Sprint 5 worker design (ADR-010 D25-D28, #122): design authority line, Issues 5.4-5.8 criteria and tests, the Sprint 5 DoD wording, the Issue 10.6 purge rehearsal, the R-002 mitigation and Assumption 10 |
 | 2026-11-14 | 1.4 | Sprint 6 streaming design (ADR-011, #104/#105/#107/#126): design authority line, Issues 6.1-6.3 and 6.5-6.8 criteria and tests, Issue 6.4 withdrawn, the Sprint 6 DoD progress line, the catalog visibility criteria in Issues 6.3, 6.5, 7.3, 7.4, 8.1, 8.2 and 8.3 (404 for operations that take a `movieId`, filtered results for lists), the Issue 8.2 history writer, the Issue 9.1/9.4 admin projection, R-014/R-015 and Assumption 7 |
 | 2026-11-19 | 1.5 | Browser session design (ADR-012, #72): Issues 6.9 and 6.10 added to Sprint 6, Issue 6.6 depends on Issue 6.9, a Sprint 6 DoD line for the session model |
-| 2026-11-22 | 1.6 | Issue 6.6 error mapping follows the ADR-011 addendum of 2026-11-22: terminal HLS load errors in hls.js 1.7.4 (#223) |
+| 2026-11-22 | 1.6 | Issue 6.6 follows the ADR-011 addendum of 2026-11-22: the D2 budget per hls.js load and terminal HLS load errors in hls.js 1.7.4 (#223) |
 | 2026-10-26 | 1.2 | Contract-first API documentation (Issue #120, owner decision 2026-10-18): the Global Definition of Done requires `API-CONTRACT.yaml` updated or confirmed with responses validated in tests instead of OpenAPI annotations, and Issue 10.2 serves the frozen contract in Swagger UI instead of generating a code-first document |
 
 ---

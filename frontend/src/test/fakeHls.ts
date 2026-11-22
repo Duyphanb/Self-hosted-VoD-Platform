@@ -1,13 +1,12 @@
 import type RealHls from 'hls.js';
-import type { ErrorData, HlsConfig, LoaderResponse, RetryConfig } from 'hls.js';
+import type { ErrorData, HlsConfig } from 'hls.js';
 
 type ErrorListener = (event: string, data: ErrorData) => void;
-type PolicyName = 'manifestLoadPolicy' | 'playlistLoadPolicy' | 'fragLoadPolicy';
 
 /**
- * A controllable stand-in for the hls.js default export. Tests drive the hooks the player installs
- * (`xhrSetup`, the load-policy `shouldRetry`) and emit errors; the real constants and default config are
- * copied from hls.js by `adopt`.
+ * A controllable stand-in for the hls.js default export. Tests read the config the player installs, emit
+ * errors and inspect the calls the player makes; the real constants and default config are copied from
+ * hls.js by `adopt`.
  */
 export class FakeHls {
   static instances: FakeHls[] = [];
@@ -85,24 +84,6 @@ export class FakeHls {
   destroy(): void {
     this.destroyed = true;
     this.media = null;
-  }
-
-  /** Run the player's `xhrSetup` for `url`, as hls.js does before sending a request. */
-  async setUpRequest(xhr: XMLHttpRequest, url: string): Promise<void> {
-    const xhrSetup = this.config.xhrSetup;
-    if (!xhrSetup) {
-      throw new Error('The player installed no xhrSetup');
-    }
-    await xhrSetup(xhr, url, { url, responseType: 'text' } as never);
-  }
-
-  /** Ask the error-retry hook of `policy`, as hls.js does after a failed request. */
-  shouldRetry(policy: PolicyName, response: LoaderResponse, defaultRetry = false): boolean {
-    const errorRetry: RetryConfig | null | undefined = this.config[policy]?.default.errorRetry;
-    if (!errorRetry?.shouldRetry) {
-      throw new Error(`The player installed no shouldRetry hook on ${policy}`);
-    }
-    return errorRetry.shouldRetry(errorRetry, 0, false, response, defaultRetry);
   }
 
   emitError(data: Partial<ErrorData>): void {

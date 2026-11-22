@@ -1,4 +1,9 @@
-import Hls, { type ErrorData, type HlsConfig } from 'hls.js';
+import Hls, {
+  type ErrorData,
+  type FragmentLoaderConstructor,
+  type HlsConfig,
+  type PlaylistLoaderConstructor
+} from 'hls.js';
 import {
   ApiRequestError,
   AuthenticationSupersededError,
@@ -6,8 +11,9 @@ import {
   type AuthenticationSnapshot
 } from '../../lib/api/client';
 import {
+  authenticatedLoaderClass,
   failedRequest,
-  HlsRequestAuthenticator,
+  HlsAuthentication,
   type FailedRequest,
   type HlsAuthenticationFailure
 } from './hlsAuthentication';
@@ -76,8 +82,8 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   const { video, source, memory, saver } = options;
   // The previous run's cleanup may have recorded its own position; this run starts at its start position.
   memory.lastPosition = source.startSeconds;
-  const authenticator = new HlsRequestAuthenticator(options.client, options.identity);
-  const hls = new Hls(createHlsConfig(authenticator, source.startSeconds));
+  const authentication = new HlsAuthentication(options.client, options.identity);
+  const hls = new Hls(createHlsConfig(authentication, source.startSeconds));
   let disposed = false;
   let hlsDestroyed = false;
   let mediaRecoveryUsed = false;
@@ -189,7 +195,7 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
     for (const [type, listener] of Object.entries(videoListeners)) {
       video.removeEventListener(type, listener);
     }
-    authenticator.dispose();
+    authentication.dispose();
     hls.destroy();
   };
 
@@ -242,31 +248,15 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
     }
   };
 
-  /** ADR-011 D2 restart within an unused budget: the same instance keeps the request budgets. */
-  const restartLoading = () => {
-    if (hls.levels.length > 0) {
-      hls.startLoad(currentPosition());
-    } else {
-      hls.loadSource(source.manifestUrl);
-    }
-  };
-
   /**
    * One path for a fatal network error and for a load error that must stop at once (ADR-011 D2, D7 and the
-   * 2026-11-22 addendum). Loading is already stopped; the decision may wait for a pending recovery.
+   * 2026-11-22 addendum). Loading is already stopped. The authenticated loader has already decided every
+   * 401: a failure it recorded ends the run, any other 401 or status shows Retry, and a 404 refetches.
    */
   const handleNetworkFailure = async (request: FailedRequest, networkDetails: unknown) => {
-    const decision = await authenticator.resolveLoadFailure(request.url, request.status, networkDetails);
-    if (disposed || hlsDestroyed) {
-      return;
-    }
-    if (decision.kind === 'restartLoading') {
-      networkFailureActive = false;
-      restartLoading();
-      return;
-    }
-    if (decision.kind === 'failed') {
-      fail(statusForAuthenticationFailure(decision.failure));
+    const failure = authentication.failureFor(networkDetails);
+    if (failure) {
+      fail(statusForAuthenticationFailure(failure));
       return;
     }
     if (request.status === 404) {
@@ -278,8 +268,8 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   };
 
   /**
-   * hls.js 1.7.4 retries a fragment of a single-level stream after a 404 or a 401 on the retry although the
-   * `shouldRetry` hook refused, so such an error stops loading here, before hls.js sends it again.
+   * hls.js 1.7.4 retries a fragment of a single-level stream after a 4xx or a failed load, so a 404 and a
+   * load that authentication ended stop loading here, before hls.js sends them again.
    */
   const stopsLoadingNow = (data: ErrorData): boolean => {
     if (data.type !== Hls.ErrorTypes.NETWORK_ERROR) {
@@ -288,9 +278,11 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
     if (data.fatal) {
       return true;
     }
-    const request = failedRequest(data);
-    return LOAD_ERRORS.has(data.details)
-      && authenticator.isTerminalLoadError(request.url, request.status, data.networkDetails);
+    if (!LOAD_ERRORS.has(data.details)) {
+      return false;
+    }
+    const authenticationEnded = authentication.failureFor(data.networkDetails) !== null;
+    return failedRequest(data).status === 404 || authenticationEnded;
   };
 
   /**
@@ -430,17 +422,15 @@ const LOAD_ERRORS = new Set<string>([
   Hls.ErrorDetails.FRAG_LOAD_ERROR
 ]);
 
-function createHlsConfig(authenticator: HlsRequestAuthenticator, startSeconds: number): Partial<HlsConfig> {
+function createHlsConfig(authentication: HlsAuthentication, startSeconds: number): Partial<HlsConfig> {
+  // One loader per playlist or fragment load carries that load's D2 budget (ADR-011 2026-11-22 addendum).
+  const AuthenticatedLoader = authenticatedLoaderClass(authentication);
   return {
     // -1 is the hls.js default: a VOD playlist starts at its beginning.
     startPosition: startSeconds > 0 ? startSeconds : -1,
-    // hls.js calls xhrSetup with its loader as `this`, which tells whether it gave the attempt up.
-    xhrSetup(this: unknown, xhr: XMLHttpRequest, url: string) {
-      return authenticator.setUpRequest(xhr, url, this);
-    },
-    manifestLoadPolicy: authenticator.withAuthenticationRetry(Hls.DefaultConfig.manifestLoadPolicy),
-    playlistLoadPolicy: authenticator.withAuthenticationRetry(Hls.DefaultConfig.playlistLoadPolicy),
-    fragLoadPolicy: authenticator.withAuthenticationRetry(Hls.DefaultConfig.fragLoadPolicy)
+    // Like the hls.js default XHR loader, it serves every loader context; its typings name one per option.
+    pLoader: AuthenticatedLoader as unknown as PlaylistLoaderConstructor,
+    fLoader: AuthenticatedLoader as unknown as FragmentLoaderConstructor
   };
 }
 
