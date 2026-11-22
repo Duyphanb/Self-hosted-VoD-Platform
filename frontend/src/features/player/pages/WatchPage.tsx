@@ -14,7 +14,7 @@ import { ErrorState, LoadingState } from '../../../components/StateViews';
 import { ApiRequestError, AuthenticationSupersededError } from '../../../lib/api/client';
 import { isCanonicalUuid } from '../../../lib/uuid';
 import { NotFoundPage } from '../../../pages/NotFoundPage';
-import { useApiClient } from '../../auth/AuthContext';
+import { useApiClient, useAuth } from '../../auth/AuthContext';
 import { videoAvailability } from '../../movies/movieAvailability';
 import { useMovieDetail } from '../../movies/movieQueries';
 import type { MovieDetail } from '../../movies/moviesApi';
@@ -47,12 +47,15 @@ interface QueryResult<T> {
  */
 export function WatchPage() {
   const movieId = (useParams().movieId ?? '').toLowerCase();
+  // Subscribing to the session re-renders the page when the session changes, even for the same viewer:
+  // the cleared queries run again and the new identity gets a new player.
+  useAuth();
   const apiClient = useApiClient();
   const movie = useMovieDetail(movieId, { refetchOnMount: 'always' });
   const playback = usePlaybackInfo(movieId);
   const pageRef = useRef<HTMLDivElement>(null);
-  // The movie whose 409 was already rechecked once; a different movie gets its own recheck.
-  const recheckedMovieId = useRef<string | null>(null);
+  // Whether this visit already used its one automatic recheck of a 409; each new movie ID is a new visit.
+  const recheckUsed = useRef(false);
   const state = watchPageState(movieId, movie, playback, movie.isFetchedAfterMount);
 
   // The player's own requests belong to the viewer it was mounted for: a new identity gets a new player.
@@ -72,14 +75,20 @@ export function WatchPage() {
     pageRef.current?.focus({ preventScroll: true });
   }, [movieId]);
 
+  // A new visit, also a return to a movie opened earlier, gets its own recheck. This effect runs before
+  // the recheck effect below, in the same commit.
+  useEffect(() => {
+    recheckUsed.current = false;
+  }, [movieId]);
+
   // A 409 that raced the end of encoding: the movie already reports READY, so ask once more.
   const notReadyButMovieReady = state.kind === 'notReady' && state.movie.videoStatus === 'READY';
   useEffect(() => {
-    if (notReadyButMovieReady && recheckedMovieId.current !== movieId) {
-      recheckedMovieId.current = movieId;
+    if (notReadyButMovieReady && !recheckUsed.current) {
+      recheckUsed.current = true;
       void playback.refetch();
     }
-  }, [movieId, notReadyButMovieReady, playback]);
+  }, [notReadyButMovieReady, playback]);
 
   const retry = () => {
     // The Retry button disappears while loading; keep keyboard focus on the stable page region.

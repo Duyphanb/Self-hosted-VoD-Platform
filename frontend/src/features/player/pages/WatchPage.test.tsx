@@ -8,7 +8,7 @@ import type { UserProfile } from '../../../lib/api/types';
 import { installCookieSession } from '../../../test/cookieSession';
 import { AuthProvider, useAuth } from '../../auth/AuthContext';
 import * as authApi from '../../auth/authApi';
-import { createAuthSession } from '../../auth/authStorage';
+import { AUTH_GENERATION_STORAGE_KEY, createAuthSession } from '../../auth/authStorage';
 import { movieKeys, type MovieDetail } from '../../movies/moviesApi';
 import type { HlsPlayerProps } from '../HlsPlayer';
 import type { PlaybackInfo } from '../playbackApi';
@@ -199,6 +199,28 @@ describe('WatchPage through AppRoutes', () => {
 
       expect(playbackRequests()).toBe(requestsBefore);
     });
+
+    it('loads again and mounts a new player when the same viewer gets a new session', async () => {
+      renderWatchPage();
+      await screen.findByRole('application', { name: PLAYER_NAME }, LOAD_TIMEOUT);
+      const playbackBefore = playbackRequests();
+      vi.spyOn(authApi, 'refresh').mockResolvedValue({
+        user: VIEWER,
+        accessToken: 'second-session-access-token',
+        expiresInSeconds: 900
+      });
+
+      // Another tab signed the same viewer in again. The restore finishes before React renders, so the
+      // route guard never shows its loading state and the page stays mounted.
+      await act(async () => {
+        startNewSessionOfSameViewer();
+        await flushMicrotasks();
+      });
+
+      await waitFor(() => expect(player.mounts).toBe(2));
+      expect(playbackRequests()).toBe(playbackBefore + 1);
+      expect(screen.getByRole('application', { name: PLAYER_NAME })).toBeInTheDocument();
+    });
   });
 
   describe('loading', () => {
@@ -305,6 +327,40 @@ describe('WatchPage through AppRoutes', () => {
       expect(await screen.findByRole('application', { name: 'Player for Second Movie' }, LOAD_TIMEOUT))
         .toBeInTheDocument();
       expect(secondMovieAnswers).toBe(2);
+    });
+
+    it('gives a return to a movie its own recheck, after another movie played at once', async () => {
+      let firstMovieAnswers = 0;
+      fetchMock.mockImplementation(async (input) => {
+        const path = new URL(String(input), 'http://localhost').pathname;
+        if (path === `/api/v1/movies/${MOVIE_ID}`) {
+          return jsonResponse(movieDetail());
+        }
+        if (path === `/api/v1/movies/${SECOND_MOVIE_ID}`) {
+          return jsonResponse(movieDetail({ id: SECOND_MOVIE_ID, title: 'Second Movie' }));
+        }
+        if (path === `/api/v1/movies/${MOVIE_ID}/playback`) {
+          firstMovieAnswers += 1;
+          // The first visit stays unavailable after its recheck; the return visit plays after its own.
+          return firstMovieAnswers === 4
+            ? jsonResponse(playbackInfo())
+            : apiError(409, 'VIDEO_NOT_READY', 'Video is not ready');
+        }
+        if (path === `/api/v1/movies/${SECOND_MOVIE_ID}/playback`) {
+          return jsonResponse(playbackInfo({ movieId: SECOND_MOVIE_ID }));
+        }
+        return apiError(404, 'NOT_FOUND', 'Unexpected request');
+      });
+      renderWatchPage(`/movies/${MOVIE_ID}/watch`, { withSecondMovieLink: true });
+      await screen.findByRole('heading', { level: 2, name: 'Not available' }, LOAD_TIMEOUT);
+      await waitFor(() => expect(firstMovieAnswers).toBe(2));
+      fireEvent.click(screen.getByRole('button', { name: 'Go to the second movie' }));
+      await screen.findByRole('application', { name: 'Player for Second Movie' }, LOAD_TIMEOUT);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+
+      expect(await screen.findByRole('application', { name: PLAYER_NAME }, LOAD_TIMEOUT)).toBeInTheDocument();
+      expect(firstMovieAnswers).toBe(4);
     });
 
     it('waits for the fresh movie before it chooses the label, instead of using the cached one', async () => {
@@ -502,14 +558,31 @@ function renderWatchPage(
   return { ...view, queryClient };
 }
 
-/** In-app navigation to another watch address: the same page component stays mounted. */
+/** In-app navigation to another watch address and back: the same page component stays mounted. */
 function GoToSecondMovie() {
   const navigate = useNavigate();
   return (
-    <button onClick={() => navigate(`/movies/${SECOND_MOVIE_ID}/watch`)} type="button">
-      Go to the second movie
-    </button>
+    <>
+      <button onClick={() => navigate(`/movies/${SECOND_MOVIE_ID}/watch`)} type="button">
+        Go to the second movie
+      </button>
+      <button onClick={() => navigate(-1)} type="button">Go back</button>
+    </>
   );
+}
+
+/** What a sign-in of the same viewer in another tab leaves behind: a new session generation. */
+function startNewSessionOfSameViewer() {
+  const marker = JSON.parse(window.localStorage.getItem(AUTH_GENERATION_STORAGE_KEY) ?? 'null');
+  const nextMarker = { ...marker, generation: marker.generation + 1 };
+  window.localStorage.setItem(AUTH_GENERATION_STORAGE_KEY, JSON.stringify(nextMarker));
+  window.dispatchEvent(new StorageEvent('storage', { key: AUTH_GENERATION_STORAGE_KEY }));
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let step = 0; step < 50; step += 1) {
+    await Promise.resolve();
+  }
 }
 
 function SignInOtherViewer() {
