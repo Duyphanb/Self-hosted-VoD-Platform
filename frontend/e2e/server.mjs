@@ -14,6 +14,14 @@ let maxWriters = 0;
 let counts = {};
 let control = {};
 let gates = [];
+let segmentGates = [];
+let tokenLabels = new Map();
+let issuedPerUser = {};
+let hlsLog = [];
+let progressSaves = [];
+const ASSET_A = '5f1e2d3c-4b5a-4968-8776-655443322110';
+const ASSET_B = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+const SEGMENT_COUNT = 5;
 const users = Object.fromEntries(['alice', 'bob'].map(id => [id, {
   id,
   email: id + '@example.com',
@@ -58,6 +66,9 @@ function issue(request, response, userId, bodyDelayMs = 0) {
   const accessValue = 'access-cookie-test-' + randomUUID();
   sessions.set(refreshValue, userId);
   access.set(accessValue, userId);
+  issuedPerUser[userId] = (issuedPerUser[userId] ?? 0) + 1;
+  // Requests are logged with this label, never with the token value.
+  tokenLabels.set(accessValue, `${userId}-${issuedPerUser[userId]}`);
   setCookie(response, refreshValue);
   const payload = { user: users[userId], accessToken: accessValue, expiresInSeconds: 900 };
   if (bodyDelayMs <= 0) {
@@ -89,6 +100,104 @@ async function body(request) {
   return raw ? JSON.parse(raw) : {};
 }
 
+function releaseSegments() {
+  for (const complete of segmentGates) {
+    complete();
+  }
+  segmentGates = [];
+}
+
+function bearer(request) {
+  return (request.headers.authorization ?? '').replace('Bearer ', '');
+}
+
+function currentAsset() {
+  return control.currentAsset ?? ASSET_A;
+}
+
+function manifest() {
+  const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:6', '#EXT-X-MEDIA-SEQUENCE:0'];
+  lines.push('#EXT-X-PLAYLIST-TYPE:VOD');
+  for (let index = 0; index < SEGMENT_COUNT; index++) {
+    lines.push('#EXTINF:6.000,', `segments/seg_${String(index).padStart(5, '0')}.ts`);
+  }
+  lines.push('#EXT-X-ENDLIST', '');
+  return lines.join('\n');
+}
+
+/**
+ * The authenticated HLS proxy (ADR-011 D4). Segments are held open until the test releases them, so no
+ * fixture media is needed: the protocol, not decoding, is under test.
+ */
+async function hls(request, response, url) {
+  const [, , , assetId, ...rest] = url.pathname.split('/');
+  const token = bearer(request);
+  const entry = {
+    path: url.pathname.replace(assetId, assetId === ASSET_B ? 'asset-b' : 'asset-a'),
+    label: tokenLabels.get(token) ?? (token ? 'unknown' : 'none'),
+    hasCookie: Boolean(request.headers.cookie),
+    hasQuery: url.search !== '',
+    status: 0
+  };
+  hlsLog.push(entry);
+  const finish = (status, contentType, body) => {
+    entry.status = status;
+    response.writeHead(status, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
+    response.end(body);
+  };
+  const segmentRejected = control.segmentsUnauthorized && rest[0] === 'segments';
+  if (control.hlsUnauthorized || segmentRejected || !access.has(token)) {
+    return finish(401, 'application/json', JSON.stringify({ code: 'UNAUTHORIZED' }));
+  }
+  if (rest.join('/') === 'master.m3u8') {
+    if (assetId !== currentAsset()) {
+      return finish(404, 'application/json', JSON.stringify({ code: 'VIDEO_ASSET_NOT_FOUND' }));
+    }
+    if (control.expireAfterManifest) {
+      control.expireAfterManifest = false;
+      access.clear();
+    }
+    return finish(200, 'application/vnd.apple.mpegurl', manifest());
+  }
+  const scriptedStatus = control.segmentFailures?.shift();
+  if (scriptedStatus) {
+    return finish(scriptedStatus, 'application/json', JSON.stringify({ code: 'HLS_STORAGE_UNAVAILABLE' }));
+  }
+  while (assetId === currentAsset() && !control.segmentsUnauthorized && !response.destroyed) {
+    await new Promise(complete => {
+      segmentGates.push(complete);
+      response.once('close', complete);
+    });
+  }
+  if (response.destroyed) {
+    return;
+  }
+  if (control.segmentsUnauthorized) {
+    return finish(401, 'application/json', JSON.stringify({ code: 'UNAUTHORIZED' }));
+  }
+  finish(404, 'application/json', JSON.stringify({ code: 'VIDEO_ASSET_NOT_FOUND' }));
+}
+
+function playback(request, response, movieId) {
+  counts.playback = (counts.playback ?? 0) + 1;
+  if (!access.has(bearer(request))) return error(response, 401, 'UNAUTHORIZED');
+  if (control.playbackStatus === 409) return error(response, 409, 'VIDEO_NOT_READY');
+  const videoAssetId = currentAsset();
+  if (control.expireOnPlayback) {
+    // The playback info used the token; the manifest request that follows meets an expired one.
+    control.expireOnPlayback = false;
+    access.clear();
+  }
+  return json(response, 200, {
+    movieId,
+    videoAssetId,
+    status: 'READY',
+    hlsManifestUrl: `/hls/video-assets/${videoAssetId}/master.m3u8`,
+    resumeSeconds: 12,
+    durationSeconds: SEGMENT_COUNT * 6
+  });
+}
+
 async function waitGate(response) {
   await new Promise(complete => {
     gates.push(complete);
@@ -108,10 +217,24 @@ const server = http.createServer(async (request, response) => {
       maxWriters = 0;
       counts = {};
       control = {};
+      releaseSegments();
+      tokenLabels = new Map();
+      issuedPerUser = {};
+      hlsLog = [];
+      progressSaves = [];
       return json(response, 200, {});
     }
+    if (path === '/__test/hls') return json(response, 200, { requests: hlsLog, progressSaves });
     if (path === '/__test/control') {
       Object.assign(control, await body(request));
+      if (control.expireAccess) {
+        control.expireAccess = false;
+        access.clear();
+      }
+      if (control.releaseSegments) {
+        control.releaseSegments = false;
+        releaseSegments();
+      }
       if (control.release) {
         release();
         control.hold = null;
@@ -174,6 +297,16 @@ const server = http.createServer(async (request, response) => {
       } finally {
         active--;
       }
+    }
+    if (path.startsWith('/hls/video-assets/')) {
+      return await hls(request, response, new URL(request.url, 'http://localhost'));
+    }
+    const movieRoute = path.match(/^\/api\/v1\/movies\/([0-9a-f-]{36})\/(playback|progress)$/);
+    if (movieRoute?.[2] === 'playback') return playback(request, response, movieRoute[1]);
+    if (movieRoute?.[2] === 'progress' && request.method === 'PUT') {
+      if (!access.has(bearer(request))) return error(response, 401, 'UNAUTHORIZED');
+      progressSaves.push(await body(request));
+      return json(response, 200, { movieId: movieRoute[1], currentSeconds: 0, finished: false });
     }
     if (path.startsWith('/api/')) return error(response, 404, 'NOT_FOUND');
     let file = resolve(root, '.' + path);

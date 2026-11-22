@@ -33,7 +33,14 @@ export default defineConfig([
     }
   },
   {
-    files: ['src/features/auth/**/*', 'src/lib/api/**/*', 'e2e/**/*', 'playwright.config.ts'],
+    files: [
+      'src/features/auth/**/*',
+      'src/features/player/**/*',
+      'src/lib/api/**/*',
+      'src/test/fakeHls.ts',
+      'e2e/**/*',
+      'playwright.config.ts'
+    ],
     plugins: { '@stylistic': stylistic },
     rules: {
       '@stylistic/max-statements-per-line': ['error', { max: 1 }],

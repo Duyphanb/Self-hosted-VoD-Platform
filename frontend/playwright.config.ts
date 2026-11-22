@@ -3,7 +3,7 @@ const external = process.env.VOD_E2E_BASE_URL;
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: external ? 'stack.spec.ts' : 'session.spec.ts',
+  testMatch: external ? 'stack.spec.ts' : ['session.spec.ts', 'player.spec.ts'],
   outputDir: external ? 'test-results-stack' : 'test-results',
   fullyParallel: false,
   workers: 1,

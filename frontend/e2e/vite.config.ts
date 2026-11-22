@@ -6,6 +6,6 @@ export default defineConfig({
   build: {
     outDir: 'dist-e2e',
     emptyOutDir: true,
-    rollupOptions: { input: 'e2e/harness.html' }
+    rollupOptions: { input: ['e2e/harness.html', 'e2e/player.html'] }
   }
 });
