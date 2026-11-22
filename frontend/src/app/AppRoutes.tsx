@@ -8,6 +8,7 @@ import { MovieListPage } from '../features/movies/pages/MovieListPage';
 import { AdminMovieListPage } from '../features/movies/pages/AdminMovieListPage';
 import { AdminMovieFormPage } from '../features/movies/pages/AdminMovieFormPage';
 import { AdminMovieUploadPage } from '../features/movies/pages/AdminMovieUploadPage';
+import { WatchPage } from '../features/player/pages/WatchPage';
 import { AccountPage, ForbiddenPage } from '../pages/AccessPages';
 import { HomePage } from '../pages/HomePage';
 import { NotFoundPage } from '../pages/NotFoundPage';
@@ -25,6 +26,7 @@ export function AppRoutes() {
         <Route element={<ProtectedRoute />}>
           <Route path="movies" element={<MovieListPage />} />
           <Route path="movies/:movieId" element={<MovieDetailPage />} />
+          <Route path="movies/:movieId/watch" element={<WatchPage />} />
           <Route path="account" element={<AccountPage />} />
         </Route>
         <Route element={<AdminRoute />}>

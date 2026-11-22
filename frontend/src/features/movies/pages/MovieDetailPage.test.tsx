@@ -114,7 +114,8 @@ describe('MovieDetailPage through AppRoutes', () => {
       watch.focus();
       expect(watch).toHaveFocus();
       fireEvent.click(watch);
-      expect(await screen.findByRole('heading', { level: 1, name: 'Page not found' })).toBeInTheDocument();
+      // The watch page (Issue 6.7) owns this route; its own tests cover what it shows.
+      expect(await screen.findByRole('region', { name: 'Watch movie' })).toBeInTheDocument();
     } else {
       expect(screen.queryByRole('link', { name: 'Watch' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Watch' })).not.toBeInTheDocument();

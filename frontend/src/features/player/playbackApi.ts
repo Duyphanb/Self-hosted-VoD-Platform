@@ -33,10 +33,13 @@ export class InvalidPlaybackResponseError extends Error {
 export async function fetchPlaybackInfo(
   client: ApiClient,
   movieId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  identity?: AuthenticationSnapshot
 ): Promise<PlaybackInfo> {
+  // With `identity`, the request belongs to that viewer and is never sent with another account's token.
   const response = await client.request<unknown>(`/movies/${encodeURIComponent(movieId)}/playback`, {
     authenticated: true,
+    identity,
     signal
   });
   const playbackInfo = decodePlaybackInfo(response);
