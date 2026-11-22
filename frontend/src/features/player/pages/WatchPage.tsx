@@ -53,7 +53,7 @@ export function WatchPage() {
   const pageRef = useRef<HTMLDivElement>(null);
   // The movie whose 409 was already rechecked once; a different movie gets its own recheck.
   const recheckedMovieId = useRef<string | null>(null);
-  const state = watchPageState(movieId, movie, playback, movie.isFetching);
+  const state = watchPageState(movieId, movie, playback, movie.isFetchedAfterMount);
 
   // The player's own requests belong to the viewer it was mounted for: a new identity gets a new player.
   const currentIdentity = apiClient.getAuthenticationSnapshot();
@@ -136,8 +136,9 @@ export function WatchPage() {
       <>
         <BackLink to={`/movies/${state.movie.id}`}>Back to movie details</BackLink>
         <MovieTitle movie={state.movie} />
+        {/* Only a playback request started by the page or the viewer disables the button, never a reconnect. */}
         <UnavailableNotice
-          checking={movie.isFetching || playback.isFetching}
+          checking={playback.isFetching}
           label={state.label}
           onCheckAgain={checkAgain}
         />
@@ -190,7 +191,7 @@ function watchPageState(
   movieId: string,
   movie: QueryResult<MovieDetail>,
   playback: QueryResult<PlaybackInfo>,
-  movieRefreshing: boolean
+  movieFetchedOnThisVisit: boolean
 ): WatchPageState {
   if (!isCanonicalUuid(movieId)) {
     return { kind: 'notFound' };
@@ -207,8 +208,9 @@ function watchPageState(
     return { kind: 'error', error: movieError };
   }
   if (isVideoNotReady(playbackError)) {
-    // The label comes from the movie's current video status, never from a cached answer still being refreshed.
-    return movie.data && !movieRefreshing
+    // The label comes from a movie answer fetched on this visit, never from an older cached one. A later
+    // refresh, for example after a reconnect, keeps the label until its answer arrives.
+    return movie.data && movieFetchedOnThisVisit
       ? { kind: 'notReady', movie: movie.data, label: unavailableLabel(movie.data) }
       : { kind: 'loading' };
   }

@@ -307,22 +307,77 @@ describe('WatchPage through AppRoutes', () => {
       expect(secondMovieAnswers).toBe(2);
     });
 
-    it('plays after Check again once the video became ready', async () => {
+    it('waits for the fresh movie before it chooses the label, instead of using the cached one', async () => {
+      // The detail page cached the movie as READY; a new upload started before the viewer clicked Watch.
+      renderWatchPage(`/movies/${MOVIE_ID}`);
+      const watch = await screen.findByRole('link', { name: 'Watch' }, LOAD_TIMEOUT);
+      let releaseMovie: (response: Response) => void = () => undefined;
+      answers.movie = () => new Promise<Response>((resolve) => {
+        releaseMovie = resolve;
+      });
+      answers.playback = () => apiError(409, 'VIDEO_NOT_READY', 'Video is not ready');
+
+      fireEvent.click(watch);
+      await waitFor(() => expect(playbackRequests()).toBe(1));
+      await renderQueryNotifications();
+
+      expect(screen.getByRole('heading', { level: 1, name: 'Watch' })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { level: 2, name: 'Not available' })).not.toBeInTheDocument();
+      // The cached READY must not trigger the recheck that only a fresh READY earns.
+      expect(playbackRequests()).toBe(1);
+      await act(async () => {
+        releaseMovie(jsonResponse(movieDetail({ videoStatus: 'PROCESSING' })));
+      });
+      expect(await screen.findByRole('heading', { level: 2, name: 'Processing' }, LOAD_TIMEOUT))
+        .toBeInTheDocument();
+    });
+
+    it('asks for the movie and its playback info at once on Check again, and plays once ready', async () => {
       answers.movie = () => jsonResponse(movieDetail({ videoStatus: 'PROCESSING' }));
       answers.playback = () => apiError(409, 'VIDEO_NOT_READY', 'Video is not ready');
       renderWatchPage();
       await screen.findByRole('heading', { level: 2, name: 'Processing' }, LOAD_TIMEOUT);
-      answers.movie = () => jsonResponse(movieDetail());
+      let releaseMovie: (response: Response) => void = () => undefined;
+      answers.movie = () => new Promise<Response>((resolve) => {
+        releaseMovie = resolve;
+      });
       answers.playback = () => jsonResponse(playbackInfo());
-
       const movieRequestsBefore = movieRequests();
       const playbackRequestsBefore = playbackRequests();
 
       fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
 
-      expect(await screen.findByRole('application', { name: PLAYER_NAME })).toBeInTheDocument();
+      // The playback request starts while the movie request is still pending, not after its answer.
+      await waitFor(() => expect(playbackRequests()).toBe(playbackRequestsBefore + 1));
       expect(movieRequests()).toBe(movieRequestsBefore + 1);
-      expect(playbackRequests()).toBeGreaterThanOrEqual(playbackRequestsBefore + 1);
+      await act(async () => {
+        releaseMovie(jsonResponse(movieDetail()));
+      });
+      expect(await screen.findByRole('application', { name: PLAYER_NAME })).toBeInTheDocument();
+      expect(playbackRequests()).toBe(playbackRequestsBefore + 1);
+    });
+
+    it('keeps the label and an enabled, focused Check again while a reconnect refreshes the movie', async () => {
+      answers.movie = () => jsonResponse(movieDetail({ videoStatus: 'PROCESSING' }));
+      answers.playback = () => apiError(409, 'VIDEO_NOT_READY', 'Video is not ready');
+      renderWatchPage();
+      const checkAgain = await screen.findByRole('button', { name: 'Check again' }, LOAD_TIMEOUT);
+      checkAgain.focus();
+      answers.movie = () => new Promise<Response>(() => undefined);
+      const movieRequestsBefore = movieRequests();
+
+      act(() => {
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+      });
+      await waitFor(() => expect(movieRequests()).toBe(movieRequestsBefore + 1));
+      await renderQueryNotifications();
+
+      expect(screen.getByRole('heading', { level: 2, name: 'Processing' })).toBeInTheDocument();
+      const stillCheckAgain = screen.getByRole('button', { name: 'Check again' });
+      expect(stillCheckAgain).toBe(checkAgain);
+      expect(stillCheckAgain).toBeEnabled();
+      expect(stillCheckAgain).toHaveFocus();
     });
   });
 
