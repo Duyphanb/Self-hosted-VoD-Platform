@@ -17,6 +17,11 @@ export interface AuthRequestController {
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   authenticated?: boolean;
   json?: unknown;
+  /**
+   * For an authenticated request that belongs to one identity, such as a player's progress save: when
+   * another identity is signed in, nothing is sent and AuthenticationSupersededError is thrown.
+   */
+  identity?: AuthenticationSnapshot;
 }
 
 export interface UploadOptions {
@@ -82,45 +87,21 @@ export class ApiClient {
       : null;
     const accessToken = initialAuthentication?.accessToken ?? null;
     if (authenticated && !initialAuthentication) throw new AuthenticationSupersededError();
+    if (options.identity && !sameIdentity(options.identity, initialAuthentication)) {
+      throw new AuthenticationSupersededError();
+    }
     let response = await this.send(path, options, accessToken);
 
-    if (authenticated && response.status === 401) {
-      const currentAuthentication = this.authController.getAuthenticationSnapshot();
-      if (!sameIdentity(initialAuthentication, currentAuthentication)) {
+    if (initialAuthentication && response.status === 401) {
+      await this.recoverAuthentication(initialAuthentication);
+      // Read the session again right before sending: it may have changed while the recovery settled.
+      const retryAuthentication = this.authController.getAuthenticationSnapshot();
+      if (!retryAuthentication || !sameIdentity(initialAuthentication, retryAuthentication)) {
         throw new AuthenticationSupersededError();
       }
-
-      if (currentAuthentication && currentAuthentication.accessToken !== accessToken) {
-        response = await this.send(path, options, currentAuthentication.accessToken);
-        if (response.status === 401) {
-          await this.throwAuthenticationFailure(response, currentAuthentication);
-        }
-      } else {
-        try {
-          await this.refreshAccessTokenOnce();
-        } catch (error) {
-          if (error instanceof ApiRequestError && error.status === 401 && sameAuthentication(
-            initialAuthentication,
-            this.authController.getAuthenticationSnapshot()
-          )) {
-            this.authController.onAuthenticationFailure(error);
-          }
-          throw error;
-        }
-
-        const refreshedAuthentication = this.authController.getAuthenticationSnapshot();
-        if (!sameIdentity(initialAuthentication, refreshedAuthentication)) {
-          throw new AuthenticationSupersededError();
-        }
-        if (!refreshedAuthentication) {
-          const error = new AuthenticationSupersededError();
-          throw error;
-        }
-
-        response = await this.send(path, options, refreshedAuthentication.accessToken);
-        if (response.status === 401) {
-          await this.throwAuthenticationFailure(response, refreshedAuthentication);
-        }
+      response = await this.send(path, options, retryAuthentication.accessToken);
+      if (response.status === 401) {
+        await this.throwAuthenticationFailure(response, retryAuthentication);
       }
     }
 
@@ -141,6 +122,84 @@ export class ApiClient {
       this.assertCurrentIdentity(initialAuthentication);
     }
     return payload;
+  }
+
+  /** The authentication a request sent now must use; null when signed out or while the session changes. */
+  getAuthenticationSnapshot(): AuthenticationSnapshot | null {
+    return this.authController.getAuthenticationSnapshot();
+  }
+
+  /**
+   * The one authentication recovery after a 401 (ADR-011 D2), shared by JSON requests and by callers that
+   * send their own requests, such as the HLS player. `rejected` is the authentication the 401 answered.
+   *
+   * - A late 401 of an older token resolves at once with the current authentication, without a refresh.
+   * - Otherwise the caller joins the single-flight refresh and gets the refreshed authentication.
+   * - A refresh rejected with 401 ends the session (when `rejected` is still current) and is rethrown.
+   * - Any other refresh failure (network error, timeout, 5xx) is rethrown and keeps the session.
+   * - Throws AuthenticationSupersededError when the signed-in identity changed.
+   *
+   * The caller retries its request once with the returned authentication and reports a second 401
+   * through `rejectAuthentication`.
+   */
+  async recoverAuthentication(rejected: AuthenticationSnapshot): Promise<AuthenticationSnapshot> {
+    const currentAuthentication = this.authController.getAuthenticationSnapshot();
+    if (!currentAuthentication || !sameIdentity(rejected, currentAuthentication)) {
+      throw new AuthenticationSupersededError();
+    }
+    if (currentAuthentication.accessToken !== rejected.accessToken) {
+      return currentAuthentication;
+    }
+
+    try {
+      await this.refreshAccessTokenOnce();
+    } catch (error) {
+      const refreshRejected = error instanceof ApiRequestError && error.status === 401;
+      if (refreshRejected && sameAuthentication(rejected, this.authController.getAuthenticationSnapshot())) {
+        this.authController.onAuthenticationFailure(error);
+      }
+      throw error;
+    }
+
+    const refreshedAuthentication = this.authController.getAuthenticationSnapshot();
+    if (!refreshedAuthentication || !sameIdentity(rejected, refreshedAuthentication)) {
+      throw new AuthenticationSupersededError();
+    }
+    return refreshedAuthentication;
+  }
+
+  /**
+   * The retry after `recoverAuthentication` still got 401 with `attempted`: the session has expired.
+   * It ends only while `attempted` is still the current authentication, so a late callback of an older
+   * token or identity never ends a newer session.
+   */
+  rejectAuthentication(attempted: AuthenticationSnapshot, error: unknown): void {
+    if (sameAuthentication(attempted, this.authController.getAuthenticationSnapshot())) {
+      this.authController.onAuthenticationFailure(error);
+    }
+  }
+
+  /**
+   * A best-effort request at page unload (ADR-011 D13): the current token, `keepalive`, and no recovery
+   * or retry. It is sent only while `identity` is still the signed-in identity, and its result is ignored.
+   * Returns whether the request was sent.
+   */
+  sendOnUnload(
+    path: string,
+    options: { method: string; json: unknown },
+    identity: AuthenticationSnapshot
+  ): boolean {
+    const currentAuthentication = this.authController.getAuthenticationSnapshot();
+    if (!currentAuthentication || !sameIdentity(identity, currentAuthentication)) {
+      return false;
+    }
+    const requestOptions: ApiRequestOptions = {
+      method: options.method,
+      json: options.json,
+      keepalive: true
+    };
+    this.send(path, requestOptions, currentAuthentication.accessToken).catch(() => undefined);
+    return true;
   }
 
   /** A single, non-replayable body transfer. Only the preceding GET may refresh authentication. */
@@ -232,7 +291,13 @@ export class ApiClient {
     options: ApiRequestOptions,
     accessToken: string | null
   ): Promise<Response> {
-    const { authenticated: _authenticated, json, headers: initialHeaders, ...requestInit } = options;
+    const {
+      authenticated: _authenticated,
+      identity: _identity,
+      json,
+      headers: initialHeaders,
+      ...requestInit
+    } = options;
     const headers = new Headers(initialHeaders);
     if (json !== undefined) {
       headers.set('Content-Type', 'application/json');
@@ -281,12 +346,7 @@ export class ApiClient {
     if (!sameIdentity(attemptedAuthentication, currentAuthentication)) {
       throw new AuthenticationSupersededError();
     }
-    if (sameAuthentication(
-      attemptedAuthentication,
-      currentAuthentication
-    )) {
-      this.authController.onAuthenticationFailure(error);
-    }
+    this.rejectAuthentication(attemptedAuthentication, error);
     throw error;
   }
 
