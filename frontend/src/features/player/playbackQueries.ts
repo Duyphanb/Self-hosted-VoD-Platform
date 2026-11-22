@@ -21,6 +21,8 @@ export function usePlaybackInfo(movieId: string) {
     enabled: isCanonicalUuid(movieId),
     staleTime: 0,
     gcTime: 0,
-    refetchOnMount: 'always'
+    refetchOnMount: 'always',
+    // The mounted player handles later asset changes itself; a reconnect must not swap it out.
+    refetchOnReconnect: false
   });
 }

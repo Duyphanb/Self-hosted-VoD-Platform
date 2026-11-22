@@ -1,4 +1,13 @@
-import { lazy, type ReactNode, Suspense, useCallback, useRef } from 'react';
+import {
+  Component,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef
+} from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { secondaryButtonClass } from '../../../components/buttonStyles';
 import { ErrorState, LoadingState } from '../../../components/StateViews';
@@ -33,17 +42,43 @@ interface QueryResult<T> {
 /**
  * The watch page (Issue 6.7): the movie's title, the authenticated player at the resume position, and the
  * description. It maps the playback API per ADR-011 D7: 404 MOVIE_NOT_FOUND shows the not-found state and
- * 409 VIDEO_NOT_READY shows the viewer-facing availability label, never a failure code or message.
+ * 409 VIDEO_NOT_READY shows the viewer-facing availability label, never a failure code or message. Any
+ * other error shows the error state with Retry.
  */
 export function WatchPage() {
   const movieId = (useParams().movieId ?? '').toLowerCase();
   const apiClient = useApiClient();
-  const movie = useMovieDetail(movieId);
+  const movie = useMovieDetail(movieId, { refetchOnMount: 'always' });
   const playback = usePlaybackInfo(movieId);
   const pageRef = useRef<HTMLDivElement>(null);
-  // The player asks again on its own when its asset is no longer current; the page's answer stays as it is.
-  const reloadPlaybackInfo = useCallback(() => fetchPlaybackInfo(apiClient, movieId), [apiClient, movieId]);
+  const recheckedAfterReady = useRef(false);
   const state = watchPageState(movieId, movie, playback);
+
+  // The player's own requests belong to the viewer it was mounted for: a new identity gets a new player.
+  const currentIdentity = apiClient.getAuthenticationSnapshot();
+  const identityKey = currentIdentity ? `${currentIdentity.userId}:${currentIdentity.generation}` : 'signed-out';
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the snapshot is captured once per identity.
+  const playerIdentity = useMemo(() => apiClient.getAuthenticationSnapshot(), [apiClient, identityKey]);
+  const reloadPlaybackInfo = useCallback(() => {
+    if (!playerIdentity) {
+      return Promise.reject(new AuthenticationSupersededError());
+    }
+    return fetchPlaybackInfo(apiClient, movieId, undefined, playerIdentity);
+  }, [apiClient, movieId, playerIdentity]);
+
+  // Route change: focus moves from the link that opened this page to the page itself.
+  useEffect(() => {
+    pageRef.current?.focus({ preventScroll: true });
+  }, [movieId]);
+
+  // A 409 that raced the end of encoding: the movie already reports READY, so ask once more.
+  const notReadyButMovieReady = state.kind === 'notReady' && state.movie.videoStatus === 'READY';
+  useEffect(() => {
+    if (notReadyButMovieReady && !recheckedAfterReady.current) {
+      recheckedAfterReady.current = true;
+      void playback.refetch();
+    }
+  }, [notReadyButMovieReady, playback]);
 
   const retry = () => {
     // The Retry button disappears while loading; keep keyboard focus on the stable page region.
@@ -55,6 +90,15 @@ export function WatchPage() {
       void playback.refetch();
     }
   };
+
+  const checkAgain = () => {
+    pageRef.current?.focus({ preventScroll: true });
+    void movie.refetch();
+    void playback.refetch();
+  };
+
+  const retrying = (movie.isError && movie.isFetching) || (playback.isError && playback.isFetching);
+  const announcement = state.kind === 'notReady' ? state.label : '';
 
   let content: ReactNode;
   if (state.kind === 'notFound') {
@@ -80,7 +124,7 @@ export function WatchPage() {
         <ErrorState
           error={state.error}
           headingLevel={1}
-          isRetrying={movie.isFetching || playback.isFetching}
+          isRetrying={retrying}
           onRetry={retry}
           title="Movie could not be loaded"
         />
@@ -90,34 +134,46 @@ export function WatchPage() {
     content = (
       <>
         <BackLink to={`/movies/${state.movie.id}`}>Back to movie details</BackLink>
-        <h1 className="text-3xl font-semibold text-white">{state.movie.title}</h1>
-        <UnavailableNotice label={state.label} />
+        <MovieTitle movie={state.movie} />
+        <UnavailableNotice
+          checking={movie.isFetching || playback.isFetching}
+          label={state.label}
+          onCheckAgain={checkAgain}
+        />
+        <MovieDescription movie={state.movie} />
       </>
     );
   } else {
     content = (
       <>
         <BackLink to={`/movies/${state.movie.id}`}>Back to movie details</BackLink>
-        <h1 className="text-3xl font-semibold text-white">{state.movie.title}</h1>
-        <Suspense fallback={<LoadingState label="Loading player…" />}>
-          <HlsPlayer
-            key={movieId}
-            movieId={movieId}
-            playbackInfo={state.playbackInfo}
-            reloadPlaybackInfo={reloadPlaybackInfo}
-            title={state.movie.title}
-          />
-        </Suspense>
-        <section aria-labelledby="watch-description-heading">
-          <h2 className="text-lg font-semibold text-white" id="watch-description-heading">Description</h2>
-          <p className="mt-2 whitespace-pre-line text-slate-300">{state.movie.description}</p>
-        </section>
+        <MovieTitle movie={state.movie} />
+        <PlayerLoadBoundary>
+          <Suspense fallback={<LoadingState label="Loading player…" />}>
+            <HlsPlayer
+              key={`${movieId}:${identityKey}`}
+              movieId={movieId}
+              playbackInfo={state.playbackInfo}
+              reloadPlaybackInfo={reloadPlaybackInfo}
+              title={state.movie.title}
+            />
+          </Suspense>
+        </PlayerLoadBoundary>
+        <MovieDescription movie={state.movie} />
       </>
     );
   }
 
   return (
-    <div aria-label="Watch movie" className="grid gap-6 focus:outline-none" ref={pageRef} role="region" tabIndex={-1}>
+    <div
+      aria-label="Watch movie"
+      className="grid min-w-0 gap-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+      ref={pageRef}
+      role="region"
+      tabIndex={-1}
+    >
+      {/* Present from the first render, so an availability result is announced when it arrives. */}
+      <p className="sr-only" role="status">{announcement}</p>
       {content}
     </div>
   );
@@ -125,7 +181,9 @@ export function WatchPage() {
 
 /**
  * The page state from the route and both queries. A query whose session was replaced is treated as still
- * loading: the cache is cleared and the queries run again for the new identity.
+ * loading: the cache is cleared and the queries run again for the new identity. Once the movie and its
+ * playback info are both known, only a not-found answer takes the player away: a failed background refetch
+ * must not stop playback that works.
  */
 function watchPageState(
   movieId: string,
@@ -137,22 +195,22 @@ function watchPageState(
   }
   const movieError = realError(movie);
   const playbackError = realError(playback);
-  if (isNotFound(movieError) || isNotFound(playbackError)) {
+  if (isMovieNotFound(movieError) || isMovieNotFound(playbackError)) {
     return { kind: 'notFound' };
+  }
+  if (movie.data && playback.data && !playback.isError) {
+    return { kind: 'ready', movie: movie.data, playbackInfo: playback.data };
   }
   if (movieError) {
     return { kind: 'error', error: movieError };
   }
-  if (isNotReady(playbackError)) {
+  if (isVideoNotReady(playbackError)) {
     return movie.data
       ? { kind: 'notReady', movie: movie.data, label: unavailableLabel(movie.data) }
       : { kind: 'loading' };
   }
   if (playbackError) {
     return { kind: 'error', error: playbackError };
-  }
-  if (movie.data && playback.data) {
-    return { kind: 'ready', movie: movie.data, playbackInfo: playback.data };
   }
   return { kind: 'loading' };
 }
@@ -164,12 +222,12 @@ function realError(query: QueryResult<unknown>): unknown {
   return query.error;
 }
 
-function isNotFound(error: unknown): boolean {
-  return error instanceof ApiRequestError && (error.status === 400 || error.status === 404);
+function isMovieNotFound(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.status === 404 && error.apiError?.code === 'MOVIE_NOT_FOUND';
 }
 
-function isNotReady(error: unknown): boolean {
-  return error instanceof ApiRequestError && error.status === 409;
+function isVideoNotReady(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.status === 409 && error.apiError?.code === 'VIDEO_NOT_READY';
 }
 
 /** The viewer-facing label of a movie without a playable asset (ADR-011 D7, D18). */
@@ -177,7 +235,26 @@ function unavailableLabel(movie: MovieDetail): UnavailableLabel {
   return videoAvailability(movie.videoStatus).label === 'Processing' ? 'Processing' : 'Not available';
 }
 
-function UnavailableNotice({ label }: { label: UnavailableLabel }) {
+function MovieTitle({ movie }: { movie: MovieDetail }) {
+  return <h1 className="break-words text-3xl font-semibold text-white">{movie.title}</h1>;
+}
+
+function MovieDescription({ movie }: { movie: MovieDetail }) {
+  return (
+    <section aria-labelledby="watch-description-heading" className="min-w-0">
+      <h2 className="text-lg font-semibold text-white" id="watch-description-heading">Description</h2>
+      <p className="mt-2 whitespace-pre-line break-words text-slate-300">{movie.description}</p>
+    </section>
+  );
+}
+
+interface UnavailableNoticeProps {
+  label: UnavailableLabel;
+  checking: boolean;
+  onCheckAgain(): void;
+}
+
+function UnavailableNotice({ label, checking, onCheckAgain }: UnavailableNoticeProps) {
   const message = label === 'Processing'
     ? 'This movie is still being processed. Check back later.'
     : 'This movie cannot be watched right now.';
@@ -188,10 +265,47 @@ function UnavailableNotice({ label }: { label: UnavailableLabel }) {
     >
       <h2 className="text-lg font-semibold text-white" id="watch-availability-heading">{label}</h2>
       <p className="mt-2 text-sm text-slate-300">{message}</p>
+      <button className={`${secondaryButtonClass} mt-4`} disabled={checking} onClick={onCheckAgain} type="button">
+        {checking ? 'Checking…' : 'Check again'}
+      </button>
     </section>
   );
 }
 
 function BackLink({ to, children }: { to: string; children: ReactNode }) {
   return <Link className={`${secondaryButtonClass} justify-self-start`} to={to}>{children}</Link>;
+}
+
+interface PlayerLoadBoundaryState {
+  failed: boolean;
+}
+
+/**
+ * The player's code could not be loaded, for example in a tab opened before a deployment replaced the
+ * player chunk. The page stays; reloading it fetches the current code.
+ */
+class PlayerLoadBoundary extends Component<{ children: ReactNode }, PlayerLoadBoundaryState> {
+  state: PlayerLoadBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): PlayerLoadBoundaryState {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) {
+      return this.props.children;
+    }
+    return (
+      <div className="rounded-lg border border-rose-500/50 bg-rose-500/10 p-6" role="alert">
+        <p className="text-sm text-rose-100">The player could not be loaded.</p>
+        <button
+          className={`${secondaryButtonClass} mt-4`}
+          onClick={() => window.location.reload()}
+          type="button"
+        >
+          Reload page
+        </button>
+      </div>
+    );
+  }
 }
