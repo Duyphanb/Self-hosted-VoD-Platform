@@ -23,7 +23,10 @@ def capture_auth_cookie(response, payload, path):
         return payload
     assert not isinstance(payload, dict) or 'refreshToken' not in payload, 'Refresh token leaked into JSON'
     issuing = response.status == 200
-    clearing = (path.endswith('/refresh') and response.status == 401) or (path.endswith('/logout') and response.status == 204)
+    clearing = (
+        (path.endswith('/refresh') and response.status == 401)
+        or (path.endswith('/logout') and response.status == 204)
+    )
     if not issuing and not clearing:
         return payload
     lines = response.headers.get_all('Set-Cookie') or []
@@ -32,7 +35,9 @@ def capture_auth_cookie(response, payload, path):
         parsed.load(line)
     assert 'vod_refresh' in parsed, 'Missing refresh cookie'
     cookie = parsed['vod_refresh']
-    assert cookie['httponly'] and cookie['secure'] and cookie['samesite'].lower() == 'strict', 'Cookie security attributes differ'
+    assert (
+        cookie['httponly'] and cookie['secure'] and cookie['samesite'].lower() == 'strict'
+    ), 'Cookie security attributes differ'
     assert cookie['path'] == '/api/v1/auth' and not cookie['domain'], 'Cookie scope differs'
     age = int(cookie['max-age'])
     if clearing:

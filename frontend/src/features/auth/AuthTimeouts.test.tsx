@@ -47,7 +47,9 @@ describe('real auth transport timeouts', () => {
       }));
     }
     const { result } = setup();
-    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
     expect(result.current.isAuthenticated).toBe(operation !== 'login');
 
     await act(async () => {
@@ -77,7 +79,9 @@ describe('real auth transport timeouts', () => {
   it('keeps a timed-out bootstrap retryable without writing a signed-out marker', async () => {
     signedInMarker();
     const { result } = setup();
-    await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_001);
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
     expect(result.current.isInitializing).toBe(false);

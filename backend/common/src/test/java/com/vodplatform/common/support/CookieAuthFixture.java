@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,42 +31,69 @@ public abstract class CookieAuthFixture {
     protected static final String ORIGIN = "http://localhost";
     protected static final String PASSWORD = "fixture-password";
     protected final Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
-    @Autowired protected MockMvc mvc;
-    @Autowired protected JdbcTemplate jdbc;
-    @Autowired protected ObjectMapper mapper;
-    @MockitoBean protected Clock clock;
-    @MockitoSpyBean protected RefreshTokenRepository tokens;
+    @Autowired
+    protected MockMvc mvc;
+    @Autowired
+    protected JdbcTemplate jdbc;
+    @Autowired
+    protected ObjectMapper mapper;
+    @MockitoBean
+    protected Clock clock;
+    @MockitoSpyBean
+    protected RefreshTokenRepository tokens;
     private final List<UUID> users = new ArrayList<>();
     protected String email;
     protected UUID user;
 
-    @BeforeEach void createUser() throws Exception {
+    @BeforeEach
+    void createUser() throws Exception {
         when(clock.instant()).thenReturn(now);
         email = UUID.randomUUID() + "@example.com";
         var result = mvc.perform(post("/api/v1/auth/register").contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(java.util.Map.of("email", email,
+                .content(mapper.writeValueAsString(Map.of("email", email,
                         "password", PASSWORD, "displayName", "Cookie fixture"))))
                 .andExpect(status().isCreated()).andReturn();
-        user = UUID.fromString(mapper.readTree(result.getResponse().getContentAsString()).path("id").asString());
+        String userId = mapper.readTree(result.getResponse().getContentAsString()).path("id").asString();
+        user = UUID.fromString(userId);
         users.add(user);
     }
-    @AfterEach void cleanup() { for (UUID id : users) jdbc.update("delete from users where id=?", id); }
+
+    @AfterEach
+    void cleanup() {
+        for (UUID userId : users) {
+            jdbc.update("delete from users where id=?", userId);
+        }
+    }
 
     protected ResultActions login(Cookie... cookies) throws Exception {
         var request = post("/api/v1/auth/login").header("Origin", ORIGIN);
-        if (cookies.length > 0) request.cookie(cookies);
+        if (cookies.length > 0) {
+            request.cookie(cookies);
+        }
         return mvc.perform(request
                 .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(
-                        java.util.Map.of("email", email, "password", PASSWORD))));
+                        Map.of("email", email, "password", PASSWORD))));
     }
-    protected Cookie issued() throws Exception { return cookie(login().andExpect(status().isOk()).andReturn()); }
+
+    protected Cookie issued() throws Exception {
+        return cookie(login().andExpect(status().isOk()).andReturn());
+    }
+
     protected Cookie cookie(MvcResult result) {
-        return new Cookie("vod_refresh", HttpCookie.parse(result.getResponse().getHeader("Set-Cookie")).getFirst().getValue());
+        String cookieHeader = result.getResponse().getHeader("Set-Cookie");
+        return new Cookie("vod_refresh", HttpCookie.parse(cookieHeader).getFirst().getValue());
     }
+
     protected ResultActions refresh(Cookie... cookies) throws Exception {
         var request = post("/api/v1/auth/refresh").header("Origin", ORIGIN);
-        if (cookies.length > 0) request.cookie(cookies);
+        if (cookies.length > 0) {
+            request.cookie(cookies);
+        }
         return mvc.perform(request);
     }
-    protected int revoked() { return jdbc.queryForObject("select count(*) from refresh_tokens where user_id=? and revoked_at is not null", Integer.class, user); }
+
+    protected int revoked() {
+        return jdbc.queryForObject("select count(*) from refresh_tokens where user_id=? and revoked_at is not null",
+                Integer.class, user);
+    }
 }

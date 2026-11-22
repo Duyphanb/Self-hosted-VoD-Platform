@@ -22,11 +22,14 @@ public class AuthOriginFilter extends OncePerRequestFilter {
     private final ObjectMapper mapper;
 
     public AuthOriginFilter(CorsProperties origins, ApiErrorFactory errors, ObjectMapper mapper) {
-        this.origins = origins; this.errors = errors; this.mapper = mapper;
+        this.origins = origins;
+        this.errors = errors;
+        this.mapper = mapper;
     }
 
-    @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
-                                              FilterChain chain) throws ServletException, IOException {
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
         if (AuthEndpoints.POSTS.matches(request)) {
             var values = Collections.list(request.getHeaders("Origin"));
             boolean required = AuthEndpoints.REQUIRE_ORIGIN.matches(request);
@@ -36,7 +39,9 @@ public class AuthOriginFilter extends OncePerRequestFilter {
                 try {
                     String normalized = new CorsProperties(List.of(values.getFirst())).allowedOrigins().getFirst();
                     rejected |= !origins.allowedOrigins().contains(normalized);
-                } catch (IllegalArgumentException | java.util.NoSuchElementException invalid) { rejected = true; }
+                } catch (IllegalArgumentException | java.util.NoSuchElementException invalid) {
+                    rejected = true;
+                }
             }
             if (rejected) {
                 response.setStatus(403);

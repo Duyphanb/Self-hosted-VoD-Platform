@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import stylistic from '@stylistic/eslint-plugin';
 import pluginQuery from '@tanstack/eslint-plugin-query';
 import reactHooks from 'eslint-plugin-react-hooks';
 import { reactRefresh } from 'eslint-plugin-react-refresh';
@@ -29,6 +30,20 @@ export default defineConfig([
         'error',
         { allowlist: { variables: ['apiClient'], types: ['ApiClient'] } }
       ]
+    }
+  },
+  {
+    files: ['src/features/auth/**/*', 'src/lib/api/**/*', 'e2e/**/*', 'playwright.config.ts'],
+    plugins: { '@stylistic': stylistic },
+    rules: {
+      '@stylistic/max-statements-per-line': ['error', { max: 1 }],
+      '@stylistic/max-len': ['error', {
+        code: 120,
+        ignoreUrls: true,
+        ignoreStrings: true,
+        ignoreTemplateLiterals: true,
+        ignoreRegExpLiterals: true
+      }]
     }
   },
   {

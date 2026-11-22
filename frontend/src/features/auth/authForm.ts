@@ -58,7 +58,9 @@ export function trimDisplayName(value: string): string {
 }
 
 export function validateDisplayName(value: string): string | null {
-  if ([...value].length > DISPLAY_NAME_MAX_LENGTH) return `Display name must be ${DISPLAY_NAME_MAX_LENGTH} characters or fewer.`;
+  if ([...value].length > DISPLAY_NAME_MAX_LENGTH) {
+    return `Display name must be ${DISPLAY_NAME_MAX_LENGTH} characters or fewer.`;
+  }
   // Inspect raw input so trimming cannot hide a control character at either end.
   if (/\p{Cc}/u.test(value)) return 'Display name must not contain control characters.';
   const length = [...trimDisplayName(value)].length;
@@ -237,7 +239,7 @@ function validIpv6Address(address: string): boolean {
 function safeInternalPath(path: string): string {
   if (!path.startsWith('/')
     || path.startsWith('//')
-    // eslint-disable-next-line no-control-regex -- rejecting backslashes, C0 control characters and DEL in redirect targets is the point.
+    // eslint-disable-next-line no-control-regex -- backslash, C0 and DEL are forbidden in redirect targets.
     || /[\\\u0000-\u001f\u007f]/.test(path)) {
     return '/';
   }
