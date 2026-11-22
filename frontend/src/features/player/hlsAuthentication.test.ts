@@ -124,8 +124,11 @@ describe('HlsRequestAuthenticator', () => {
       expect(onAuthenticationFailure).not.toHaveBeenCalled();
     });
 
-    it('keeps the session when the refresh fails by a network error or a timeout', async () => {
-      refresh.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    it.each([
+      ['a network error', new TypeError('Failed to fetch')],
+      ['a timeout', new DOMException('Authentication request timed out', 'TimeoutError')]
+    ])('keeps the session when the refresh fails by %s', async (_name, refreshFailure) => {
+      refresh.mockRejectedValueOnce(refreshFailure);
       await failWith(await setUp(SEGMENT_URL), 401);
 
       authenticator.shouldRetry(null, 0, false, { url: SEGMENT_URL, code: 401 }, false);
@@ -264,6 +267,37 @@ describe('HlsRequestAuthenticator', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe('a retry that hls.js gave up', () => {
+    it('ends the budget when hls.js cancelled the retry while it waited for the recovery', async () => {
+      await failWith(await setUp(SEGMENT_URL), 401);
+      authenticator.shouldRetry(null, 0, false, { url: SEGMENT_URL, code: 401 }, false);
+      const abandoned = new FakeXhr();
+
+      const abandonedRequest = abandoned as unknown as XMLHttpRequest;
+      const cancelledRetry = authenticator.setUpRequest(abandonedRequest, SEGMENT_URL, () => true);
+
+      await expect(cancelledRetry).rejects.toThrow('HLS load cancelled');
+      expect(abandoned.method).toBe('');
+      const newLoad = await setUp(SEGMENT_URL);
+      await failWith(newLoad, 401);
+      expect(authenticator.isTerminalLoadError(SEGMENT_URL, 401, newLoad)).toBe(false);
+    });
+
+    it('does not keep a failed recovery for a later load when the retry was cancelled', async () => {
+      refresh.mockRejectedValueOnce(new ApiRequestError(503, null));
+      await failWith(await setUp(SEGMENT_URL), 401);
+      authenticator.shouldRetry(null, 0, false, { url: SEGMENT_URL, code: 401 }, false);
+      const abandoned = new FakeXhr();
+
+      const abandonedRequest = abandoned as unknown as XMLHttpRequest;
+      const cancelledRetry = authenticator.setUpRequest(abandonedRequest, SEGMENT_URL, () => true);
+
+      await expect(cancelledRetry).rejects.toMatchObject({ status: 503 });
+      const newLoad = await setUp(SEGMENT_URL);
+      expect(newLoad.headers.authorization).toBe('Bearer token-1');
     });
   });
 

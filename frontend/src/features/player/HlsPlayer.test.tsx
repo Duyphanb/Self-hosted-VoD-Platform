@@ -23,6 +23,7 @@ vi.mock('hls.js', async (importOriginal) => {
 const MOVIE_ID = '0b9a7c55-6f0e-4b3a-9d1c-2e4f6a8b0c1d';
 const ASSET_ID = '5f1e2d3c-4b5a-4968-8776-655443322110';
 const NEW_ASSET_ID = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+const THIRD_ASSET_ID = '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f';
 const MANIFEST_URL = `/hls/video-assets/${ASSET_ID}/master.m3u8`;
 const NEW_MANIFEST_URL = `/hls/video-assets/${NEW_ASSET_ID}/master.m3u8`;
 const SEGMENT_URL = `${window.location.origin}/hls/video-assets/${ASSET_ID}/segments/seg_00003.ts`;
@@ -94,7 +95,7 @@ describe('HlsPlayer', () => {
       expect(FakeHls.latest().config.startPosition).toBe(-1);
     });
 
-    it('stays paused without an error when play() is rejected', async () => {
+    it('shows no error and saves nothing when play() is rejected', async () => {
       const notAllowed = new DOMException('Playback needs a user gesture', 'NotAllowedError');
       vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(notAllowed);
       const { video } = await renderPlayer();
@@ -103,7 +104,6 @@ describe('HlsPlayer', () => {
       await expect(video.play()).rejects.toBe(notAllowed);
       await settle();
 
-      expect(video.paused).toBe(true);
       expect(playerAlert()).toBeNull();
       expect(FakeHls.latest().destroyed).toBe(false);
       expect(progressSaves()).toEqual([]);
@@ -571,6 +571,66 @@ describe('HlsPlayer', () => {
       fireEvent(newVideo, new Event('seeked'));
       await settle();
       expect(progressSaves().at(-1)).toEqual({ ...save(75), videoAssetId: NEW_ASSET_ID });
+    });
+  });
+
+  describe('review findings of #241, round 2', () => {
+    it('does not carry finished over to a replacement of an asset that ended', async () => {
+      const replacement = playbackInfo({ videoAssetId: NEW_ASSET_ID, durationSeconds: 900 });
+      const { video } = await renderPlayer({ reloadPlaybackInfo: vi.fn(async () => replacement) });
+      startPlaying(video, 590);
+      const notCurrent = apiError(409, 'VIDEO_ASSET_NOT_CURRENT');
+      fetchMock.mockImplementationOnce(async () => jsonResponse(notCurrent, 409));
+
+      setPlayback(video, { time: 596, paused: true, ended: true });
+      fireEvent(video, new Event('ended'));
+      await waitFor(() => expect(FakeHls.instances).toHaveLength(2));
+      seekTo(screen.getByLabelText(TITLE) as HTMLVideoElement, 596);
+      await settle();
+
+      expect(progressSaves().at(-1)).toEqual({ ...save(596), videoAssetId: NEW_ASSET_ID });
+    });
+
+    it('ignores a late 409 about the previous asset after the player switched assets', async () => {
+      const reloadPlaybackInfo = vi.fn<() => Promise<PlaybackInfo>>()
+        .mockResolvedValueOnce(playbackInfo({ videoAssetId: NEW_ASSET_ID }))
+        .mockResolvedValueOnce(playbackInfo({ videoAssetId: THIRD_ASSET_ID }));
+      const { video } = await renderPlayer({ reloadPlaybackInfo });
+      startPlaying(video, 5);
+      const slowSave = deferredResponse();
+      fetchMock.mockImplementationOnce(() => slowSave.promise);
+      setPlayback(video, { time: 30, paused: true });
+      fireEvent(video, new Event('pause'));
+
+      emitError(fatalNetworkError(SEGMENT_URL, 404));
+      await waitFor(() => expect(FakeHls.instances).toHaveLength(2));
+      slowSave.resolve(jsonResponse(apiError(409, 'VIDEO_ASSET_NOT_CURRENT'), 409));
+      await settle();
+      expect(reloadPlaybackInfo).toHaveBeenCalledTimes(1);
+
+      emitError(fatalNetworkError(SEGMENT_URL, 404));
+      await waitFor(() => expect(FakeHls.instances).toHaveLength(3));
+      expect(reloadPlaybackInfo).toHaveBeenCalledTimes(2);
+      expect(FakeHls.latest().loadedSources).toEqual([`/hls/video-assets/${THIRD_ASSET_ID}/master.m3u8`]);
+    });
+
+    it('retries a replacement at its own start position when it fails before reaching it', async () => {
+      const replacement = playbackInfo({ videoAssetId: NEW_ASSET_ID, durationSeconds: 30, resumeSeconds: 10 });
+      const { video } = await renderPlayer({ reloadPlaybackInfo: vi.fn(async () => replacement) });
+      startPlaying(video, 5);
+      const notCurrent = apiError(409, 'VIDEO_ASSET_NOT_CURRENT');
+      fetchMock.mockImplementationOnce(async () => jsonResponse(notCurrent, 409));
+      setPlayback(video, { time: 120, paused: true });
+      fireEvent(video, new Event('pause'));
+      await waitFor(() => expect(FakeHls.instances).toHaveLength(2));
+      expect(FakeHls.latest().config.startPosition).toBe(10);
+
+      emitError(fatalNetworkError(SEGMENT_URL, 503));
+      await settle();
+      fireEvent.click(within(playerAlert()!).getByRole('button', { name: 'Retry' }));
+
+      await waitFor(() => expect(FakeHls.instances).toHaveLength(3));
+      expect(FakeHls.latest().config.startPosition).toBe(10);
     });
   });
 

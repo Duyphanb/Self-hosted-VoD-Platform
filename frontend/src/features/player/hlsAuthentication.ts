@@ -41,12 +41,12 @@ interface RequestBudget {
 }
 
 /**
- * How long after its recovery an attempt still counts as the D2 retry. hls.js sends the retry within its
- * retry delay (at most 8 seconds). A later attempt is a new load, for example after the viewer seeked away
- * and back, whose token may have expired meanwhile (5-minute access tokens, ADR-012 D5), so it gets a new
- * budget instead of ending the session on its first 401.
+ * How long after its recovery an attempt still counts as the D2 retry. hls.js schedules the retry when the
+ * 401 arrives, at most `maxRetryDelayMs` (8 seconds in 1.7.4) later, so it is sent no later than 8 seconds
+ * after the recovery. A later attempt is a new load, for example after the viewer seeked away while the
+ * retry was scheduled and came back, so it gets a new budget instead of ending the session on its first 401.
  */
-export const RETRY_WINDOW_MS = 60_000;
+export const RETRY_WINDOW_MS = 15_000;
 
 type ShouldRetry = NonNullable<RetryConfig['shouldRetry']>;
 
@@ -78,8 +78,15 @@ export class HlsRequestAuthenticator {
     private readonly identity: AuthenticationSnapshot
   ) {}
 
-  /** hls.js `xhrSetup`. A rejection makes hls.js report a network error for the request. */
-  readonly setUpRequest = async (xhr: XMLHttpRequest, url: string): Promise<void> => {
+  /**
+   * hls.js `xhrSetup`. A rejection makes hls.js report a network error for the request. `isCancelled`
+   * tells whether hls.js gave the attempt up while it waited for the recovery, for example after a seek.
+   */
+  readonly setUpRequest = async (
+    xhr: XMLHttpRequest,
+    url: string,
+    isCancelled: () => boolean = () => false
+  ): Promise<void> => {
     this.throwIfDisposed();
     let budget = this.budgetFor(url);
     if (!isHlsProxyUrl(url)) {
@@ -88,10 +95,18 @@ export class HlsRequestAuthenticator {
       throw new Error('HLS request outside the HLS proxy');
     }
     if (budget.recovery) {
-      await budget.recovery;
+      try {
+        await budget.recovery;
+      } catch (failure) {
+        this.forgetIfCancelled(url, budget, isCancelled);
+        throw failure;
+      }
     }
-    // The player may have stopped while this attempt waited for the recovery.
+    // The player may have stopped, or hls.js may have given the load up, while the attempt waited.
     this.throwIfDisposed();
+    if (this.forgetIfCancelled(url, budget, isCancelled)) {
+      throw new Error('HLS load cancelled');
+    }
     if (budget.recoveredAt !== null && Date.now() - budget.recoveredAt > RETRY_WINDOW_MS) {
       this.budgets.delete(url);
       budget = this.budgetFor(url);
@@ -190,6 +205,17 @@ export class HlsRequestAuthenticator {
   dispose(): void {
     this.disposed = true;
     this.budgets.clear();
+  }
+
+  /** A load that hls.js gave up ends its budget, even after a failed recovery: a later load starts afresh. */
+  private forgetIfCancelled(url: string, budget: RequestBudget, isCancelled: () => boolean): boolean {
+    if (!isCancelled()) {
+      return false;
+    }
+    if (this.budgets.get(url) === budget) {
+      this.budgets.delete(url);
+    }
+    return true;
   }
 
   private releaseBudget(url: string, budget: RequestBudget): void {

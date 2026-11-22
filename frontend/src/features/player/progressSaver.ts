@@ -6,8 +6,8 @@ export interface ProgressSaverOptions {
   save(snapshot: ProgressSave): Promise<void>;
   /** A best-effort `keepalive` save at page unload. */
   saveOnUnload(snapshot: ProgressSave): void;
-  /** The server answered 409 VIDEO_ASSET_NOT_CURRENT: the page must fetch the playback info again. */
-  onAssetNotCurrent(): void;
+  /** A save of `videoAssetId` answered 409 VIDEO_ASSET_NOT_CURRENT: fetch the playback info again. */
+  onAssetNotCurrent(videoAssetId: string): void;
 }
 
 /**
@@ -99,7 +99,7 @@ export class ProgressSaver {
       this.stoppedAssets.add(snapshot.videoAssetId);
     }
     if (failure.status === 409 && failure.apiError?.code === 'VIDEO_ASSET_NOT_CURRENT') {
-      this.options.onAssetNotCurrent();
+      this.options.onAssetNotCurrent(snapshot.videoAssetId);
     }
   }
 }

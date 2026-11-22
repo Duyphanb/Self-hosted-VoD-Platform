@@ -59,8 +59,8 @@ export interface PlaybackRunOptions {
   memory: PlayerMemory;
   /** The player's one progress saver, shared by all runs so that saves stay in order. */
   saver: ProgressSaver;
-  /** Set by the run: what to do when a save answers 409 VIDEO_ASSET_NOT_CURRENT. */
-  assetNotCurrentHandler: { current: () => void };
+  /** Set by the run: what to do when a save of `videoAssetId` answers 409 VIDEO_ASSET_NOT_CURRENT. */
+  assetNotCurrentHandler: { current: (videoAssetId: string) => void };
   setStatus(status: PlayerStatus): void;
   setBuffering(buffering: boolean): void;
   /** Start a new run at `startSeconds`, with the asset of `playbackInfo` when given. */
@@ -74,6 +74,8 @@ export interface PlaybackRunOptions {
  */
 export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   const { video, source, memory, saver } = options;
+  // The previous run's cleanup may have recorded its own position; this run starts at its start position.
+  memory.lastPosition = source.startSeconds;
   const authenticator = new HlsRequestAuthenticator(options.client, options.identity);
   const hls = new Hls(createHlsConfig(authenticator, source.startSeconds));
   let disposed = false;
@@ -195,15 +197,15 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   };
 
   /**
-   * ADR-011 D7 (HLS 404) and D13 (progress 409 VIDEO_ASSET_NOT_CURRENT) share a refetch that is running or
-   * succeeded; a refetch that failed does not answer a later trigger, which fetches again.
+   * ADR-011 D7 (HLS 404) and D13 (progress 409 VIDEO_ASSET_NOT_CURRENT) share a refetch while it runs; a
+   * later trigger fetches again, so it never acts on an answer that the server has since changed.
    */
   const checkCurrentAsset = (): Promise<AssetCheckResult> => {
     if (!assetCheck) {
       const check = fetchCurrentAsset(options.reloadPlaybackInfo, source.videoAssetId);
       assetCheck = check;
-      void check.then((result) => {
-        if (result.kind === 'failed' && assetCheck === check) {
+      void check.then(() => {
+        if (assetCheck === check) {
           assetCheck = null;
         }
       });
@@ -223,6 +225,8 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
       reloadRequested = true;
       const startSeconds = startOnReplacement(currentPosition(), result.playbackInfo);
       memory.lastPosition = startSeconds;
+      // Reaching the end of the old asset says nothing about the replacement.
+      memory.endedAt = null;
       options.reload(startSeconds, result.playbackInfo);
       return;
     }
@@ -338,7 +342,11 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
   }
   document.addEventListener('visibilitychange', onVisibilityChange);
   window.addEventListener('pagehide', onPageHide);
-  options.assetNotCurrentHandler.current = () => {
+  options.assetNotCurrentHandler.current = (videoAssetId) => {
+    // A late answer to a save of an earlier asset says nothing about the asset this run plays.
+    if (videoAssetId !== source.videoAssetId) {
+      return;
+    }
     void checkCurrentAsset().then((result) => applyAssetCheck(result, 'progress'));
   };
   hls.on(Hls.Events.ERROR, onHlsError);
@@ -408,7 +416,11 @@ function createHlsConfig(authenticator: HlsRequestAuthenticator, startSeconds: n
   return {
     // -1 is the hls.js default: a VOD playlist starts at its beginning.
     startPosition: startSeconds > 0 ? startSeconds : -1,
-    xhrSetup: authenticator.setUpRequest,
+    // hls.js calls xhrSetup with its loader as `this`; `stats.aborted` marks an attempt it gave up.
+    xhrSetup(this: unknown, xhr: XMLHttpRequest, url: string) {
+      const loader = this as { stats?: { aborted?: boolean } } | undefined;
+      return authenticator.setUpRequest(xhr, url, () => loader?.stats?.aborted === true);
+    },
     manifestLoadPolicy: authenticator.withAuthenticationRetry(Hls.DefaultConfig.manifestLoadPolicy),
     playlistLoadPolicy: authenticator.withAuthenticationRetry(Hls.DefaultConfig.playlistLoadPolicy),
     fragLoadPolicy: authenticator.withAuthenticationRetry(Hls.DefaultConfig.fragLoadPolicy)

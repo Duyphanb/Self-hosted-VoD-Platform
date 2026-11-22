@@ -70,7 +70,7 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
   // One saver for the player's whole life keeps every save in order across reloads and asset changes.
   // The running load sets what a 409 VIDEO_ASSET_NOT_CURRENT does.
   const [{ saver, assetNotCurrentHandler }] = useState(() => {
-    const handler = { current: () => undefined as void };
+    const handler: { current: (videoAssetId: string) => void } = { current: () => undefined };
     const progressSaver = new ProgressSaver({
       save: (snapshot) => {
         if (!playerIdentity) {
@@ -83,7 +83,7 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
           saveProgressOnUnload(client, movieId, snapshot, playerIdentity);
         }
       },
-      onAssetNotCurrent: () => handler.current()
+      onAssetNotCurrent: (videoAssetId) => handler.current(videoAssetId)
     });
     return { saver: progressSaver, assetNotCurrentHandler: handler };
   });
