@@ -51,8 +51,9 @@ export function WatchPage() {
   const movie = useMovieDetail(movieId, { refetchOnMount: 'always' });
   const playback = usePlaybackInfo(movieId);
   const pageRef = useRef<HTMLDivElement>(null);
-  const recheckedAfterReady = useRef(false);
-  const state = watchPageState(movieId, movie, playback);
+  // The movie whose 409 was already rechecked once; a different movie gets its own recheck.
+  const recheckedMovieId = useRef<string | null>(null);
+  const state = watchPageState(movieId, movie, playback, movie.isFetching);
 
   // The player's own requests belong to the viewer it was mounted for: a new identity gets a new player.
   const currentIdentity = apiClient.getAuthenticationSnapshot();
@@ -74,11 +75,11 @@ export function WatchPage() {
   // A 409 that raced the end of encoding: the movie already reports READY, so ask once more.
   const notReadyButMovieReady = state.kind === 'notReady' && state.movie.videoStatus === 'READY';
   useEffect(() => {
-    if (notReadyButMovieReady && !recheckedAfterReady.current) {
-      recheckedAfterReady.current = true;
+    if (notReadyButMovieReady && recheckedMovieId.current !== movieId) {
+      recheckedMovieId.current = movieId;
       void playback.refetch();
     }
-  }, [notReadyButMovieReady, playback]);
+  }, [movieId, notReadyButMovieReady, playback]);
 
   const retry = () => {
     // The Retry button disappears while loading; keep keyboard focus on the stable page region.
@@ -167,7 +168,7 @@ export function WatchPage() {
   return (
     <div
       aria-label="Watch movie"
-      className="grid min-w-0 gap-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+      className="grid min-w-0 grid-cols-1 gap-6 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
       ref={pageRef}
       role="region"
       tabIndex={-1}
@@ -188,7 +189,8 @@ export function WatchPage() {
 function watchPageState(
   movieId: string,
   movie: QueryResult<MovieDetail>,
-  playback: QueryResult<PlaybackInfo>
+  playback: QueryResult<PlaybackInfo>,
+  movieRefreshing: boolean
 ): WatchPageState {
   if (!isCanonicalUuid(movieId)) {
     return { kind: 'notFound' };
@@ -205,7 +207,8 @@ function watchPageState(
     return { kind: 'error', error: movieError };
   }
   if (isVideoNotReady(playbackError)) {
-    return movie.data
+    // The label comes from the movie's current video status, never from a cached answer still being refreshed.
+    return movie.data && !movieRefreshing
       ? { kind: 'notReady', movie: movie.data, label: unavailableLabel(movie.data) }
       : { kind: 'loading' };
   }
@@ -236,7 +239,7 @@ function unavailableLabel(movie: MovieDetail): UnavailableLabel {
 }
 
 function MovieTitle({ movie }: { movie: MovieDetail }) {
-  return <h1 className="break-words text-3xl font-semibold text-white">{movie.title}</h1>;
+  return <h1 className="break-words text-3xl font-semibold text-white [overflow-wrap:anywhere]">{movie.title}</h1>;
 }
 
 function MovieDescription({ movie }: { movie: MovieDetail }) {

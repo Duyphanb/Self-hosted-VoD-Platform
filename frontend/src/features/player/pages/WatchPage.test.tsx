@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -134,6 +134,26 @@ describe('WatchPage through AppRoutes', () => {
     });
   });
 
+  describe('reconnect', () => {
+    it('refetches the movie but not the playback info, and keeps the player', async () => {
+      renderWatchPage();
+      await screen.findByRole('application', { name: PLAYER_NAME }, LOAD_TIMEOUT);
+      const playbackBefore = playbackRequests();
+      answers.playback = () => apiError(503, 'SERVICE_UNAVAILABLE', 'Try again later');
+
+      act(() => {
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+      });
+      await waitFor(() => expect(movieRequests()).toBe(2));
+      await renderQueryNotifications();
+
+      expect(playbackRequests()).toBe(playbackBefore);
+      expect(screen.getByRole('application', { name: PLAYER_NAME })).toBeInTheDocument();
+      expect(player.mounts).toBe(1);
+    });
+  });
+
   describe('fetching the playback info again for the player (ADR-011 D7)', () => {
     it('fetches it again without reloading the page or the player', async () => {
       renderWatchPage();
@@ -200,10 +220,21 @@ describe('WatchPage through AppRoutes', () => {
       ['FAILED', 'Not available', 'This movie cannot be watched right now.']
     ] as const)('shows "%s" movies as %s, without the failure code or message', async (videoStatus, label, message) => {
       answers.movie = () => jsonResponse(movieDetail({ videoStatus }));
-      answers.playback = () => apiError(409, 'VIDEO_NOT_READY', 'Video is not ready for playback');
+      let releasePlayback: (response: Response) => void = () => undefined;
+      answers.playback = () => new Promise<Response>((resolve) => {
+        releasePlayback = resolve;
+      });
 
       renderWatchPage();
+      await screen.findByRole('heading', { level: 1, name: 'Watch' }, LOAD_TIMEOUT);
+      const liveRegion = screen.getByRole('region', { name: 'Watch movie' }).querySelector('p.sr-only[role="status"]');
+      expect(liveRegion).toHaveTextContent('');
+      await act(async () => {
+        releasePlayback(apiError(409, 'VIDEO_NOT_READY', 'Video is not ready for playback'));
+      });
 
+      expect(await screen.findByRole('heading', { level: 2, name: label }, LOAD_TIMEOUT)).toBeInTheDocument();
+      expect(liveRegion).toHaveTextContent(label);
       const notice = await screen.findByRole('heading', { level: 2, name: label }, LOAD_TIMEOUT);
       expect(notice.parentElement).toHaveTextContent(message);
       expect(screen.getByRole('heading', { level: 1, name: 'The Long Night' })).toBeInTheDocument();
@@ -249,9 +280,14 @@ describe('WatchPage through AppRoutes', () => {
       answers.movie = () => jsonResponse(movieDetail());
       answers.playback = () => jsonResponse(playbackInfo());
 
+      const movieRequestsBefore = movieRequests();
+      const playbackRequestsBefore = playbackRequests();
+
       fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
 
       expect(await screen.findByRole('application', { name: PLAYER_NAME })).toBeInTheDocument();
+      expect(movieRequests()).toBe(movieRequestsBefore + 1);
+      expect(playbackRequests()).toBeGreaterThanOrEqual(playbackRequestsBefore + 1);
     });
   });
 
@@ -335,6 +371,8 @@ describe('WatchPage through AppRoutes', () => {
 
       const alert = await screen.findByRole('alert', {}, LOAD_TIMEOUT);
       expect(within(alert).getByRole('button', { name: 'Retry' })).toBeEnabled();
+      fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+      await waitFor(() => expect(playbackRequests()).toBe(2));
     });
 
     it('keeps the page and offers a reload when the player code cannot be loaded', async () => {
