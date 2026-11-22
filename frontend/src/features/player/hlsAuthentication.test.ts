@@ -272,6 +272,32 @@ describe('HlsRequestAuthenticator', () => {
     });
   });
 
+  describe('a load that returns while an abandoned retry waits', () => {
+    it('gives the returning load a new budget once the abandoned retry ended the old one', async () => {
+      let finishRefresh: () => void = () => undefined;
+      refresh.mockImplementationOnce(() => new Promise<string>((resolve) => {
+        finishRefresh = () => {
+          current = snapshot('alice', 'token-2', 1);
+          resolve('token-2');
+        };
+      }));
+      await failWith(await setUp(SEGMENT_URL), 401);
+      authenticator.shouldRetry(null, 0, false, { url: SEGMENT_URL, code: 401 }, false);
+      await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      const abandoned = new FakeXhr() as unknown as XMLHttpRequest;
+      const abandonedRetry = authenticator.setUpRequest(abandoned, SEGMENT_URL, ABORTED_LOADER);
+      const returning = new FakeXhr();
+      const returningLoad = authenticator.setUpRequest(returning as unknown as XMLHttpRequest, SEGMENT_URL);
+
+      finishRefresh();
+
+      await expect(abandonedRetry).rejects.toThrow('HLS load cancelled');
+      await returningLoad;
+      await failWith(returning, 401);
+      expect(authenticator.isTerminalLoadError(SEGMENT_URL, 401, returning)).toBe(false);
+    });
+  });
+
   describe('a failed recovery', () => {
     it('lets a load after the retry window recover again instead of failing at once', async () => {
       vi.useFakeTimers({ toFake: ['Date'] });

@@ -46,11 +46,12 @@ interface RequestBudget {
  * A later attempt gets a new budget: a load after the viewer seeked away while the retry was scheduled and
  * came back, or one after a failed refresh, which then recovers again instead of failing at once.
  *
- * Inside the window, a 401 for the recovered token ends the session even when hls.js abandoned the original
- * retry: that token is at most 15 seconds old, far below the shortest access-token lifetime in use (one
- * minute in the #125 stack, five minutes by default, ADR-012 D5), so the 401 is a rejection, not an expiry.
- * After a longer stall, for example a suspended tab, a retry may recover once more; it still never ends a
- * session for a token that could have expired, and the next 401 inside the window ends it.
+ * Inside the window, a 401 for the token the recovery returned ends the session even when hls.js abandoned
+ * the original retry. When that token came from the shared refresh it is at most 15 seconds old, far below
+ * the shortest access-token lifetime in use (one minute in the #125 stack, five minutes by default, ADR-012
+ * D5), so the 401 is a rejection, not an expiry. A late 401 returns the current token without a refresh; a
+ * 401 for it ends the session exactly as D2 and the JSON requests already do. After a longer stall, for
+ * example a suspended tab, a retry may recover once more: one extra refresh, never a loop.
  */
 export const RETRY_WINDOW_MS = 15_000;
 
@@ -114,6 +115,10 @@ export class HlsRequestAuthenticator {
     this.throwIfDisposed();
     if (this.forgetIfCancelled(url, budget, isCancelled)) {
       throw new Error('HLS load cancelled');
+    }
+    // An abandoned attempt may have ended this budget while this one waited: then this is a new load.
+    if (this.budgets.get(url) !== budget) {
+      budget = this.budgetFor(url);
     }
     const authentication = this.currentAuthentication(budget);
     const attempt: RequestAttempt = { authentication, afterRecovery: budget.recoveryUsed };

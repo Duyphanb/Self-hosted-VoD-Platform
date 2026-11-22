@@ -405,6 +405,7 @@ describe('HlsPlayer', () => {
       emitError(fatalNetworkError(SEGMENT_URL, 0));
 
       expect(await findPlayerAlert()).toHaveTextContent('The video could not be loaded.');
+      expect(within(playerAlert()!).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
       expect(screen.getByTestId('identity')).toHaveTextContent(ALICE.id);
     });
 
@@ -577,6 +578,33 @@ describe('HlsPlayer', () => {
       fireEvent(newVideo, new Event('seeked'));
       await settle();
       expect(progressSaves().at(-1)).toEqual({ ...save(75), videoAssetId: NEW_ASSET_ID });
+    });
+  });
+
+  describe('review findings of #241, round 4', () => {
+    it('passes the hls.js loader to the authentication, so an abandoned attempt is not sent', async () => {
+      await renderPlayer();
+      const xhr = new FakeXhr();
+      const abortedLoader = { loader: xhr, stats: { aborted: true } };
+      const context = { url: SEGMENT_URL, responseType: 'arraybuffer' } as never;
+
+      const setUp = FakeHls.latest().config.xhrSetup!.call(abortedLoader, xhr as never, SEGMENT_URL, context);
+
+      await expect(setUp).rejects.toThrow('HLS load cancelled');
+      expect(xhr.headers.authorization).toBeUndefined();
+    });
+
+    it('leaves the end on a seek to an earlier second, even less than one second back', async () => {
+      const { video } = await renderPlayer();
+      startPlaying(video, 90);
+      setPlayback(video, { time: 100.2, paused: true, ended: true });
+      fireEvent(video, new Event('ended'));
+      await settle();
+
+      seekTo(video, 99.5);
+      await settle();
+
+      expect(progressSaves()).toEqual([save(100, true), save(99)]);
     });
   });
 
