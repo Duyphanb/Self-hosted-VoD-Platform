@@ -260,6 +260,24 @@ describe('AuthenticatedHlsLoader', () => {
       expect(load.callbacks.onSuccess).not.toHaveBeenCalled();
     });
 
+    it('reports nothing when hls.js aborts the load while a failed recovery rejects its setup', async () => {
+      const failRefresh = holdFailingRefresh();
+      const load = startLoad(MANIFEST_URL);
+      await settle();
+      FakeLoaderXhr.latestSent().respond(401);
+      await settle();
+      const resend = FakeLoaderXhr.instances.at(-1)!;
+
+      failRefresh(new ApiRequestError(503, null));
+      // hls.js opens the resend for its second xhrSetup call after the first one rejected; abort then.
+      await stepUntil(() => resend.method === 'GET');
+      load.loader.abort();
+      await settle();
+
+      expect(load.callbacks.onAbort).toHaveBeenCalledTimes(1);
+      expect(load.callbacks.onError).not.toHaveBeenCalled();
+    });
+
     it('sends nothing for a run that stopped', async () => {
       authentication.dispose();
 
@@ -300,6 +318,15 @@ describe('AuthenticatedHlsLoader', () => {
         return call ? { error: call[0], networkDetails: call[2] } : undefined;
       }
     };
+  }
+
+  /** Hold the next refresh open; the returned function rejects it with `failure`. */
+  function holdFailingRefresh(): (failure: unknown) => void {
+    let fail: (failure: unknown) => void = () => undefined;
+    refresh.mockImplementationOnce(() => new Promise<string>((_resolve, reject) => {
+      fail = reject;
+    }));
+    return (failure) => fail(failure);
   }
 
   /** Hold the next refresh open; the returned function completes it with token-2. */
@@ -351,6 +378,17 @@ function requestsCarryingToken(): FakeLoaderXhr[] {
 
 function snapshot(userId: string, accessToken: string, generation: number): AuthenticationSnapshot {
   return { userId, accessToken, generation };
+}
+
+/** Run microtasks one at a time until `condition` holds, to act between two steps of the loader. */
+async function stepUntil(condition: () => boolean): Promise<void> {
+  for (let step = 0; step < 50; step += 1) {
+    if (condition()) {
+      return;
+    }
+    await Promise.resolve();
+  }
+  throw new Error('The condition never held');
 }
 
 /** Let the loader's promise chain and the shared recovery run to completion. */

@@ -155,9 +155,8 @@ export function startPlaybackRun(options: PlaybackRunOptions): () => void {
     seeked: () => {
       mediaPositionKnown = true;
       currentPosition();
-      // Saves are whole seconds, so any seek to an earlier second leaves the end.
-      const leftTheEnd = memory.endedAt !== null && Math.floor(video.currentTime) < Math.floor(memory.endedAt);
-      if (leftTheEnd) {
+      // Any seek away from the end leaves it, even within the same whole second.
+      if (memory.endedAt !== null && !video.ended) {
         memory.endedAt = null;
       }
       save();

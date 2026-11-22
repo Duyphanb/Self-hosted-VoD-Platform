@@ -187,7 +187,11 @@ export class AuthenticatedHlsLoader extends XhrLoader {
     stats: LoaderStats,
     reportError: LoaderErrorCallback
   ): void {
-    if (error.code === 401 && this.attempt && !this.recovery && !this.isFinished()) {
+    // hls.js can still call back after abort() when xhrSetup rejects late; that load is over and silent.
+    if (this.isFinished()) {
+      return;
+    }
+    if (error.code === 401 && this.attempt && !this.recovery) {
       this.startRecovery(this.attempt);
       return;
     }

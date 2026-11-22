@@ -564,6 +564,19 @@ describe('HlsPlayer', () => {
   });
 
   describe('progress saves at the end of the video (ADR-011 D13)', () => {
+    it('leaves the end on a seek within the same whole second', async () => {
+      const { video } = await renderPlayer();
+      startPlaying(video, 90);
+      setPlayback(video, { time: 100.2, paused: true, ended: true });
+      fireEvent(video, new Event('ended'));
+      await settle();
+
+      seekTo(video, 100.1);
+      await settle();
+
+      expect(progressSaves()).toEqual([save(100, true), save(100)]);
+    });
+
     it('leaves the end on a seek to an earlier second, even less than one second back', async () => {
       const { video } = await renderPlayer();
       startPlaying(video, 90);
