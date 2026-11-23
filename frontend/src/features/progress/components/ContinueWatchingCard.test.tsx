@@ -14,15 +14,16 @@ describe('ContinueWatchingCard', () => {
 
       const card = screen.getByRole('link');
       expect(card).toHaveTextContent('1 min left');
-      expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('99.8%');
+      expect(barWidthPercent()).toBeCloseTo(99.83, 2);
+      expect(barWidthPercent()).toBeLessThan(100);
     });
 
-    it('shows early progress as a thin bar instead of an empty one', () => {
-      renderCard({ currentSeconds: 60, durationSeconds: 7200 });
+    it('shows the first second of a two-hour movie as a bar that is not empty', () => {
+      renderCard({ currentSeconds: 1, durationSeconds: 7200 });
 
-      const card = screen.getByRole('link');
-      expect(card).toHaveTextContent('Resume at 1:00');
-      expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('0.8%');
+      expect(screen.getByRole('link')).toHaveTextContent('Resume at 0:01');
+      expect(barWidthPercent()).toBeGreaterThan(0);
+      expect(barWidthPercent()).toBeCloseTo(0.0139, 4);
     });
   });
 
@@ -56,6 +57,11 @@ describe('ContinueWatchingCard', () => {
     });
   });
 });
+
+/** The width of the bar of the share watched, in percent. */
+function barWidthPercent(): number {
+  return Number.parseFloat(screen.getByRole('link').querySelector<HTMLElement>('[style]')?.style.width ?? '');
+}
 
 function renderCard(progress: Pick<PlaybackProgress, 'currentSeconds' | 'durationSeconds'>) {
   const item: ContinueWatchingItem = {

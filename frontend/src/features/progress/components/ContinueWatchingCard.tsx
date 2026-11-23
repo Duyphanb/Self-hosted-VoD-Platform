@@ -10,7 +10,7 @@ interface ResumeDetails {
   position: string;
   /** Null when the duration is unknown, or when nothing is left. */
   timeLeft: string | null;
-  /** Share of the video watched, 0-100 to one decimal; null when the duration is unknown. */
+  /** Share of the video watched, 0-100, unrounded; null when the duration is unknown. */
   percentWatched: number | null;
 }
 
@@ -58,8 +58,8 @@ function resumeDetails(progress: PlaybackProgress): ResumeDetails {
   return {
     position: formatPlaybackPosition(position),
     timeLeft: remaining > 0 ? formatTimeLeft(remaining) : null,
-    // Rounded down to one decimal: early progress still shows, and the bar is full only at the end.
-    percentWatched: Math.floor((position / duration) * 1000) / 10
+    // Unrounded, so any progress shows and only the end fills the bar.
+    percentWatched: (position / duration) * 100
   };
 }
 

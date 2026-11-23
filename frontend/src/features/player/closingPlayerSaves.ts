@@ -1,10 +1,14 @@
-/** How long the watch page waits at most for the saves of a player that just closed. */
+/** How long, from the moment a player closes, a new visit may wait for that player's saves. */
 export const CLOSING_SAVE_WAIT_MS = 3_000;
 
 /**
  * The saves still running or queued in players that closed, per viewer and movie. A player sends its last
  * save as it unmounts, possibly queued behind a save in flight; a new visit of the same movie that asked for
  * the playback info before those saves land would resume at an older position (ADR-011 D11, D13).
+ *
+ * Each entry settles when its saves are done, or `CLOSING_SAVE_WAIT_MS` after the player closed, whichever
+ * comes first, and then leaves the registry. Every later wait of the same visit (Retry, Check again, the
+ * automatic recheck) therefore uses only the time that is left.
  */
 const closingSaves = new Map<string, Set<Promise<void>>>();
 
@@ -12,21 +16,27 @@ const closingSaves = new Map<string, Set<Promise<void>>>();
 export function registerClosingPlayerSaves(movieId: string, userId: string, saved: Promise<void>): void {
   const key = closingKey(movieId, userId);
   const saves = closingSaves.get(key) ?? new Set<Promise<void>>();
-  saves.add(saved);
+  const doneOrExpired = new Promise<void>((resolve) => {
+    const expiry = setTimeout(resolve, CLOSING_SAVE_WAIT_MS);
+    const finish = () => {
+      clearTimeout(expiry);
+      resolve();
+    };
+    saved.then(finish, finish);
+  });
+  saves.add(doneOrExpired);
   closingSaves.set(key, saves);
-  const release = () => {
-    saves.delete(saved);
+  void doneOrExpired.then(() => {
+    saves.delete(doneOrExpired);
     if (saves.size === 0 && closingSaves.get(key) === saves) {
       closingSaves.delete(key);
     }
-  };
-  saved.then(release, release);
+  });
 }
 
 /**
- * Waits until the closed players' saves for this viewer and movie are done, for at most
- * `CLOSING_SAVE_WAIT_MS`, so a stalled save never blocks playback. Another viewer never waits, and an
- * aborted request stops waiting at once.
+ * Waits until the closed players' saves for this viewer and movie are done or have expired. Another viewer
+ * never waits, and an aborted request stops waiting at once.
  */
 export async function waitForClosingPlayerSaves(
   movieId: string,
@@ -37,17 +47,14 @@ export async function waitForClosingPlayerSaves(
   if (!saves || saves.size === 0 || signal?.aborted) {
     return;
   }
-  let timer: ReturnType<typeof setTimeout> | undefined;
   let stopWaiting: () => void = () => undefined;
-  const limit = new Promise<void>((resolve) => {
+  const aborted = new Promise<void>((resolve) => {
     stopWaiting = () => resolve();
-    timer = setTimeout(stopWaiting, CLOSING_SAVE_WAIT_MS);
     signal?.addEventListener('abort', stopWaiting, { once: true });
   });
   try {
-    await Promise.race([Promise.allSettled([...saves]), limit]);
+    await Promise.race([Promise.all([...saves]), aborted]);
   } finally {
-    clearTimeout(timer);
     signal?.removeEventListener('abort', stopWaiting);
   }
 }

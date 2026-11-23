@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from '../../auth/AuthContext';
 import * as authApi from '../../auth/authApi';
 import { AUTH_GENERATION_STORAGE_KEY, createAuthSession } from '../../auth/authStorage';
 import { movieKeys, type MovieDetail } from '../../movies/moviesApi';
+import { registerClosingPlayerSaves } from '../closingPlayerSaves';
 import type { HlsPlayerProps } from '../HlsPlayer';
 import type { PlaybackInfo } from '../playbackApi';
 
@@ -132,6 +133,25 @@ describe('WatchPage through AppRoutes', () => {
       expect(screen.getByRole('application', { name: PLAYER_NAME })).toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       expect(player.mounts).toBe(1);
+    });
+  });
+
+  describe('a player of this movie that just closed (ADR-011 D11)', () => {
+    it('asks for the playback info only after that player\'s last save is done', async () => {
+      let releaseSave: () => void = () => undefined;
+      registerClosingPlayerSaves(MOVIE_ID, VIEWER.id, new Promise<void>((resolve) => {
+        releaseSave = resolve;
+      }));
+
+      renderWatchPage();
+      await waitFor(() => expect(movieRequests()).toBe(1), LOAD_TIMEOUT);
+      await renderQueryNotifications();
+      expect(playbackRequests()).toBe(0);
+
+      releaseSave();
+
+      expect(await screen.findByRole('application', { name: PLAYER_NAME }, LOAD_TIMEOUT)).toBeInTheDocument();
+      expect(playbackRequests()).toBe(1);
     });
   });
 

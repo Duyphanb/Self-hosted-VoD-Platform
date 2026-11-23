@@ -133,8 +133,14 @@ describe('ProgressSaver', () => {
   describe('whenIdle', () => {
     it('resolves at once when no save is running', async () => {
       const harness = createHarness();
+      let idle = false;
 
-      await expect(harness.saver.whenIdle()).resolves.toBeUndefined();
+      void harness.saver.whenIdle().then(() => {
+        idle = true;
+      });
+      await flushPromises();
+
+      expect(idle).toBe(true);
     });
 
     it('resolves only after the running save and the pending snapshot are both done', async () => {

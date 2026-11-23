@@ -94,8 +94,8 @@ describe('ContinueWatchingPage through AppRoutes', () => {
 
       const [firstCard] = await findCards();
       const bar = firstCard.querySelector<HTMLElement>('[style]');
-      // 754 of 3600 seconds is 20.94%, rounded down to one decimal.
-      expect(bar?.style.width).toBe('20.9%');
+      // 754 of 3600 seconds is 20.94%.
+      expect(Number.parseFloat(bar?.style.width ?? '')).toBeCloseTo(20.94, 2);
       expect(bar?.closest('[aria-hidden="true"]')).not.toBeNull();
     });
 

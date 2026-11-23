@@ -32,7 +32,8 @@ describe('fetchPlaybackInfoForVisit', () => {
   it('asks at once when no player of this movie is closing', async () => {
     const requests: string[] = [];
 
-    await fetchPlaybackInfoForVisit(fakeClient(requests), MOVIE_ID);
+    void fetchPlaybackInfoForVisit(fakeClient(requests), MOVIE_ID);
+    await flushMicrotasks();
 
     expect(requests).toEqual([`/movies/${MOVIE_ID}/playback`]);
   });
