@@ -42,7 +42,7 @@ export function AppLayout() {
           <nav
             aria-busy={isInitializing}
             aria-label="Primary navigation"
-            className="flex min-h-5 items-center gap-4 whitespace-nowrap text-sm"
+            className="flex min-h-5 flex-wrap items-center gap-x-4 gap-y-2 whitespace-nowrap text-sm"
           >
             {!isInitializing && (isAuthenticated || isLoggingOut) ? (
               <>

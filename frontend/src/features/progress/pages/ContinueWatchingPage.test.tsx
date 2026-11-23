@@ -64,12 +64,14 @@ describe('ContinueWatchingPage through AppRoutes', () => {
       expect(screen.getByText('2 movies')).toBeInTheDocument();
     });
 
-    it('links each card to the watch page of its movie', async () => {
+    it('links each card to the watch page of its movie, named by its title and resume details', async () => {
       renderPage();
 
       const cards = await findCards();
       expect(cards[0]).toHaveAttribute('href', `/movies/${FIRST_MOVIE_ID}/watch`);
       expect(cards[1]).toHaveAttribute('href', `/movies/${SECOND_MOVIE_ID}/watch`);
+      // The poster repeats the title but is hidden, so the title is read once.
+      expect(cards[0]).toHaveAccessibleName('The Long Night Resume at 12:34 48 min left');
     });
 
     it('draws the share watched as a bar hidden from assistive technology', async () => {
