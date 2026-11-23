@@ -1,4 +1,4 @@
-import { type ReactNode, useRef } from 'react';
+import { type FocusEvent, type ReactNode, type RefObject, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { secondaryButtonClass } from '../../../components/buttonStyles';
 import { EmptyState, ErrorState, LoadingState } from '../../../components/StateViews';
@@ -22,9 +22,31 @@ export function ContinueWatchingPage() {
   // cleared query then runs again under the new session.
   useAuth();
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const { data, error, isError, isFetching, refetch } = useContinueWatching();
+  const listRef = useRef<HTMLUListElement>(null);
+  // The path of the card link that last had focus.
+  const focusedCardPath = useRef<string | null>(null);
+  const { data, error, isError, isFetching, fetchStatus, refetch } = useContinueWatching();
   // A request cancelled by a sign-in change is not an error: it runs again under the new session.
   const failed = isError && !(error instanceof AuthenticationSupersededError);
+  // TanStack Query does not start a request while the browser is offline; it starts once the connection is back.
+  const offline = !data && !failed && fetchStatus === 'paused';
+
+  // A refresh can remove the card that has focus, for example a movie finished on another device. Focus then
+  // moves to the page heading instead of being lost.
+  useEffect(() => {
+    const path = focusedCardPath.current;
+    if (path === null || document.activeElement !== document.body) {
+      return;
+    }
+    focusedCardPath.current = null;
+    if (!cardPaths(listRef.current).includes(path)) {
+      headingRef.current?.focus({ preventScroll: true });
+    }
+  }, [data]);
+
+  const rememberFocusedCard = (event: FocusEvent<HTMLUListElement>) => {
+    focusedCardPath.current = event.target.getAttribute('href');
+  };
 
   // Retry swaps its button for the loading state or the list, so focus moves to the page heading.
   const retry = () => {
@@ -42,6 +64,8 @@ export function ContinueWatchingPage() {
         title="Continue watching could not be loaded"
       />
     );
+  } else if (offline) {
+    content = <EmptyState description="The list loads when the connection is back." title="You are offline" />;
   } else if (!data) {
     content = (
       <LoadingState label="Loading continue watching…">
@@ -55,7 +79,7 @@ export function ContinueWatchingPage() {
       </EmptyState>
     );
   } else {
-    content = <ContinueWatchingGrid items={data} />;
+    content = <ContinueWatchingGrid items={data} listRef={listRef} onFocus={rememberFocusedCard} />;
   }
 
   return (
@@ -70,9 +94,9 @@ export function ContinueWatchingPage() {
           >
             Continue watching
           </h1>
-          {/* Present from the first render, so the count is announced when the list arrives. */}
+          {/* Present from the first render, so the count or the offline state is announced when it changes. */}
           <p aria-atomic="true" aria-live="polite" className="text-sm text-slate-400">
-            {data ? movieCount(data.length) : ''}
+            {statusText(data, offline)}
           </p>
         </div>
         <p className="text-sm text-slate-300">
@@ -85,9 +109,15 @@ export function ContinueWatchingPage() {
   );
 }
 
-function ContinueWatchingGrid({ items }: { items: ContinueWatchingItem[] }) {
+interface ContinueWatchingGridProps {
+  items: ContinueWatchingItem[];
+  listRef: RefObject<HTMLUListElement>;
+  onFocus(event: FocusEvent<HTMLUListElement>): void;
+}
+
+function ContinueWatchingGrid({ items, listRef, onFocus }: ContinueWatchingGridProps) {
   return (
-    <ul className={movieGridClass}>
+    <ul className={movieGridClass} onFocus={onFocus} ref={listRef}>
       {items.map((item) => (
         <li className="min-w-0" key={item.movie.id}>
           <ContinueWatchingCard item={item} />
@@ -114,6 +144,13 @@ function RefreshFailedNotice({ isRetrying, onRetry }: RefreshFailedNoticeProps) 
   );
 }
 
-function movieCount(count: number): string {
-  return count === 1 ? '1 movie' : `${count} movies`;
+function statusText(items: ContinueWatchingItem[] | undefined, offline: boolean): string {
+  if (items) {
+    return items.length === 1 ? '1 movie' : `${items.length} movies`;
+  }
+  return offline ? 'Offline' : '';
+}
+
+function cardPaths(list: HTMLUListElement | null): Array<string | null> {
+  return Array.from(list?.querySelectorAll('a') ?? [], (link) => link.getAttribute('href'));
 }

@@ -58,7 +58,8 @@ function resumeDetails(progress: PlaybackProgress): ResumeDetails {
   return {
     position: formatPlaybackPosition(position),
     timeLeft: remaining > 0 ? formatTimeLeft(remaining) : null,
-    percentWatched: Math.round((position / duration) * 100)
+    // Rounded down, so the bar is full only at the end and an unfinished movie never looks finished.
+    percentWatched: Math.floor((position / duration) * 100)
   };
 }
 

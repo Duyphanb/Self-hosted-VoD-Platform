@@ -13,6 +13,7 @@ import { progressKeys } from '../continueWatchingQueries';
 
 const FIRST_MOVIE_ID = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
 const SECOND_MOVIE_ID = '7334b2f1-664f-4bc1-b8f1-10de58c1d74a';
+const THIRD_MOVIE_ID = '5a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const VIEWER: UserProfile = {
   id: '3fcf25c2-f096-4462-ae63-4ba4702a9078',
   email: 'viewer@example.com',
@@ -64,6 +65,20 @@ describe('ContinueWatchingPage through AppRoutes', () => {
       expect(screen.getByText('2 movies')).toBeInTheDocument();
     });
 
+    it('keeps the order of the API, never sorting by ID or title', async () => {
+      // Most recently watched first, as the API orders them; neither the IDs nor the titles are in this order.
+      answerList = () => jsonResponse([
+        item(SECOND_MOVIE_ID, 'Beta', { lastPlayedAt: '2026-11-22T12:00:00Z' }),
+        item(THIRD_MOVIE_ID, 'Charlie', { lastPlayedAt: '2026-11-22T11:00:00Z' }),
+        item(FIRST_MOVIE_ID, 'Alpha', { lastPlayedAt: '2026-11-22T10:00:00Z' })
+      ]);
+
+      renderPage();
+
+      const titles = (await findCards()).map((card) => within(card).getByRole('heading').textContent);
+      expect(titles).toEqual(['Beta', 'Charlie', 'Alpha']);
+    });
+
     it('links each card to the watch page of its movie, named by its title and resume details', async () => {
       renderPage();
 
@@ -79,7 +94,8 @@ describe('ContinueWatchingPage through AppRoutes', () => {
 
       const [firstCard] = await findCards();
       const bar = firstCard.querySelector<HTMLElement>('[style]');
-      expect(bar?.style.width).toBe('21%');
+      // 754 of 3600 seconds is 20.9%, rounded down.
+      expect(bar?.style.width).toBe('20%');
       expect(bar?.closest('[aria-hidden="true"]')).not.toBeNull();
     });
 
@@ -140,6 +156,31 @@ describe('ContinueWatchingPage through AppRoutes', () => {
         releaseList(jsonResponse([item(FIRST_MOVIE_ID, 'The Long Night')]));
       });
       await waitFor(() => expect(countRegion).toHaveTextContent('1 movie'));
+    });
+  });
+
+  describe('offline', () => {
+    afterEach(() => {
+      act(() => {
+        onlineManager.setOnline(true);
+      });
+    });
+
+    it('says that the browser is offline instead of loading, and loads once the connection is back', async () => {
+      onlineManager.setOnline(false);
+
+      renderPage();
+
+      expect(await screen.findByRole('heading', { level: 2, name: 'You are offline' }, LOAD_TIMEOUT))
+        .toBeInTheDocument();
+      expect(screen.queryByText('Loading continue watching…')).not.toBeInTheDocument();
+      expect(listRequests()).toBe(0);
+      act(() => {
+        onlineManager.setOnline(true);
+      });
+
+      expect(await findCards()).toHaveLength(2);
+      expect(screen.queryByRole('heading', { name: 'You are offline' })).not.toBeInTheDocument();
     });
   });
 
@@ -239,6 +280,53 @@ describe('ContinueWatchingPage through AppRoutes', () => {
 
       await waitFor(async () => expect(await findCards()).toHaveLength(1));
       expect(listRequests()).toBe(2);
+    });
+
+    it('moves focus to the page heading when a refresh removes the focused card', async () => {
+      const { queryClient } = renderPage();
+      const [firstCard] = await findCards();
+      firstCard.focus();
+      // The first movie was finished on another device.
+      answerList = () => jsonResponse([item(SECOND_MOVIE_ID, 'Second Movie')]);
+
+      await act(async () => {
+        await queryClient.refetchQueries({ queryKey: progressKeys.continueWatching() });
+      });
+      await renderQueryNotifications();
+
+      expect(await findCards()).toHaveLength(1);
+      expect(screen.getByRole('heading', { level: 1, name: 'Continue watching' })).toHaveFocus();
+    });
+
+    it('leaves focus on a card that a refresh keeps', async () => {
+      const { queryClient } = renderPage();
+      const cards = await findCards();
+      cards[1].focus();
+      answerList = () => jsonResponse([item(SECOND_MOVIE_ID, 'Second Movie')]);
+
+      await act(async () => {
+        await queryClient.refetchQueries({ queryKey: progressKeys.continueWatching() });
+      });
+      await renderQueryNotifications();
+
+      const [remainingCard] = await findCards();
+      expect(remainingCard).toHaveFocus();
+    });
+
+    it('does not take focus when the viewer had moved it away from a card that a refresh keeps', async () => {
+      const { queryClient } = renderPage();
+      const cards = await findCards();
+      cards[1].focus();
+      cards[1].blur();
+      answerList = () => jsonResponse([item(SECOND_MOVIE_ID, 'Second Movie')]);
+
+      await act(async () => {
+        await queryClient.refetchQueries({ queryKey: progressKeys.continueWatching() });
+      });
+      await renderQueryNotifications();
+
+      expect(await findCards()).toHaveLength(1);
+      expect(document.body).toHaveFocus();
     });
 
     it('fetches the list again when the same viewer gets a new session', async () => {

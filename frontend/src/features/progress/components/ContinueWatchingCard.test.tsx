@@ -28,6 +28,14 @@ describe('ContinueWatchingCard with values the server does not list today', () =
     expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('100%');
   });
 
+  it('never shows a full bar for a position one second before the end', () => {
+    renderCard({ currentSeconds: 599, durationSeconds: 600 });
+
+    const card = screen.getByRole('link');
+    expect(card).toHaveTextContent('1 min left');
+    expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('99%');
+  });
+
   it('keeps the bar and the position inside the duration when the position is beyond it', () => {
     renderCard({ currentSeconds: 900, durationSeconds: 600 });
 

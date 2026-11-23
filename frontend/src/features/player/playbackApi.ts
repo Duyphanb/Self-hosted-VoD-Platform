@@ -19,6 +19,15 @@ export interface ProgressSave {
   finished: boolean;
 }
 
+/** How long a playback request waits at most for the movie's running progress saves. */
+export const RUNNING_SAVE_WAIT_MS = 3_000;
+
+/**
+ * Regular progress saves still running, per movie. A player that closes sends its last save as it unmounts;
+ * a playback request for the same movie that starts before that save lands would read the older position.
+ */
+const runningSaves = new Map<string, Set<Promise<unknown>>>();
+
 export class InvalidPlaybackResponseError extends Error {
   constructor() {
     super('Server returned invalid playback information');
@@ -36,6 +45,8 @@ export async function fetchPlaybackInfo(
   signal?: AbortSignal,
   identity?: AuthenticationSnapshot
 ): Promise<PlaybackInfo> {
+  // The resume position must include the last save of a player that just closed (ADR-011 D11).
+  await waitForRunningSaves(movieId, signal);
   // With `identity`, the request belongs to that viewer and is never sent with another account's token.
   const response = await client.request<unknown>(`/movies/${encodeURIComponent(movieId)}/playback`, {
     authenticated: true,
@@ -59,12 +70,51 @@ export async function saveProgress(
   save: ProgressSave,
   identity: AuthenticationSnapshot
 ): Promise<void> {
-  await client.request<unknown>(progressPath(movieId), {
+  const request = client.request<unknown>(progressPath(movieId), {
     method: 'PUT',
     authenticated: true,
     identity,
     json: save
   });
+  trackRunningSave(movieId, request);
+  await request;
+}
+
+function trackRunningSave(movieId: string, request: Promise<unknown>): void {
+  const saves = runningSaves.get(movieId) ?? new Set<Promise<unknown>>();
+  saves.add(request);
+  runningSaves.set(movieId, saves);
+  const release = () => {
+    saves.delete(request);
+    if (saves.size === 0 && runningSaves.get(movieId) === saves) {
+      runningSaves.delete(movieId);
+    }
+  };
+  request.then(release, release);
+}
+
+/**
+ * Waits until the movie's running saves settle, whether they succeed or fail, for at most
+ * `RUNNING_SAVE_WAIT_MS`, so a stalled save never blocks playback. An aborted request stops waiting at once.
+ */
+async function waitForRunningSaves(movieId: string, signal?: AbortSignal): Promise<void> {
+  const saves = runningSaves.get(movieId);
+  if (!saves || saves.size === 0 || signal?.aborted) {
+    return;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopWaiting: () => void = () => undefined;
+  const limit = new Promise<void>((resolve) => {
+    stopWaiting = () => resolve();
+    timer = setTimeout(stopWaiting, RUNNING_SAVE_WAIT_MS);
+    signal?.addEventListener('abort', stopWaiting, { once: true });
+  });
+  try {
+    await Promise.race([Promise.allSettled([...saves]), limit]);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', stopWaiting);
+  }
 }
 
 /** A best-effort save at page unload: `keepalive`, the current token, no refresh or retry (ADR-011 D13). */
