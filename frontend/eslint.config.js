@@ -36,6 +36,7 @@ export default defineConfig([
     files: [
       'src/features/auth/**/*',
       'src/features/player/**/*',
+      'src/features/progress/**/*',
       'src/lib/api/**/*',
       'src/test/fakeHls.ts',
       'e2e/**/*',

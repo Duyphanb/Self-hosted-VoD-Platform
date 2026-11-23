@@ -162,7 +162,7 @@ function decodePageMeta(value: unknown): PageMeta | null {
 }
 
 // Checks the shape of every contract field. An unknown status string decodes to UNKNOWN_ENUM_VALUE.
-function decodeMovieSummary(value: unknown): MovieSummary | null {
+export function decodeMovieSummary(value: unknown): MovieSummary | null {
   if (!isRecord(value)
     || !isCanonicalUuid(value.id)
     || typeof value.title !== 'string'
@@ -230,7 +230,7 @@ function decodeMovieCredit(value: unknown): MovieCredit | null {
 }
 
 // Undefined marks an invalid value, because null is a valid "no progress".
-function decodePlaybackProgress(value: unknown): PlaybackProgress | undefined {
+export function decodePlaybackProgress(value: unknown): PlaybackProgress | undefined {
   if (!isRecord(value)
     || !isCanonicalUuid(value.movieId)
     || !nonNegativeInteger(value.currentSeconds)

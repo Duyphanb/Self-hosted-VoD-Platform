@@ -17,6 +17,7 @@ import { FakeLoaderXhr } from '../../test/fakeLoaderXhr';
 import { AuthProvider, useAuth } from '../auth/AuthContext';
 import * as authApi from '../auth/authApi';
 import { createAuthSession } from '../auth/authStorage';
+import { progressKeys } from '../progress/continueWatchingQueries';
 import { HlsPlayer } from './HlsPlayer';
 import type { PlaybackInfo } from './playbackApi';
 
@@ -540,6 +541,26 @@ describe('HlsPlayer', () => {
       expect(FakeHls.latest().destroyed).toBe(false);
     });
 
+    it('marks the continue-watching list stale after a successful save, not after a failed one', async () => {
+      const { video, queryClient } = await renderPlayer();
+      queryClient.setQueryData(progressKeys.continueWatching(), []);
+      startPlaying(video, 5);
+      fetchMock.mockImplementationOnce(async () => jsonResponse(apiError(500, 'INTERNAL_ERROR'), 500));
+
+      setPlayback(video, { time: 20, paused: true });
+      fireEvent(video, new Event('pause'));
+      await settle();
+
+      expect(progressSaves()).toEqual([save(20)]);
+      expect(queryClient.getQueryState(progressKeys.continueWatching())?.isInvalidated).toBe(false);
+
+      fireEvent(video, new Event('seeked'));
+      await settle();
+
+      expect(progressSaves()).toEqual([save(20), save(20)]);
+      expect(queryClient.getQueryState(progressKeys.continueWatching())?.isInvalidated).toBe(true);
+    });
+
     it('reloads with the new asset after 409 VIDEO_ASSET_NOT_CURRENT and saves for that asset', async () => {
       const reloadPlaybackInfo = vi.fn(async () => playbackInfo({ videoAssetId: NEW_ASSET_ID }));
       const { video } = await renderPlayer({ reloadPlaybackInfo });
@@ -776,8 +797,9 @@ async function renderPlayer({
 }: RenderOptions = {}) {
   const session = createAuthSession(authResponse(ALICE, 'alice-token-1'));
   installCookieSession(session, window.localStorage);
+  const queryClient = new QueryClient();
   const view = render(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <AuthProvider redirectToLogin={() => undefined}>
         <SessionControls />
         <MountedOnceSignedIn>
@@ -790,7 +812,7 @@ async function renderPlayer({
   if (expectHls) {
     await waitFor(() => expect(FakeHls.instances).toHaveLength(1));
   }
-  return { video, unmount: view.unmount };
+  return { video, unmount: view.unmount, queryClient };
 }
 
 /** Mounts the player after sign-in and keeps it mounted, so the player itself sees identity changes. */

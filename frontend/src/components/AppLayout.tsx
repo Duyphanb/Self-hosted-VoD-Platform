@@ -49,6 +49,7 @@ export function AppLayout() {
                 {isAuthenticated ? (
                   <>
                     <NavLink className={navLinkClass} to="/movies">Movies</NavLink>
+                    <NavLink className={navLinkClass} to="/continue-watching">Continue watching</NavLink>
                     <NavLink className={navLinkClass} to="/account">Account</NavLink>
                     {isAdmin ? <NavLink className={navLinkClass} to="/admin/movies">Admin</NavLink> : null}
                   </>
