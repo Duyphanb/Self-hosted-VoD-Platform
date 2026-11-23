@@ -130,6 +130,59 @@ describe('ProgressSaver', () => {
     });
   });
 
+  describe('whenIdle', () => {
+    it('resolves at once when no save is running', async () => {
+      const harness = createHarness();
+      let idle = false;
+
+      void harness.saver.whenIdle().then(() => {
+        idle = true;
+      });
+      await flushPromises();
+
+      expect(idle).toBe(true);
+    });
+
+    it('resolves only after the running save and the pending snapshot are both done', async () => {
+      const harness = createHarness();
+      let idle = false;
+      harness.saver.request(position(40));
+      harness.saver.request(position(57));
+      void harness.saver.whenIdle().then(() => {
+        idle = true;
+      });
+
+      await harness.completeSave();
+      expect(harness.save).toHaveBeenLastCalledWith(position(57));
+      expect(idle).toBe(false);
+
+      await harness.completeSave();
+      expect(idle).toBe(true);
+    });
+
+    it('resolves after a failed save with nothing pending', async () => {
+      const harness = createHarness();
+      harness.saver.request(position(40));
+      const idle = harness.saver.whenIdle();
+
+      await harness.failSave(new TypeError('Failed to fetch'));
+
+      await expect(idle).resolves.toBeUndefined();
+    });
+
+    it('resolves when the pending snapshot equals the save that just succeeded', async () => {
+      const harness = createHarness();
+      harness.saver.request(position(40));
+      harness.saver.request(position(40));
+      const idle = harness.saver.whenIdle();
+
+      await harness.completeSave();
+
+      await expect(idle).resolves.toBeUndefined();
+      expect(harness.save).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('unload saves', () => {
     it('sends the latest snapshot with keepalive even while a regular save is in flight', () => {
       const harness = createHarness();

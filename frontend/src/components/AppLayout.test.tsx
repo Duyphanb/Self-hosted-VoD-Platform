@@ -34,6 +34,7 @@ describe('AppLayout auth navigation', () => {
     expect(await screen.findByRole('link', { name: 'Sign in' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Register' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Movies' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Continue watching' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Account' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
@@ -45,6 +46,7 @@ describe('AppLayout auth navigation', () => {
 
     expect(await screen.findByRole('link', { name: 'Account' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Movies' })).toHaveAttribute('href', '/movies');
+    expect(screen.getByRole('link', { name: 'Continue watching' })).toHaveAttribute('href', '/continue-watching');
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeEnabled();

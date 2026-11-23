@@ -42,13 +42,14 @@ export function AppLayout() {
           <nav
             aria-busy={isInitializing}
             aria-label="Primary navigation"
-            className="flex min-h-5 items-center gap-4 whitespace-nowrap text-sm"
+            className="flex min-h-5 flex-wrap items-center gap-x-4 gap-y-2 whitespace-nowrap text-sm"
           >
             {!isInitializing && (isAuthenticated || isLoggingOut) ? (
               <>
                 {isAuthenticated ? (
                   <>
                     <NavLink className={navLinkClass} to="/movies">Movies</NavLink>
+                    <NavLink className={navLinkClass} to="/continue-watching">Continue watching</NavLink>
                     <NavLink className={navLinkClass} to="/account">Account</NavLink>
                     {isAdmin ? <NavLink className={navLinkClass} to="/admin/movies">Admin</NavLink> : null}
                   </>

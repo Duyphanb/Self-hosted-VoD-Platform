@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from '../../auth/AuthContext';
 import * as authApi from '../../auth/authApi';
 import { AUTH_GENERATION_STORAGE_KEY, createAuthSession } from '../../auth/authStorage';
 import { movieKeys, type MovieDetail } from '../../movies/moviesApi';
+import { registerClosingPlayerSaves } from '../closingPlayerSaves';
 import type { HlsPlayerProps } from '../HlsPlayer';
 import type { PlaybackInfo } from '../playbackApi';
 
@@ -132,6 +133,52 @@ describe('WatchPage through AppRoutes', () => {
       expect(screen.getByRole('application', { name: PLAYER_NAME })).toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       expect(player.mounts).toBe(1);
+    });
+  });
+
+  describe('a player of this movie that just closed (ADR-011 D11)', () => {
+    it('asks for the playback info only after that player\'s last save is done', async () => {
+      let releaseSave: () => void = () => undefined;
+      registerClosingPlayerSaves(MOVIE_ID, VIEWER.id, new Promise<void>((resolve) => {
+        releaseSave = resolve;
+      }));
+
+      renderWatchPage();
+      await waitFor(() => expect(movieRequests()).toBe(1), LOAD_TIMEOUT);
+      await renderQueryNotifications();
+      expect(playbackRequests()).toBe(0);
+
+      releaseSave();
+
+      expect(await screen.findByRole('application', { name: PLAYER_NAME }, LOAD_TIMEOUT)).toBeInTheDocument();
+      expect(playbackRequests()).toBe(1);
+    });
+
+    it('mounts the player only with playback info fetched for this visit, never with a cached answer', async () => {
+      answers.playback = () => jsonResponse(playbackInfo({ resumeSeconds: 40 }));
+      renderWatchPage(`/movies/${MOVIE_ID}/watch`, { withLeaveAndReturn: true });
+      await screen.findByRole('application', { name: PLAYER_NAME }, LOAD_TIMEOUT);
+      let releasePlayback: () => void = () => undefined;
+      answers.playback = () => new Promise<Response>((resolve) => {
+        releasePlayback = () => resolve(jsonResponse(playbackInfo({ resumeSeconds: 57 })));
+      });
+      const mountsBefore = player.mounts;
+
+      // Leave and come back before the cache drops the earlier answer, which it does in a later task.
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: 'Leave the watch page' }));
+      });
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: 'Return to the watch page' }));
+      });
+      await waitFor(() => expect(playbackRequests()).toBe(2));
+      await renderQueryNotifications();
+      expect(player.mounts).toBe(mountsBefore);
+
+      releasePlayback();
+
+      await waitFor(() => expect(player.mounts).toBe(mountsBefore + 1));
+      expect(player.renders.at(-1)?.playbackInfo.resumeSeconds).toBe(57);
     });
   });
 
@@ -537,7 +584,7 @@ describe('WatchPage through AppRoutes', () => {
 
 function renderWatchPage(
   path = `/movies/${MOVIE_ID}/watch`,
-  { withSignInOtherViewer = false, withSecondMovieLink = false } = {}
+  { withSignInOtherViewer = false, withSecondMovieLink = false, withLeaveAndReturn = false } = {}
 ) {
   installCookieSession(
     createAuthSession({ user: VIEWER, accessToken: 'access-token', expiresInSeconds: 900 }),
@@ -550,6 +597,7 @@ function renderWatchPage(
         <AuthProvider redirectToLogin={() => undefined}>
           {withSignInOtherViewer ? <SignInOtherViewer /> : null}
           {withSecondMovieLink ? <GoToSecondMovie /> : null}
+          {withLeaveAndReturn ? <LeaveAndReturn /> : null}
           <AppRoutes />
         </AuthProvider>
       </QueryClientProvider>
@@ -567,6 +615,17 @@ function GoToSecondMovie() {
         Go to the second movie
       </button>
       <button onClick={() => navigate(-1)} type="button">Go back</button>
+    </>
+  );
+}
+
+/** Leaves the watch page for the movie detail page and comes back, as a viewer who reopens the movie. */
+function LeaveAndReturn() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button onClick={() => navigate(`/movies/${MOVIE_ID}`)} type="button">Leave the watch page</button>
+      <button onClick={() => navigate(`/movies/${MOVIE_ID}/watch`)} type="button">Return to the watch page</button>
     </>
   );
 }

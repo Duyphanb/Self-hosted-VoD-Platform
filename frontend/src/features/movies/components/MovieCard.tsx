@@ -4,8 +4,9 @@ import { PosterArt } from './PosterArt';
 
 const MAX_CARD_GENRES = 2;
 
-const cardClass = 'flex h-full flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900 transition '
-  + 'hover:border-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 '
+/** The frame of every movie card: border, hover state and keyboard focus ring. */
+export const movieCardClass = 'flex h-full flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-900 '
+  + 'transition hover:border-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 '
   + 'focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
 
 /**
@@ -15,7 +16,7 @@ const cardClass = 'flex h-full flex-col overflow-hidden rounded-lg border border
 export function MovieCard({ movie }: { movie: MovieSummary }) {
   const genres = movie.genres.slice(0, MAX_CARD_GENRES);
   return (
-    <Link className={cardClass} to={movieDetailPath(movie.id)}>
+    <Link className={movieCardClass} to={movieDetailPath(movie.id)}>
       <PosterArt movie={movie} />
       <div className="grid gap-1 p-3">
         <h2 className="line-clamp-2 break-words text-sm font-semibold leading-5 text-white">

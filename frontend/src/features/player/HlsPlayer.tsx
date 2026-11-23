@@ -1,7 +1,10 @@
+import { useQueryClient } from '@tanstack/react-query';
 import Hls from 'hls.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AuthenticationSupersededError, type AuthenticationSnapshot } from '../../lib/api/client';
 import { useApiClient, useAuth } from '../auth/AuthContext';
+import { refreshContinueWatching } from '../progress/continueWatchingQueries';
+import { registerClosingPlayerSaves } from './closingPlayerSaves';
 import { saveProgress, saveProgressOnUnload, type PlaybackInfo } from './playbackApi';
 import { startPlaybackRun, type PlayerMemory, type PlayerSource, type PlayerStatus } from './playbackRun';
 import { ProgressSaver } from './progressSaver';
@@ -49,6 +52,7 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
   // Subscribing to the session re-renders the player when the signed-in identity changes.
   useAuth();
   const client = useApiClient();
+  const queryClient = useQueryClient();
   const currentIdentity = client.getAuthenticationSnapshot();
   const [playerIdentity] = useState<AuthenticationSnapshot | null>(currentIdentity);
   const [supported] = useState(() => Hls.isSupported());
@@ -76,7 +80,10 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
         if (!playerIdentity) {
           return Promise.reject(new AuthenticationSupersededError());
         }
-        return saveProgress(client, movieId, snapshot, playerIdentity);
+        return saveProgress(client, movieId, snapshot, playerIdentity).then(() => {
+          // The saved position changes the continue-watching list; an open list fetches it again.
+          void refreshContinueWatching(queryClient);
+        });
       },
       saveOnUnload: (snapshot) => {
         if (playerIdentity) {
@@ -132,6 +139,14 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
       reloadPlaybackInfo: () => reloadPlaybackInfoRef.current()
     });
   }, [assetNotCurrentHandler, client, identityLost, playerIdentity, reload, saver, source, supported]);
+
+  // Declared after the playback run, so on unmount it runs after the run queued its last save. A new visit
+  // of this movie waits for these saves before it reads the resume position.
+  useEffect(() => () => {
+    if (playerIdentity) {
+      registerClosingPlayerSaves(movieId, playerIdentity.userId, saver.whenIdle());
+    }
+  }, [movieId, playerIdentity, saver]);
 
   const shownStatus = displayedStatus(supported, identityLost, signedOut, status);
   const fatalMessage = FATAL_MESSAGES[shownStatus];

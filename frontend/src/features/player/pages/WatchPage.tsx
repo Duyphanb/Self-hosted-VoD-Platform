@@ -33,6 +33,12 @@ type WatchPageState =
   | { kind: 'notReady'; movie: MovieDetail; label: UnavailableLabel }
   | { kind: 'ready'; movie: MovieDetail; playbackInfo: PlaybackInfo };
 
+/** Whether each query has answered since this visit started, as opposed to holding an older cached answer. */
+interface FetchedOnThisVisit {
+  movie: boolean;
+  playback: boolean;
+}
+
 interface QueryResult<T> {
   data: T | undefined;
   error: unknown;
@@ -56,7 +62,10 @@ export function WatchPage() {
   const pageRef = useRef<HTMLDivElement>(null);
   // Whether this visit already used its one automatic recheck of a 409; each new movie ID is a new visit.
   const recheckUsed = useRef(false);
-  const state = watchPageState(movieId, movie, playback, movie.isFetchedAfterMount);
+  const state = watchPageState(movieId, movie, playback, {
+    movie: movie.isFetchedAfterMount,
+    playback: playback.isFetchedAfterMount
+  });
 
   // The player's own requests belong to the viewer it was mounted for: a new identity gets a new player.
   const currentIdentity = apiClient.getAuthenticationSnapshot();
@@ -194,13 +203,15 @@ export function WatchPage() {
  * The page state from the route and both queries. A query whose session was replaced is treated as still
  * loading: the cache is cleared and the queries run again for the new identity. Once the movie and its
  * playback info are both known, only a not-found answer takes the player away: a failed background refetch
- * must not stop playback that works.
+ * must not stop playback that works. The player mounts only with playback info fetched on this visit: a
+ * cached answer of an earlier visit holds an older resume position, and the player keeps the position it
+ * mounted with.
  */
 function watchPageState(
   movieId: string,
   movie: QueryResult<MovieDetail>,
   playback: QueryResult<PlaybackInfo>,
-  movieFetchedOnThisVisit: boolean
+  fetchedOnThisVisit: FetchedOnThisVisit
 ): WatchPageState {
   if (!isCanonicalUuid(movieId)) {
     return { kind: 'notFound' };
@@ -210,7 +221,7 @@ function watchPageState(
   if (isMovieNotFound(movieError) || isMovieNotFound(playbackError)) {
     return { kind: 'notFound' };
   }
-  if (movie.data && playback.data && !playback.isError) {
+  if (movie.data && playback.data && !playback.isError && fetchedOnThisVisit.playback) {
     return { kind: 'ready', movie: movie.data, playbackInfo: playback.data };
   }
   if (movieError) {
@@ -219,7 +230,7 @@ function watchPageState(
   if (isVideoNotReady(playbackError)) {
     // The label comes from a movie answer fetched on this visit, never from an older cached one. A later
     // refresh, for example after a reconnect, keeps the label until its answer arrives.
-    return movie.data && movieFetchedOnThisVisit
+    return movie.data && fetchedOnThisVisit.movie
       ? { kind: 'notReady', movie: movie.data, label: unavailableLabel(movie.data) }
       : { kind: 'loading' };
   }
