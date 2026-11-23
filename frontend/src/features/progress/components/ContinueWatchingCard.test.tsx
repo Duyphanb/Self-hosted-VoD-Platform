@@ -7,41 +7,53 @@ import { ContinueWatchingCard } from './ContinueWatchingCard';
 
 const MOVIE_ID = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
 
-// The server lists only positions above 0 and below a known duration (ADR-011 D11). The contract still
-// allows the values below, so the card must stay correct for them.
-describe('ContinueWatchingCard with values the server does not list today', () => {
-  it('shows only where it resumes when the duration is 0', () => {
-    renderCard({ currentSeconds: 30, durationSeconds: 0 });
+describe('ContinueWatchingCard', () => {
+  describe('the bar of the share watched', () => {
+    it('never shows a full bar for a position one second before the end', () => {
+      renderCard({ currentSeconds: 599, durationSeconds: 600 });
 
-    const card = screen.getByRole('link');
-    expect(card).toHaveTextContent('Resume at 0:30');
-    expect(card).not.toHaveTextContent('left');
-    expect(card.querySelector('[style]')).toBeNull();
+      const card = screen.getByRole('link');
+      expect(card).toHaveTextContent('1 min left');
+      expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('99.8%');
+    });
+
+    it('shows early progress as a thin bar instead of an empty one', () => {
+      renderCard({ currentSeconds: 60, durationSeconds: 7200 });
+
+      const card = screen.getByRole('link');
+      expect(card).toHaveTextContent('Resume at 1:00');
+      expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('0.8%');
+    });
   });
 
-  it('shows no time left and a full bar when the position is at the end', () => {
-    renderCard({ currentSeconds: 600, durationSeconds: 600 });
+  // The server lists only positions above 0 and below a known duration (ADR-011 D11). The contract still
+  // allows the values below, so the card must stay correct for them.
+  describe('values the server does not list today', () => {
+    it('shows only where it resumes when the duration is 0', () => {
+      renderCard({ currentSeconds: 30, durationSeconds: 0 });
 
-    const card = screen.getByRole('link');
-    expect(card).toHaveTextContent('Resume at 10:00');
-    expect(card).not.toHaveTextContent('left');
-    expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('100%');
-  });
+      const card = screen.getByRole('link');
+      expect(card).toHaveTextContent('Resume at 0:30');
+      expect(card).not.toHaveTextContent('left');
+      expect(card.querySelector('[style]')).toBeNull();
+    });
 
-  it('never shows a full bar for a position one second before the end', () => {
-    renderCard({ currentSeconds: 599, durationSeconds: 600 });
+    it('shows no time left and a full bar when the position is at the end', () => {
+      renderCard({ currentSeconds: 600, durationSeconds: 600 });
 
-    const card = screen.getByRole('link');
-    expect(card).toHaveTextContent('1 min left');
-    expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('99%');
-  });
+      const card = screen.getByRole('link');
+      expect(card).toHaveTextContent('Resume at 10:00');
+      expect(card).not.toHaveTextContent('left');
+      expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('100%');
+    });
 
-  it('keeps the bar and the position inside the duration when the position is beyond it', () => {
-    renderCard({ currentSeconds: 900, durationSeconds: 600 });
+    it('keeps the bar and the position inside the duration when the position is beyond it', () => {
+      renderCard({ currentSeconds: 900, durationSeconds: 600 });
 
-    const card = screen.getByRole('link');
-    expect(card).toHaveTextContent('Resume at 10:00');
-    expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('100%');
+      const card = screen.getByRole('link');
+      expect(card).toHaveTextContent('Resume at 10:00');
+      expect(card.querySelector<HTMLElement>('[style]')?.style.width).toBe('100%');
+    });
   });
 });
 

@@ -94,8 +94,8 @@ describe('ContinueWatchingPage through AppRoutes', () => {
 
       const [firstCard] = await findCards();
       const bar = firstCard.querySelector<HTMLElement>('[style]');
-      // 754 of 3600 seconds is 20.9%, rounded down.
-      expect(bar?.style.width).toBe('20%');
+      // 754 of 3600 seconds is 20.94%, rounded down to one decimal.
+      expect(bar?.style.width).toBe('20.9%');
       expect(bar?.closest('[aria-hidden="true"]')).not.toBeNull();
     });
 
@@ -318,6 +318,22 @@ describe('ContinueWatchingPage through AppRoutes', () => {
       const cards = await findCards();
       cards[1].focus();
       cards[1].blur();
+      answerList = () => jsonResponse([item(SECOND_MOVIE_ID, 'Second Movie')]);
+
+      await act(async () => {
+        await queryClient.refetchQueries({ queryKey: progressKeys.continueWatching() });
+      });
+      await renderQueryNotifications();
+
+      expect(await findCards()).toHaveLength(1);
+      expect(document.body).toHaveFocus();
+    });
+
+    it('does not take focus when the viewer had moved it away from a card that a refresh then removes', async () => {
+      const { queryClient } = renderPage();
+      const [firstCard] = await findCards();
+      firstCard.focus();
+      firstCard.blur();
       answerList = () => jsonResponse([item(SECOND_MOVIE_ID, 'Second Movie')]);
 
       await act(async () => {

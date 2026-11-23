@@ -48,6 +48,15 @@ export function ContinueWatchingPage() {
     focusedCardPath.current = event.target.getAttribute('href');
   };
 
+  // The viewer moved focus out of the list, or to nothing, while the card is still shown: a later refresh
+  // must not take focus. A card that a refresh removes is no longer connected, so it stays remembered.
+  const forgetCardLeftByViewer = (event: FocusEvent<HTMLUListElement>) => {
+    const leftTheList = !event.currentTarget.contains(event.relatedTarget as Node | null);
+    if (leftTheList && event.target.isConnected) {
+      focusedCardPath.current = null;
+    }
+  };
+
   // Retry swaps its button for the loading state or the list, so focus moves to the page heading.
   const retry = () => {
     headingRef.current?.focus({ preventScroll: true });
@@ -79,7 +88,14 @@ export function ContinueWatchingPage() {
       </EmptyState>
     );
   } else {
-    content = <ContinueWatchingGrid items={data} listRef={listRef} onFocus={rememberFocusedCard} />;
+    content = (
+      <ContinueWatchingGrid
+        items={data}
+        listRef={listRef}
+        onBlur={forgetCardLeftByViewer}
+        onFocus={rememberFocusedCard}
+      />
+    );
   }
 
   return (
@@ -113,11 +129,12 @@ interface ContinueWatchingGridProps {
   items: ContinueWatchingItem[];
   listRef: RefObject<HTMLUListElement>;
   onFocus(event: FocusEvent<HTMLUListElement>): void;
+  onBlur(event: FocusEvent<HTMLUListElement>): void;
 }
 
-function ContinueWatchingGrid({ items, listRef, onFocus }: ContinueWatchingGridProps) {
+function ContinueWatchingGrid({ items, listRef, onFocus, onBlur }: ContinueWatchingGridProps) {
   return (
-    <ul className={movieGridClass} onFocus={onFocus} ref={listRef}>
+    <ul className={movieGridClass} onBlur={onBlur} onFocus={onFocus} ref={listRef}>
       {items.map((item) => (
         <li className="min-w-0" key={item.movie.id}>
           <ContinueWatchingCard item={item} />

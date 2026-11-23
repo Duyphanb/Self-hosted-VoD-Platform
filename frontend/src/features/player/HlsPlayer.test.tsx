@@ -18,6 +18,7 @@ import { AuthProvider, useAuth } from '../auth/AuthContext';
 import * as authApi from '../auth/authApi';
 import { createAuthSession } from '../auth/authStorage';
 import { progressKeys } from '../progress/continueWatchingQueries';
+import { waitForClosingPlayerSaves } from './closingPlayerSaves';
 import { HlsPlayer } from './HlsPlayer';
 import type { PlaybackInfo } from './playbackApi';
 
@@ -559,6 +560,63 @@ describe('HlsPlayer', () => {
 
       expect(progressSaves()).toEqual([save(20), save(20)]);
       expect(queryClient.getQueryState(progressKeys.continueWatching())?.isInvalidated).toBe(true);
+    });
+
+    it('lets a new visit wait for the save in flight and the last save queued behind it at unmount', async () => {
+      const { video, unmount } = await renderPlayer();
+      startPlaying(video, 5);
+      const heldSaves: Array<() => void> = [];
+      const holdSave = () => new Promise<Response>((resolve) => {
+        heldSaves.push(() => resolve(jsonResponse(progressResponse())));
+      });
+      fetchMock.mockImplementationOnce(holdSave).mockImplementationOnce(holdSave);
+      setPlayback(video, { time: 40, paused: true });
+      fireEvent(video, new Event('pause'));
+      await settle();
+      setPlayback(video, { time: 57.4, paused: true });
+
+      unmount();
+      await settle();
+      let waited = false;
+      void waitForClosingPlayerSaves(MOVIE_ID, ALICE.id).then(() => {
+        waited = true;
+      });
+      await settle();
+      expect(progressSaves()).toEqual([save(40)]);
+      expect(waited).toBe(false);
+
+      heldSaves[0]();
+      await settle();
+      expect(progressSaves()).toEqual([save(40), save(57)]);
+      expect(waited).toBe(false);
+
+      heldSaves[1]();
+      await settle();
+      expect(waited).toBe(true);
+    });
+
+    it('lets a new visit wait for the last save that the unmount itself sends', async () => {
+      const { video, unmount } = await renderPlayer();
+      startPlaying(video, 5);
+      let releaseSave: () => void = () => undefined;
+      fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        releaseSave = () => resolve(jsonResponse(progressResponse()));
+      }));
+      setPlayback(video, { time: 57.4, paused: true });
+
+      unmount();
+      await settle();
+      let waited = false;
+      void waitForClosingPlayerSaves(MOVIE_ID, ALICE.id).then(() => {
+        waited = true;
+      });
+      await settle();
+      expect(progressSaves()).toEqual([save(57)]);
+      expect(waited).toBe(false);
+
+      releaseSave();
+      await settle();
+      expect(waited).toBe(true);
     });
 
     it('reloads with the new asset after 409 VIDEO_ASSET_NOT_CURRENT and saves for that asset', async () => {

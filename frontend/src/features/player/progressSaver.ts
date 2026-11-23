@@ -22,6 +22,8 @@ export interface ProgressSaverOptions {
  * - 404 and 409 stop the saves of that asset; 409 VIDEO_ASSET_NOT_CURRENT also asks the page to fetch the
  *   playback info again, and saves for the new asset are accepted.
  * - A changed identity stops every save for good.
+ * - `whenIdle` tells when the running save and the pending snapshot are both done, for example so that
+ *   reopening the movie reads the position of the last save.
  */
 export class ProgressSaver {
   private lastSaved: ProgressSave | null = null;
@@ -29,6 +31,7 @@ export class ProgressSaver {
   private pending: ProgressSave | null = null;
   private stopped = false;
   private readonly stoppedAssets = new Set<string>();
+  private idleWaiters: Array<() => void> = [];
 
   constructor(private readonly options: ProgressSaverOptions) {}
 
@@ -62,6 +65,16 @@ export class ProgressSaver {
     this.pending = null;
   }
 
+  /** Resolves once no save is running or pending, whether the saves succeed or fail. */
+  whenIdle(): Promise<void> {
+    if (!this.inFlight) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.idleWaiters.push(resolve);
+    });
+  }
+
   private accepts(snapshot: ProgressSave): boolean {
     return !this.stopped && !this.stoppedAssets.has(snapshot.videoAssetId);
   }
@@ -82,8 +95,18 @@ export class ProgressSaver {
 
     const next = this.pending;
     this.pending = null;
-    if (next && this.accepts(next)) {
+    if (next && this.accepts(next) && !sameSave(next, this.lastSaved)) {
       void this.send(next);
+      return;
+    }
+    this.notifyIdle();
+  }
+
+  private notifyIdle(): void {
+    const waiters = this.idleWaiters;
+    this.idleWaiters = [];
+    for (const resolve of waiters) {
+      resolve();
     }
   }
 
