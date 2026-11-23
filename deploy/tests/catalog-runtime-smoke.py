@@ -157,20 +157,19 @@ def main():
 
     def promote(address):
         lines = [line.strip() for line in psql(command, statements, address).splitlines()]
-        return lines[0], lines[lines.index("admin_role_granted") + 2]
+        return lines[lines.index("admin_role_granted") + 2]
 
     # The documented match is lower(email), so the address may differ in case from the registration.
-    assert promote(admin_email.swapcase()) == ("INSERT 0 1", "1")
-    assert promote(admin_email.lower()) == ("INSERT 0 0", "1"), "The documented SQL must be idempotent"
+    assert promote(admin_email.swapcase()) == "1"
+    assert promote(admin_email.lower()) == "1", "The documented SQL must be idempotent"
+    assert sql(f"SELECT auth_epoch FROM users WHERE lower(email) = lower('{admin_email}');") == "1"
     assert sql("SELECT count(*) FROM user_roles ur JOIN users u ON u.id = ur.user_id JOIN roles r ON r.id = ur.role_id "
                f"WHERE r.name = 'ROLE_ADMIN' AND lower(u.email) = '{viewer_email}';") == "0"
-    # Roles are carried in the access token: the existing token stays ROLE_USER until a refresh.
-    assert is_api_error(call(MOVIES, movie("smoke-forbidden"), candidate), 403, "FORBIDDEN")
-    status, refreshed = call("/api/v1/auth/refresh", cookie=candidate_session.refresh_cookie)
-    assert status == 200
-    admin = refreshed["accessToken"]
+    assert is_api_error(call(MOVIES, movie("smoke-forbidden"), candidate), 401, "UNAUTHORIZED")
+    assert call("/api/v1/auth/refresh", cookie=candidate_session.refresh_cookie)[0] == 401
+    admin = login(admin_email)["accessToken"]
     assert "ROLE_ADMIN" in call("/api/v1/users/me", token=admin)[1]["roles"]
-    print("PASS documented first-admin SQL grants ROLE_ADMIN idempotently; the role applies after refresh")
+    print("PASS first-admin SQL bumps the epoch once, revokes prior sessions and grants ROLE_ADMIN after sign-in")
 
     # ---- create ----
     published = create(movie("smoke-published", genres=["Hành   Động", "Hài"], people=[

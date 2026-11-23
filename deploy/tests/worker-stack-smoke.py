@@ -244,10 +244,13 @@ def pids_peak(stack):
 def end_to_end(stack, image, pids_limit, timeout):
     email, password = os.environ.get("NEWMAN_ADMIN_EMAIL"), os.environ.get("NEWMAN_ADMIN_PASSWORD")
     check(bool(email and password), "NEWMAN_ADMIN_EMAIL and NEWMAN_ADMIN_PASSWORD are required")
-    status, session = stack.request("/api/v1/auth/login", body=json.dumps({"email": email, "password": password})
-                                    .encode(), content_type="application/json")
-    check(status == 200 and session and session.get("accessToken"), "Administrator login failed")
-    token = session["accessToken"]
+    def admin_token():
+        login_body = json.dumps({"email": email, "password": password}).encode()
+        status, session = stack.request("/api/v1/auth/login", body=login_body, content_type="application/json")
+        check(status == 200 and session and session.get("accessToken"), "Administrator login failed")
+        return session["accessToken"]
+
+    token = admin_token()
 
     movie = uuid.uuid4()
     stack.sql("INSERT INTO movies (id, title, slug, description, status, created_at, updated_at) VALUES "
@@ -288,6 +291,8 @@ def end_to_end(stack, image, pids_limit, timeout):
     check(segments, "No HLS segment exists in vod-hls")
     print(f"PASS vod-hls holds master.m3u8 and {len(segments)} segment(s) for the attempt", flush=True)
 
+    # Job polling can outlast the access token. Authenticate the independent read phase freshly.
+    token = admin_token()
     status, detail = stack.request(f"/api/v1/movies/{movie}", token)
     check(status == 200 and detail and detail.get("videoStatus") == "READY", "The movie does not report READY")
     leftovers = stack.exec(stack.worker, 'find "$WORKER_TEMP_DIR" -mindepth 1 -maxdepth 1 -name "job-*"',

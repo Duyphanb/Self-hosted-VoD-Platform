@@ -433,7 +433,63 @@
       }
     },
     {
-      "name": "06 - Reject replayed refresh token",
+      "name": "06 - Get authenticated user profile",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200 OK', () => {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('Response matches the authenticated UserProfile', () => {",
+              "  pm.expect(body.id).to.equal(pm.environment.get('userId'));",
+              "  pm.expect(body.email).to.equal(pm.environment.get('testEmail'));",
+              "  pm.expect(body.displayName).to.equal(pm.environment.get('testDisplayName'));",
+              "  pm.expect(body.roles).to.include('ROLE_USER');",
+              "});",
+              "pm.test('Profile exposes no password data', () => {",
+              "  ['password', 'passwordHash'].forEach((field) => {",
+              "    pm.expect(body).not.to.have.property(field);",
+              "  });",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{accessToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/users/me",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "users",
+            "me"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "07 - Reject replay and revoke the session",
       "event": [
         {
           "listen": "test",
@@ -505,28 +561,16 @@
       }
     },
     {
-      "name": "07 - Get authenticated user profile",
+      "name": "08 - Reject access token from replayed session",
       "event": [
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test('Status is 200 OK', () => {",
-              "  pm.response.to.have.status(200);",
-              "});",
-              "",
-              "const body = pm.response.json();",
-              "pm.test('Response matches the authenticated UserProfile', () => {",
-              "  pm.expect(body.id).to.equal(pm.environment.get('userId'));",
-              "  pm.expect(body.email).to.equal(pm.environment.get('testEmail'));",
-              "  pm.expect(body.displayName).to.equal(pm.environment.get('testDisplayName'));",
-              "  pm.expect(body.roles).to.include('ROLE_USER');",
-              "});",
-              "pm.test('Profile exposes no password data', () => {",
-              "  ['password', 'passwordHash'].forEach((field) => {",
-              "    pm.expect(body).not.to.have.property(field);",
-              "  });",
+              "pm.test('Replayed session no longer authenticates', () => {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().code).to.equal('UNAUTHORIZED');",
               "});"
             ]
           }
@@ -561,7 +605,72 @@
       "response": []
     },
     {
-      "name": "08 - Logout current refresh token",
+      "name": "09 - Sign in again before testing logout",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Fresh session login succeeds', () => pm.response.to.have.status(200));",
+              "const cookieHeader = pm.response.headers.get('Set-Cookie') || '';",
+              "const cookieValue = /^vod_refresh=([^;]+)/.exec(cookieHeader);",
+              "pm.test('Refresh cookie issued', () => pm.expect(Boolean(cookieValue)).to.equal(true));",
+              "if (cookieValue) pm.environment.set('refreshCookie', cookieValue[1]);",
+              "pm.environment.set('accessToken', pm.response.json().accessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Origin",
+            "value": "{{baseUrl}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "auth",
+            "login"
+          ]
+        },
+        "protocolProfileBehavior": {
+          "disableCookies": true
+        }
+      },
+      "response": [],
+      "protocolProfileBehavior": {
+        "disableCookies": true
+      }
+    },
+    {
+      "name": "10 - Logout current refresh token",
       "event": [
         {
           "listen": "test",
@@ -627,7 +736,7 @@
       }
     },
     {
-      "name": "09 - Reject refresh after logout",
+      "name": "11 - Reject refresh after logout",
       "event": [
         {
           "listen": "test",
@@ -699,7 +808,7 @@
       }
     },
     {
-      "name": "10 - Repeat logout idempotently",
+      "name": "12 - Repeat logout idempotently",
       "event": [
         {
           "listen": "test",
@@ -765,7 +874,7 @@
       }
     },
     {
-      "name": "11 - Logout without a token idempotently",
+      "name": "13 - Logout without a token idempotently",
       "event": [
         {
           "listen": "test",

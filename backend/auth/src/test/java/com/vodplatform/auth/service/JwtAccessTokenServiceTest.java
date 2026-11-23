@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.nimbusds.jose.proc.SecurityContext;
 import com.vodplatform.auth.config.AuthTokenProperties;
+import com.vodplatform.auth.persistence.AuthSessionEntity;
 import com.vodplatform.auth.persistence.RoleEntity;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserStatus;
@@ -55,7 +56,9 @@ class JwtAccessTokenServiceTest {
         );
         user.addRole(role);
 
-        IssuedAccessToken issuedToken = service.issue(user);
+        UUID sessionId = UUID.randomUUID();
+        var session = new AuthSessionEntity(sessionId, userId, issuedAt, issuedAt.plus(Duration.ofDays(7)));
+        IssuedAccessToken issuedToken = service.issue(user, session);
 
         Jwt jwt = NimbusJwtDecoder.withSecretKey(secretKey)
                 .macAlgorithm(MacAlgorithm.HS256)
@@ -65,6 +68,8 @@ class JwtAccessTokenServiceTest {
         assertThat(jwt.getClaimAsString("userId")).isEqualTo(userId.toString());
         assertThat(jwt.getClaimAsString("email")).isEqualTo("viewer@example.com");
         assertThat(jwt.getClaimAsStringList("roles")).isEqualTo(List.of("ROLE_USER"));
+        assertThat(jwt.getClaimAsString("sid")).isEqualTo(sessionId.toString());
+        assertThat(((Number) jwt.getClaim("ver")).intValue()).isZero();
         assertThat(jwt.getIssuedAt()).isEqualTo(issuedAt);
         assertThat(jwt.getExpiresAt()).isEqualTo(issuedAt.plus(Duration.ofMinutes(15)));
         assertThat(issuedToken.expiresInSeconds()).isEqualTo(900);

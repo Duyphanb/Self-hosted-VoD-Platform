@@ -96,4 +96,14 @@ public abstract class CookieAuthFixture {
         return jdbc.queryForObject("select count(*) from refresh_tokens where user_id=? and revoked_at is not null",
                 Integer.class, user);
     }
+
+    protected int revokedSessions() {
+        return jdbc.queryForObject("select count(*) from auth_sessions where user_id=? and revoked_at is not null",
+                Integer.class, user);
+    }
+
+    protected String bearer(MvcResult result) {
+        return "Bearer " + mapper.readTree(result.getResponse().getContentAsByteArray())
+                .path("accessToken").asString();
+    }
 }

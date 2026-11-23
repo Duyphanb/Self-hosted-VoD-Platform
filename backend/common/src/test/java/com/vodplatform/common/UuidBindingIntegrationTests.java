@@ -9,22 +9,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -60,8 +56,8 @@ class UuidBindingIntegrationTests implements PostgresTestDatabase {
     @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
-    private JwtEncoder jwtEncoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
 
     @Test
     void aQueryParameterUuidMustBeInCanonicalForm() throws Exception {
@@ -107,21 +103,7 @@ class UuidBindingIntegrationTests implements PostgresTestDatabase {
     }
 
     private String bearerToken() {
-        UUID userId = UUID.randomUUID();
-        Instant now = Instant.now();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .subject(userId.toString())
-                .issuedAt(now)
-                .expiresAt(now.plusSeconds(300))
-                .claim("userId", userId.toString())
-                .claim("email", "uuid-binding-test@example.com")
-                .claim("roles", List.of("ROLE_USER"))
-                .build();
-        String token = jwtEncoder.encode(JwtEncoderParameters.from(
-                JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
-                claims
-        )).getTokenValue();
-        return "Bearer " + token;
+        return "Bearer " + bearerSessions.token("ROLE_USER");
     }
 
     @RestController

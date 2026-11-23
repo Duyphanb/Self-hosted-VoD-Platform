@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.shared.storage.ObjectMissingException;
 import com.vodplatform.shared.storage.ObjectStorage;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -41,11 +43,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -66,7 +63,8 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
     private static final byte[] PLAYLIST = "#EXTM3U\n#EXTINF:6.0,\nsegments/seg_00001.ts\n#EXT-X-ENDLIST\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
     private static final byte[] SEGMENT = new byte[] {0x47, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
     @Autowired private MockMvc mvc;
-    @Autowired private JwtEncoder encoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
     @Autowired private JdbcTemplate jdbc;
     @Autowired private ObjectMapper mapper;
     @Autowired private EntityManagerFactory emf;
@@ -92,7 +90,7 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
 
     @ParameterizedTest
     @ValueSource(strings = {"ROLE_USER", "ROLE_ADMIN"})
-    void servesExactObjectsAndIgnoresRangeWithTwoReadsOutsideStreaming(String role) throws Exception {
+    void servesExactObjectsWithTwoMediaReadsAndOneColdSessionRead(String role) throws Exception {
         UUID id = ready(movie("PUBLISHED"));
         String token = bearer(role);
         var stats = emf.unwrap(SessionFactory.class).getStatistics();
@@ -103,13 +101,18 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
                 for (boolean range : List.of(false, true)) {
                     stats.clear();
                     var request = request(path(id, segment), token);
-                    if (range) request.header("Range", "bytes=0-9");
+                    if (range) {
+                        request.header("Range", "bytes=0-9");
+                    }
                     MvcResult result = mvc.perform(request).andExpect(status().isOk()).andReturn();
                     assertMedia(result, segment, true);
-                    assertThat(stats.getPrepareStatementCount()).isEqualTo(2);
+                    int expectedStatements = !segment && !range ? 3 : 2;
+                    assertThat(stats.getPrepareStatementCount()).isEqualTo(expectedStatements);
                 }
             }
-        } finally { stats.setStatisticsEnabled(enabled); }
+        } finally {
+            stats.setStatisticsEnabled(enabled);
+        }
         verify(storage, org.mockito.Mockito.times(2)).get("vod-hls", key(id));
         verify(storage, org.mockito.Mockito.times(2)).get("vod-hls", prefix(id) + "segments/seg_00001.ts");
         assertThat(closed).hasValue(4);
@@ -389,11 +392,6 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
         return id;
     }
     private String bearer(String role) {
-        UUID user = UUID.randomUUID();
-        Instant now = Instant.now();
-        var claims = JwtClaimsSet.builder().subject(user.toString()).issuedAt(now).expiresAt(now.plusSeconds(300))
-                .claim("userId", user.toString()).claim("email", "hls@example.test").claim("roles", List.of(role)).build();
-        return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(), claims))
-                .getTokenValue();
+        return bearerSessions.token(role);
     }
 }

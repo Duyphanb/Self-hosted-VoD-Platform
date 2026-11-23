@@ -1,3 +1,11 @@
+CREATE TABLE public.auth_sessions (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    revoked_at timestamp with time zone
+);
+
 CREATE TABLE public.encoding_jobs (
     id uuid NOT NULL,
     video_asset_id uuid NOT NULL,
@@ -81,7 +89,8 @@ CREATE TABLE public.refresh_tokens (
     token_hash character varying(255) NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     revoked_at timestamp with time zone,
-    created_at timestamp with time zone NOT NULL
+    created_at timestamp with time zone NOT NULL,
+    session_id uuid
 );
 
 CREATE TABLE public.roles (
@@ -112,6 +121,7 @@ CREATE TABLE public.users (
     status character varying(20) NOT NULL,
     created_at timestamp with time zone NOT NULL,
     updated_at timestamp with time zone NOT NULL,
+    auth_epoch integer DEFAULT 0 NOT NULL,
     CONSTRAINT users_status_check CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'DISABLED'::character varying])::text[])))
 );
 
@@ -151,6 +161,9 @@ CREATE TABLE public.watchlist_items (
 );
 
 ALTER TABLE ONLY public.roles ALTER COLUMN id SET DEFAULT nextval('public.roles_id_seq'::regclass);
+
+ALTER TABLE ONLY public.auth_sessions
+    ADD CONSTRAINT auth_sessions_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.encoding_jobs
     ADD CONSTRAINT encoding_jobs_pkey PRIMARY KEY (id);
@@ -233,6 +246,10 @@ ALTER TABLE ONLY public.watch_history
 ALTER TABLE ONLY public.watchlist_items
     ADD CONSTRAINT watchlist_items_pkey PRIMARY KEY (id);
 
+CREATE INDEX ix_auth_sessions_ended ON public.auth_sessions USING btree (LEAST(expires_at, revoked_at), id);
+
+CREATE INDEX ix_auth_sessions_user_created ON public.auth_sessions USING btree (user_id, created_at, id);
+
 CREATE INDEX ix_encoding_jobs_status ON public.encoding_jobs USING btree (status);
 
 CREATE INDEX ix_encoding_jobs_video_asset_id ON public.encoding_jobs USING btree (video_asset_id);
@@ -255,6 +272,8 @@ CREATE INDEX ix_ratings_movie_id ON public.ratings USING btree (movie_id);
 
 CREATE INDEX ix_refresh_tokens_expires_at ON public.refresh_tokens USING btree (expires_at);
 
+CREATE INDEX ix_refresh_tokens_session_id ON public.refresh_tokens USING btree (session_id);
+
 CREATE INDEX ix_refresh_tokens_user_id ON public.refresh_tokens USING btree (user_id);
 
 CREATE INDEX ix_users_status ON public.users USING btree (status);
@@ -272,6 +291,9 @@ CREATE UNIQUE INDEX ux_users_email_identity ON public.users USING btree (lower((
 CREATE UNIQUE INDEX ux_video_assets_hls_master ON public.video_assets USING btree (hls_bucket, hls_master_object_key) WHERE (hls_master_object_key IS NOT NULL);
 
 CREATE UNIQUE INDEX ux_video_assets_movie_in_flight ON public.video_assets USING btree (movie_id) WHERE ((status)::text = ANY ((ARRAY['UPLOADED'::character varying, 'QUEUED'::character varying, 'PROCESSING'::character varying])::text[]));
+
+ALTER TABLE ONLY public.auth_sessions
+    ADD CONSTRAINT auth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY public.encoding_jobs
     ADD CONSTRAINT encoding_jobs_video_asset_id_fkey FOREIGN KEY (video_asset_id) REFERENCES public.video_assets(id) ON DELETE CASCADE;
@@ -299,6 +321,9 @@ ALTER TABLE ONLY public.ratings
 
 ALTER TABLE ONLY public.ratings
     ADD CONSTRAINT ratings_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.refresh_tokens
+    ADD CONSTRAINT refresh_tokens_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.auth_sessions(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY public.refresh_tokens
     ADD CONSTRAINT refresh_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;

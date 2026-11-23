@@ -116,7 +116,8 @@ def main():
     direct_id = str(uuid.uuid4())
     sql(f"""DO $$ BEGIN
         BEGIN
-            INSERT INTO users SELECT '{direct_id}'::uuid, upper(email), password_hash,
+            INSERT INTO users (id, email, password_hash, display_name, status, created_at, updated_at)
+            SELECT '{direct_id}'::uuid, upper(email), password_hash,
                 display_name, status, created_at, updated_at FROM users WHERE id = '{user_id}';
             RAISE EXCEPTION 'Case-duplicate insert unexpectedly succeeded';
         EXCEPTION WHEN unique_violation THEN NULL;
@@ -203,12 +204,16 @@ def main():
     assert sorted(status for status, _ in outcomes) == [200, 401]
     rotated = next(body for status, body in outcomes if status == 200).refresh_cookie
     assert refresh(original)[0] == 401
+    assert refresh(rotated)[0] == 401, "Replay did not revoke the successor session"
+    assert request("/api/v1/users/me", token=access)[0] == 401, "Replay did not invalidate the warmed session cache"
+
+    current = login()[1]
+    rotated = current.refresh_cookie
     assert request("/api/v1/auth/logout", cookie=rotated)[0] == 204
     assert request("/api/v1/auth/logout", cookie=rotated)[0] == 204
     assert request("/api/v1/auth/logout", method="POST")[0] == 204
     assert refresh(rotated)[0] == 401
-    # Existing access JWTs remain valid until expiration under the frozen model.
-    assert request("/api/v1/users/me", token=access)[0] == 200
+    assert request("/api/v1/users/me", token=current["accessToken"])[0] == 401
     print("PASS concurrent rotation, replay rejection and idempotent logout")
 
     # Hold a real PostgreSQL row lock across expiry, before the HTTP request starts.

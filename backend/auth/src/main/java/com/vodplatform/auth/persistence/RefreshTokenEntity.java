@@ -25,6 +25,9 @@ public class RefreshTokenEntity {
     @Column(name = "token_hash", nullable = false, unique = true, length = 255)
     private String tokenHash;
 
+    @Column(name = "session_id")
+    private UUID sessionId;
+
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 
@@ -49,6 +52,17 @@ public class RefreshTokenEntity {
         this.tokenHash = tokenHash;
         this.expiresAt = expiresAt;
         this.createdAt = createdAt;
+    }
+
+    public RefreshTokenEntity(
+            UUID id, UserEntity user, String tokenHash, AuthSessionEntity session, Instant createdAt
+    ) {
+        this(id, user, tokenHash, session.getExpiresAt(), createdAt);
+        this.sessionId = session.getId();
+    }
+
+    public UUID getSessionId() {
+        return sessionId;
     }
 
     public UUID getId() {

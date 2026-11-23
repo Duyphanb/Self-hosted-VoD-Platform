@@ -9,6 +9,8 @@ info:
     HLS uses /hls/* through the authenticated backend proxy.
     Refresh tokens travel only in the HttpOnly vod_refresh cookie scoped to /api/v1/auth
     (ADR-012 D1-D3); access tokens are returned in JSON and sent in the Authorization header.
+    Access tokens contain sid and ver and last 5 minutes by default (ADR-012 D5).
+    Every bearer-authenticated operation checks session and account state (ADR-012 D6).
     Sprint 6 playback, HLS, progress and admin asset projection rules follow
     ADR-011 (2026-11-14); the bearer token is accepted only in the
     Authorization header, never in a URL.
@@ -84,8 +86,8 @@ paths:
       tags: [Auth]
       summary: Login with email and password
       description: >
-        Issues a refresh token as the vod_refresh cookie; a valid refresh token
-        presented with the request is revoked first (ADR-012 D2, Issue 6.9).
+        Creates a session and issues its refresh token as the vod_refresh cookie.
+        A valid presented cookie revokes its previous session (ADR-012 D2 and D4).
       security: []
       requestBody:
         required: true
@@ -98,7 +100,9 @@ paths:
           description: Logged in
           headers:
             Set-Cookie:
-              description: "vod_refresh=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=<remaining lifetime of the refresh token> (ADR-012 D1)."
+              description: >-
+                vod_refresh=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth;
+                Max-Age=<remaining session lifetime> (ADR-012 D1).
               schema:
                 type: string
           content:
@@ -115,16 +119,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/auth/refresh:
     post:
       tags: [Auth]
       summary: Rotate refresh cookie and return a new access token
       description: >
-        No request body. Rotates the vod_refresh cookie with sliding expiry (ADR-012 D2,
-        Issue 6.9). Missing, unknown, expired, revoked, over-long, duplicated or replayed
-        cookies return 401 UNAUTHORIZED and a clearing cookie. Replay revokes no successor
-        tokens in Issue 6.9. State-read failure returns 503 without clearing the cookie.
+        No request body. Rotates the vod_refresh cookie within the same absolute-lifetime
+        session (ADR-012 D2 and D4). Missing, unknown, legacy, expired, revoked, over-long,
+        duplicated or replayed cookies return 401 UNAUTHORIZED and a clearing cookie.
+        Replay revokes the session. A state-read failure returns 503 and keeps the cookie.
       security:
         - refreshSession: []
       responses:
@@ -132,7 +138,9 @@ paths:
           description: Refreshed
           headers:
             Set-Cookie:
-              description: "vod_refresh=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=<remaining lifetime of the refresh token> (ADR-012 D1)."
+              description: >-
+                vod_refresh=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth;
+                Max-Age=<remaining session lifetime> (ADR-012 D1).
               schema:
                 type: string
           content:
@@ -148,19 +156,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "503":
-          description: AUTH_STATE_UNAVAILABLE - authentication state cannot be read.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/auth/logout:
     post:
       tags: [Auth]
-      summary: Revoke the presented refresh token
+      summary: Revoke the session of the presented cookie
       description: >
-        No request body. Revokes the presented refresh token when exactly one valid
-        vod_refresh cookie is present. Always clears the cookie; idempotent (ADR-012 D2).
+        No request body. Revokes the session identified by the vod_refresh cookie.
+        A successful logout clears the cookie and is idempotent (ADR-012 D2 and D4).
       security:
         - refreshSession: []
         - {}
@@ -178,6 +182,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/users/me:
     get:
@@ -192,6 +198,8 @@ paths:
                 $ref: "#/components/schemas/UserProfile"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
     put:
       tags: [Users]
       summary: Update current user profile
@@ -212,6 +220,8 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/movies:
     get:
@@ -255,6 +265,8 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
     post:
       tags: [Movies, Admin]
       summary: Create movie metadata
@@ -284,6 +296,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/movies/{movieId}:
     parameters:
@@ -308,6 +322,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
     put:
       tags: [Movies, Admin]
       summary: Update movie metadata
@@ -342,6 +358,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
     delete:
       tags: [Movies, Admin]
       summary: Archive movie metadata
@@ -360,6 +378,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/admin/movies:
     get:
@@ -388,6 +408,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/admin/genres:
     get:
@@ -407,6 +429,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
     post:
       tags: [Movies, Admin]
       summary: Create a genre
@@ -436,6 +460,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/admin/genres/{genreId}:
     parameters:
@@ -471,6 +497,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/admin/people:
     get:
@@ -503,6 +531,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
     post:
       tags: [Movies, Admin]
       summary: Create a person
@@ -531,6 +561,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/admin/people/{personId}:
     parameters:
@@ -563,6 +595,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/admin/movies/{movieId}/video:
     parameters:
@@ -649,6 +683,7 @@ paths:
           $ref: "#/components/responses/UpstreamUnavailable"
         "503":
           description: >
+            AUTH_STATE_UNAVAILABLE - authentication state could not be read before upload acceptance.
             UPLOAD_STORAGE_UNAVAILABLE from the backend - raw storage or spool I/O
             failed before commit; the upload was not accepted; manual retry allowed.
             UPSTREAM_UNAVAILABLE from the edge - no backend was reachable; once the
@@ -692,6 +727,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /hls/video-assets/{videoAssetId}/master.m3u8:
     parameters:
@@ -731,7 +768,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "503":
-          $ref: "#/components/responses/HlsStorageUnavailable"
+          $ref: "#/components/responses/HlsUnavailable"
 
   /hls/video-assets/{videoAssetId}/segments/{segmentName}:
     parameters:
@@ -777,7 +814,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "503":
-          $ref: "#/components/responses/HlsStorageUnavailable"
+          $ref: "#/components/responses/HlsUnavailable"
 
   /api/v1/movies/{movieId}/progress:
     parameters:
@@ -806,6 +843,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
     put:
       tags: [Progress]
       summary: Save playback progress
@@ -846,6 +885,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/movies/{movieId}/rating:
     parameters:
@@ -872,6 +913,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/search:
     get:
@@ -895,6 +938,8 @@ paths:
                 $ref: "#/components/schemas/SearchResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/search/suggestions:
     get:
@@ -917,6 +962,8 @@ paths:
                 $ref: "#/components/schemas/SearchSuggestionResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/me/watchlist:
     get:
@@ -933,6 +980,8 @@ paths:
                   $ref: "#/components/schemas/WatchlistItem"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/me/watchlist/{movieId}:
     parameters:
@@ -951,6 +1000,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
     delete:
       tags: [Watchlist]
       summary: Remove movie from watchlist
@@ -964,6 +1015,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/me/history:
     get:
@@ -981,6 +1034,8 @@ paths:
                 $ref: "#/components/schemas/HistoryPageResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/me/continue-watching:
     get:
@@ -1004,6 +1059,8 @@ paths:
                   $ref: "#/components/schemas/ContinueWatchingItem"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/admin/video-assets:
     get:
@@ -1044,6 +1101,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
   /api/v1/admin/video-assets/{videoAssetId}/retry:
     parameters:
@@ -1080,6 +1139,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          $ref: "#/components/responses/AuthStateUnavailable"
 
 components:
   securitySchemes:
@@ -1192,10 +1253,17 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ApiError"
-    HlsStorageUnavailable:
+    HlsUnavailable:
       description: >
+        AUTH_STATE_UNAVAILABLE - authentication state could not be read.
         HLS_STORAGE_UNAVAILABLE - the backend could not read the HLS object from
         storage before the response started. Players retry 5xx responses.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    AuthStateUnavailable:
+      description: AUTH_STATE_UNAVAILABLE - authentication state could not be read. No cookie is cleared.
       content:
         application/json:
           schema:
@@ -1307,6 +1375,7 @@ components:
           type: string
         expiresInSeconds:
           type: integer
+          description: Configured access token lifetime in seconds (60–900, default 300).
 
     UserProfile:
       type: object

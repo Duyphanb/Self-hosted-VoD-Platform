@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.vodplatform.common.contract.ApiContract;
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.common.web.MultipartRouteFilter;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
@@ -26,6 +27,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -39,11 +41,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -119,7 +116,8 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
 
     @LocalServerPort int port;
 
-    @Autowired JwtEncoder jwtEncoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
 
     @Autowired ObjectMapper mapper;
 
@@ -192,24 +190,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
     }
 
     private String bearer(String role) {
-        Instant now = Instant.now();
-        String id = UUID.randomUUID().toString();
-        var claims =
-                JwtClaimsSet.builder()
-                        .subject(id)
-                        .issuedAt(now)
-                        .expiresAt(now.plusSeconds(300))
-                        .claim("userId", id)
-                        .claim("email", "multipart-test@example.com")
-                        .claim("roles", List.of(role))
-                        .build();
-        return "Bearer "
-                + jwtEncoder
-                        .encode(
-                                JwtEncoderParameters.from(
-                                        JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
-                                        claims))
-                        .getTokenValue();
+        return "Bearer " + bearerSessions.token(role);
     }
 
     /** A multipart body whose file has a valid ISO-BMFF signature ({@code ftyp} at offset 4). */

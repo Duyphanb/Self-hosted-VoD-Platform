@@ -10,6 +10,7 @@ import com.vodplatform.catalog.persistence.Movie;
 import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.catalog.persistence.MovieStatus;
 import com.vodplatform.common.support.MovieVisibilityRule;
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import jakarta.persistence.EntityManager;
 import java.sql.Timestamp;
@@ -20,16 +21,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -48,7 +45,8 @@ class PlaybackApiIntegrationTests implements PostgresTestDatabase {
     private static final Instant T0 = Instant.parse("2026-10-01T00:00:00Z");
 
     @Autowired private MockMvc mockMvc;
-    @Autowired private JwtEncoder jwtEncoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
     @Autowired private MovieRepository movies;
     @Autowired private EntityManager entityManager;
     @Autowired private JdbcTemplate jdbc;
@@ -232,11 +230,6 @@ class PlaybackApiIntegrationTests implements PostgresTestDatabase {
     }
 
     private String bearer(UUID user, String role) {
-        Instant now = Instant.now();
-        JwtClaimsSet claims = JwtClaimsSet.builder().subject(user.toString()).issuedAt(now)
-                .expiresAt(now.plusSeconds(300)).claim("userId", user.toString())
-                .claim("email", user + "@example.test").claim("roles", List.of(role)).build();
-        return "Bearer " + jwtEncoder.encode(JwtEncoderParameters.from(
-                JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(), claims)).getTokenValue();
+        return "Bearer " + bearerSessions.tokenFor(user, user + "@example.test", role);
     }
 }

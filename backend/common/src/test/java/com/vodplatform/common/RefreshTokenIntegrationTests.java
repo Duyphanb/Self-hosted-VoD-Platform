@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -44,7 +45,7 @@ import org.springframework.http.MediaType;
 @AutoConfigureMockMvc(print=MockMvcPrint.NONE)
 class RefreshTokenIntegrationTests extends CookieAuthFixture implements PostgresTestDatabase {
     @Test
-    void cookieAttributesFollowStoredExpiryAndRotationKeepsSlidingLifetime() throws Exception {
+    void cookieAttributesFollowTheAbsoluteSessionExpiryAcrossRotation() throws Exception {
         var login = login().andExpect(status().isOk()).andExpect(jsonPath("$.refreshToken").doesNotExist()).andReturn();
         String header = login.getResponse().getHeader("Set-Cookie");
         HttpCookie attributes = HttpCookie.parse(header).getFirst();
@@ -55,6 +56,7 @@ class RefreshTokenIntegrationTests extends CookieAuthFixture implements Postgres
         assertThat(header.contains("SameSite=Strict")).isTrue();
         Instant expiry = jdbc.queryForObject("select expires_at from refresh_tokens where user_id=?",
                 Timestamp.class, user).toInstant();
+        assertThat(expiry).isEqualTo(now.plus(Duration.ofDays(7)));
         assertThat(attributes.getMaxAge()).isEqualTo(Duration.between(now, expiry).getSeconds());
         when(clock.instant()).thenReturn(now.plusSeconds(100));
         var rotated = refresh(cookie(login)).andExpect(status().isOk())
@@ -62,11 +64,15 @@ class RefreshTokenIntegrationTests extends CookieAuthFixture implements Postgres
         assertThat(cookie(rotated).getValue().equals(cookie(login).getValue())).isFalse();
         assertThat(revoked()).isEqualTo(1);
         String rotatedCookieHeader = rotated.getResponse().getHeader("Set-Cookie");
-        assertThat(HttpCookie.parse(rotatedCookieHeader).getFirst().getMaxAge()).isEqualTo(604800);
+        assertThat(HttpCookie.parse(rotatedCookieHeader).getFirst().getMaxAge()).isEqualTo(604700);
+        assertThat(jdbc.queryForObject("select count(distinct session_id) from refresh_tokens where user_id=?",
+                Integer.class, user)).isEqualTo(1);
+        assertThat(jdbc.queryForList("select expires_at from refresh_tokens where user_id=?", Timestamp.class, user))
+                .containsOnly(Timestamp.from(expiry));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"missing", "unknown", "expired", "revoked", "over-long", "inactive", "blank"})
+    @ValueSource(strings = {"missing", "unknown", "expired", "revoked", "over-long", "inactive", "blank", "legacy"})
     void invalidCookieReturns401AndClearsWithoutLeakingIt(String kind) throws Exception {
         Cookie original = issued();
         if (kind.equals("expired")) {
@@ -78,6 +84,9 @@ class RefreshTokenIntegrationTests extends CookieAuthFixture implements Postgres
         }
         if (kind.equals("inactive")) {
             jdbc.update("update users set status='DISABLED' where id=?", user);
+        }
+        if (kind.equals("legacy")) {
+            jdbc.update("update refresh_tokens set session_id=null where user_id=?", user);
         }
         Cookie[] cookies = switch (kind) {
             case "missing" -> new Cookie[0];
@@ -101,11 +110,16 @@ class RefreshTokenIntegrationTests extends CookieAuthFixture implements Postgres
     }
 
     @Test
-    void replayClearsCookieButDoesNotRevokeTheSuccessor() throws Exception {
-        Cookie original = issued();
+    void replayCommitsFamilyRevocationAndInvalidatesTheWarmBearerCache() throws Exception {
+        var login = login().andExpect(status().isOk()).andReturn();
+        Cookie original = cookie(login);
+        var profile = get("/api/v1/users/me").header("Authorization", bearer(login));
+        mvc.perform(profile).andExpect(status().isOk());
         Cookie successor = cookie(refresh(original).andExpect(status().isOk()).andReturn());
-        refresh(original).andExpect(status().isUnauthorized());
-        refresh(successor).andExpect(status().isOk());
+        refresh(original).andExpect(status().isUnauthorized()).andExpect(header().exists("Set-Cookie"));
+        assertThat(revokedSessions()).isEqualTo(1);
+        refresh(successor).andExpect(status().isUnauthorized());
+        mvc.perform(profile).andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -145,6 +159,7 @@ class RefreshTokenIntegrationTests extends CookieAuthFixture implements Postgres
             assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
         }
         assertThat(revoked()).isEqualTo(1);
+        assertThat(revokedSessions()).isEqualTo(1);
     }
     @Test
     void originAndFetchSiteMatrixAlwaysUsesJsonErrors() throws Exception {

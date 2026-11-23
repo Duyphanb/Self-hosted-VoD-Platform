@@ -62,7 +62,7 @@ auth:
     secure: ${AUTH_COOKIE_SECURE:true}
   tokens:
     secret: ${JWT_SECRET}
-    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL_MINUTES:60}m
+    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL_MINUTES:5}m
     refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL_DAYS:7}d
 
 security:

@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Writes the 401 {@code ApiError}. A correlated request (the upload operation) also carries its
+ * Writes the authentication {@code ApiError}. A correlated request (the upload operation) also carries its
  * {@code requestId}; other routes keep the uncorrelated body.
  */
 @Component
@@ -39,16 +39,20 @@ public class ApiAuthenticationEntryPoint implements AuthenticationEntryPoint {
             HttpServletResponse response,
             AuthenticationException authenticationException
     ) throws IOException {
-        response.setStatus(HttpStatus.UNAUTHORIZED.value());
-        response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
+        boolean unavailable = authenticationException instanceof AuthStateUnavailableException;
+        HttpStatus status = unavailable ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.UNAUTHORIZED;
+        response.setStatus(status.value());
+        if (!unavailable) {
+            response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
+        }
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(
                 response.getOutputStream(),
                 apiErrorFactory.create(
-                        HttpStatus.UNAUTHORIZED,
-                        ERROR_CODE,
-                        ERROR_MESSAGE,
+                        status,
+                        unavailable ? AuthStateUnavailableException.CODE : ERROR_CODE,
+                        unavailable ? AuthStateUnavailableException.MESSAGE : ERROR_MESSAGE,
                         List.of(),
                         RequestIds.existing(request).orElse(null)
                 )
