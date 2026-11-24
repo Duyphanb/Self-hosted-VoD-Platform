@@ -9,8 +9,10 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +21,8 @@ public class SessionStateCache {
 
     private static final Duration MAX_AGE = Duration.ofSeconds(30);
     private static final int MAX_ENTRIES = 10_000;
+    // Each attempt reads or waits for at most the reader's timeout (10 s by default, 20 s at most), so a
+    // request gets 503 well before the edge's 60-second read timeout.
     private static final int MAX_LOAD_ATTEMPTS = 2;
 
     private final SessionStateReader reader;
@@ -50,19 +54,38 @@ public class SessionStateCache {
                 populate(id);
             }
             Load shared = existing == null ? candidate : existing;
-            try {
-                LoadedState result = shared.finished.join();
-                if (isFresh(result)) {
-                    return result.state();
-                }
-            } catch (CompletionException failure) {
-                if (failure.getCause() instanceof RuntimeException cause) {
-                    throw cause;
-                }
-                throw failure;
+            LoadedState result = await(shared);
+            if (isFresh(result)) {
+                return result.state();
             }
         }
         throw new AuthStateUnavailableException(null);
+    }
+
+    // A caller sharing another request's load waits no longer than a read of its own could take.
+    private LoadedState await(Load load) {
+        try {
+            return load.finished.get(reader.timeout().toNanos(), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException slow) {
+            throw new AuthStateUnavailableException(slow);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AuthStateUnavailableException(interrupted);
+        } catch (ExecutionException failed) {
+            if (failed.getCause() instanceof RuntimeException cause) {
+                throw cause;
+            }
+            if (failed.getCause() instanceof Error error) {
+                throw error;
+            }
+            throw new AuthStateUnavailableException(failed.getCause());
+        }
+    }
+
+    // Visible for tests: the number of cached sessions after Caffeine's pending evictions.
+    long cachedSessionCount() {
+        entries.cleanUp();
+        return entries.estimatedSize();
     }
 
     public void invalidate(UUID id) {

@@ -2,6 +2,8 @@ package com.vodplatform.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.atLeast;
@@ -23,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -36,6 +39,11 @@ class SessionStateCacheTest {
     private final SessionStateReader reader = mock(SessionStateReader.class);
     private final AtomicLong nanos = new AtomicLong();
     private final SessionStateCache cache = new SessionStateCache(reader, nanos::get, 20);
+
+    @BeforeEach
+    void readerTimeout() {
+        when(reader.timeout()).thenReturn(Duration.ofSeconds(10));
+    }
 
     @Test
     void thirtySecondsStartsBeforeTheReadAndHitsDoNotRenewIt() {
@@ -137,11 +145,52 @@ class SessionStateCacheTest {
         verify(reader, times(2)).read(SESSION_ID, false);
     }
 
+    @Test
+    void aCallerSharingAStalledLoadGetsUnavailableAfterTheReaderTimeout() throws Exception {
+        when(reader.timeout()).thenReturn(Duration.ofMillis(200));
+        var reading = new CountDownLatch(1);
+        var releaseRead = new CountDownLatch(1);
+        when(reader.read(SESSION_ID, false)).thenAnswer(invocation -> {
+            reading.countDown();
+            assertThat(releaseRead.await(10, TimeUnit.SECONDS)).isTrue();
+            return ACTIVE;
+        });
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var loader = workers.submit(() -> cache.read(SESSION_ID));
+            try {
+                assertThat(reading.await(10, TimeUnit.SECONDS)).isTrue();
+                long started = System.nanoTime();
+                var waiter = workers.submit(() -> cache.read(SESSION_ID));
+
+                assertThatThrownBy(() -> waiter.get(5, TimeUnit.SECONDS))
+                        .isInstanceOf(ExecutionException.class)
+                        .hasCauseInstanceOf(AuthStateUnavailableException.class);
+                assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2));
+            } finally {
+                releaseRead.countDown();
+            }
+            assertThat(loader.get(10, TimeUnit.SECONDS)).isEqualTo(ACTIVE);
+        }
+        verify(reader, times(1)).read(SESSION_ID, false);
+    }
+
+    @Test
+    void theCacheKeepsAtMostItsCapacityOfDistinctSessions() {
+        when(reader.read(any(), eq(false)))
+                .thenReturn(ACTIVE);
+
+        for (int session = 0; session < 50; session++) {
+            assertThat(cache.read(UUID.randomUUID())).isEqualTo(ACTIVE);
+        }
+
+        assertThat(cache.cachedSessionCount()).isLessThanOrEqualTo(20);
+    }
+
     private void waitUntilJoining(AtomicReference<Thread> waiter) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         while (System.nanoTime() < deadline) {
             Thread thread = waiter.get();
-            if (thread != null && thread.getState() == Thread.State.WAITING) {
+            if (thread != null && thread.getState() == Thread.State.TIMED_WAITING) {
                 return;
             }
             Thread.sleep(5);

@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -23,6 +24,18 @@ public class AuthConfiguration {
     @Bean
     PasswordEncoder passwordEncoder() {
         return new VersionedBcryptPasswordEncoder();
+    }
+
+    // Session-state reads run here so that a request can stop waiting for a stalled database (ADR-012 D6).
+    // When every thread is busy and the queue is full, a read is refused at once as 503.
+    @Bean(defaultCandidate = false)
+    ThreadPoolTaskExecutor authStateReadExecutor() {
+        var executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(8);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(1_000);
+        executor.setThreadNamePrefix("auth-state-");
+        return executor;
     }
 
     @Bean(defaultCandidate = false)

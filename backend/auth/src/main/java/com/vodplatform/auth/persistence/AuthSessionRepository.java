@@ -1,6 +1,7 @@
 package com.vodplatform.auth.persistence;
 
 import jakarta.persistence.LockModeType;
+import jakarta.persistence.QueryHint;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -8,6 +9,7 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.QueryHints;
 
 public interface AuthSessionRepository extends JpaRepository<AuthSessionEntity, UUID> {
 
@@ -23,6 +25,8 @@ public interface AuthSessionRepository extends JpaRepository<AuthSessionEntity, 
             """)
     List<AuthSessionEntity> lockActiveByUser(UUID userId, Instant now);
 
+    // Frees the reader's executor thread when PostgreSQL stalls; the request itself stops waiting sooner.
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "20000"))
     @Query("""
             select new com.vodplatform.auth.persistence.SessionState(
                 u.id, u.status, u.authEpoch, s.expiresAt, s.revokedAt, admin.name

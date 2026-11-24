@@ -18,6 +18,7 @@ import com.vodplatform.auth.persistence.AuthSessionRepository;
 import com.vodplatform.auth.service.SessionStateReader;
 import com.vodplatform.common.support.CookieAuthFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import java.sql.Connection;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.List;
@@ -26,6 +27,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -50,7 +52,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest(properties = {
         "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
-        "CORS_ALLOWED_ORIGINS=http://localhost"
+        "CORS_ALLOWED_ORIGINS=http://localhost",
+        // Short enough for the stalled-database tests; the default is 10 s.
+        "auth.sessions.state-read-timeout=1s"
 })
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE)
 class SessionSecurityIntegrationTests extends CookieAuthFixture implements PostgresTestDatabase {
@@ -62,6 +66,7 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
     @Autowired JwtEncoder encoder;
     @Autowired JwtDecoder decoder;
     @Autowired PlatformTransactionManager transactionManager;
+    @Autowired DataSource dataSource;
     @MockitoBean Ticker ticker;
     @MockitoSpyBean AuthSessionRepository sessions;
     @MockitoSpyBean SessionStateReader reader;
@@ -169,6 +174,44 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         assertThat(revokedSessions()).isZero();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {PROFILE, ADMIN, HLS})
+    void aStalledDatabaseIs503WithinTheReadTimeoutAndKeepsTheSession(String path) throws Exception {
+        var login = signedIn();
+        var request = get(path).header("Authorization", bearer(login)).cookie(cookie(login));
+        try (Connection holder = lockSessionTable()) {
+            long started = System.nanoTime();
+            mvc.perform(request)
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.code").value("AUTH_STATE_UNAVAILABLE"))
+                    .andExpect(header().doesNotExist("Set-Cookie"))
+                    .andExpect(header().doesNotExist("WWW-Authenticate"));
+            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(5));
+            holder.rollback();
+        }
+        assertThat(revokedSessions()).isZero();
+        mvc.perform(get(PROFILE).header("Authorization", bearer(login))).andExpect(status().isOk());
+    }
+
+    @Test
+    void aRequestSharingAStalledLoadAlsoGets503WithinTheReadTimeout() throws Exception {
+        var login = signedIn();
+        UUID id = sessionId();
+        var request = get(PROFILE).header("Authorization", bearer(login));
+        try (var callers = Executors.newFixedThreadPool(2); Connection holder = lockSessionTable()) {
+            var loader = callers.submit(() -> mvc.perform(request).andReturn().getResponse().getStatus());
+            awaitReadBlockedBy(holder);
+            long started = System.nanoTime();
+            var sharing = callers.submit(() -> mvc.perform(request).andReturn().getResponse().getStatus());
+
+            assertThat(loader.get(5, TimeUnit.SECONDS)).isEqualTo(503);
+            assertThat(sharing.get(5, TimeUnit.SECONDS)).isEqualTo(503);
+            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(3));
+            holder.rollback();
+        }
+        verify(reader, times(1)).read(id, false);
+    }
+
     @Test
     void loginAndLogoutReadFailuresPreserveTheCookie() throws Exception {
         var existing = issued();
@@ -240,6 +283,40 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
 
     private MvcResult signedIn() throws Exception {
         return login().andExpect(status().isOk()).andReturn();
+    }
+
+    // A real stall: the session-state query waits for this table lock until the holder rolls back.
+    private Connection lockSessionTable() throws Exception {
+        Connection connection = dataSource.getConnection();
+        try {
+            connection.setAutoCommit(false);
+            try (var lock = connection.createStatement()) {
+                lock.execute("lock table auth_sessions in access exclusive mode");
+            }
+            return connection;
+        } catch (Exception | AssertionError failure) {
+            connection.close();
+            throw failure;
+        }
+    }
+
+    private void awaitReadBlockedBy(Connection holder) throws Exception {
+        int holderPid;
+        try (var query = holder.createStatement(); var row = query.executeQuery("select pg_backend_pid()")) {
+            assertThat(row.next()).isTrue();
+            holderPid = row.getInt(1);
+        }
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            Integer blocked = jdbc.queryForObject(
+                    "select count(*) from pg_stat_activity where ? = any(pg_blocking_pids(pid))",
+                    Integer.class, holderPid);
+            if (blocked > 0) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("The session-state read never waited for the table lock");
     }
 
     private UUID sessionId() {
