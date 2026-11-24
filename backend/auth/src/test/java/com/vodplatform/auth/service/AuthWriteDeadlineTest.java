@@ -31,7 +31,9 @@ class AuthWriteDeadlineTest {
     private final AtomicLong nanos = new AtomicLong();
     private final List<Integer> networkTimeouts = new CopyOnWriteArrayList<>();
     private final List<Long> statementTimeouts = new CopyOnWriteArrayList<>();
+    private final List<String> connectionCalls = new CopyOnWriteArrayList<>();
     private Duration flushTakes = Duration.ZERO;
+    private Duration statementTakes = Duration.ZERO;
     private final AuthWriteDeadline deadline = new AuthWriteDeadline(entityManagerRecordingTimeouts(), nanos::get);
 
     @BeforeEach
@@ -56,7 +58,45 @@ class AuthWriteDeadlineTest {
 
         // Entry with 4 s left; flush with 3 s left; commit with 3 s left.
         assertThat(statementTimeouts).containsExactly(2_000L, 1_000L, 3_000L);
-        assertThat(networkTimeouts).containsExactly(3_000, 2_000, 3_000);
+        assertThat(networkTimeouts).containsExactly(3_000, 2_000, 4_000, 3_000);
+    }
+
+    @Test
+    void theNetworkTimeoutIsInPlaceBeforeEveryStatementItBounds() {
+        deadline.startRequest();
+        deadline.enterTransaction();
+        beforeCommit();
+
+        assertThat(connectionCalls).containsExactly(
+                "network", "statement",
+                "network", "statement",
+                "network", "statement",
+                "network");
+    }
+
+    @Test
+    void theCommitStatementTimeoutRoundTripCountsBeforeTheFinalCheck() {
+        deadline.startRequest();
+        deadline.enterTransaction();
+        advance(Duration.ofSeconds(2));
+        statementTakes = Duration.ofMillis(1_200);
+
+        // 4 s left; the flush's SET LOCAL leaves 2.8 s, the commit's SET LOCAL 1.6 s: under the 2 s reserve.
+        assertThatThrownBy(this::beforeCommit).isInstanceOf(QueryTimeoutException.class);
+        assertThat(connectionCalls).endsWith("network", "statement");
+    }
+
+    @Test
+    void theCommitNetworkTimeoutIsTheTimeLeftAfterTheLastStatement() {
+        deadline.startRequest();
+        deadline.enterTransaction();
+        advance(Duration.ofSeconds(1));
+        statementTakes = Duration.ofMillis(500);
+
+        beforeCommit();
+
+        // 5 s left; 4.5 s after the flush's SET LOCAL; 4 s after the commit's SET LOCAL.
+        assertThat(networkTimeouts).endsWith(4_000);
     }
 
     @Test
@@ -136,11 +176,17 @@ class AuthWriteDeadlineTest {
         Connection connection = mock(Connection.class);
         Statement statement = mock(Statement.class);
         try {
-            doAnswer(invocation -> networkTimeouts.add(invocation.getArgument(1)))
-                    .when(connection).setNetworkTimeout(any(), anyInt());
+            doAnswer(invocation -> {
+                connectionCalls.add("network");
+                return networkTimeouts.add(invocation.getArgument(1));
+            }).when(connection).setNetworkTimeout(any(), anyInt());
             when(connection.createStatement()).thenReturn(statement);
-            doAnswer(invocation -> statementTimeouts.add(statementTimeoutOf(invocation.getArgument(0))))
-                    .when(statement).execute(anyString());
+            doAnswer(invocation -> {
+                connectionCalls.add("statement");
+                statementTimeouts.add(statementTimeoutOf(invocation.getArgument(0)));
+                advance(statementTakes);
+                return false;
+            }).when(statement).execute(anyString());
         } catch (SQLException impossible) {
             throw new AssertionError(impossible);
         }

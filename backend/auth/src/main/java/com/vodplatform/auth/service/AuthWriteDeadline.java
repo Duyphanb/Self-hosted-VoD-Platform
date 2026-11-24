@@ -23,11 +23,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  *   <li>PostgreSQL itself cancels any statement of the transaction, a lock wait included, once it has run longer
  *       than the time left minus {@link #MIN_FOR_COMMIT} ({@code SET LOCAL statement_timeout}); the connection
  *       stays usable and no backend is left waiting;</li>
- *   <li>before the commit, the pending changes are flushed under the same rule, and with less than
- *       {@link #MIN_FOR_COMMIT} left after that flush the transaction rolls back;</li>
- *   <li>the connection's network timeout is only a backstop for a dead connection: in the body it is one second
- *       longer than the statement timeout, so PostgreSQL always cancels first, and for the commit it is the time
- *       left.</li>
+ *   <li>before the commit, the pending changes are flushed under the same rule and the commit's statement timeout
+ *       is set; only then is the time left checked a last time, and with less than {@link #MIN_FOR_COMMIT} the
+ *       transaction rolls back, so no statement runs between that check and the commit;</li>
+ *   <li>the connection's network timeout is only a backstop for a dead connection. It is always set before any
+ *       statement it should bound: one second longer than the statement timeout, so PostgreSQL cancels first, and
+ *       for the commit the time left at the last check.</li>
  * </ul>
  * Each refusal is a {@link QueryTimeoutException}: a runtime exception, so Spring rolls back explicitly even when
  * it is thrown before the commit, and the auth controllers answer it with 503 {@code AUTH_STATE_UNAVAILABLE}
@@ -79,7 +80,7 @@ public class AuthWriteDeadline {
             throw new QueryTimeoutException("The auth request deadline passed before its transaction");
         }
         Duration statementTimeout = left.minus(MIN_FOR_COMMIT);
-        limitStatementsAndNetwork(statementTimeout, statementTimeout.plus(SOCKET_BACKSTOP_MARGIN));
+        limitStatements(statementTimeout);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void beforeCommit(boolean readOnly) {
@@ -88,13 +89,14 @@ public class AuthWriteDeadline {
                 if (leftForFlush.isNegative() || leftForFlush.isZero()) {
                     throw new QueryTimeoutException("The auth request deadline passed before its flush");
                 }
-                limitStatementsAndNetwork(leftForFlush, leftForFlush.plus(SOCKET_BACKSTOP_MARGIN));
+                limitStatements(leftForFlush);
                 entityManager.flush();
-                Duration leftForCommit = remaining(deadline);
-                if (leftForCommit.compareTo(MIN_FOR_COMMIT) < 0) {
-                    throw new QueryTimeoutException("The auth request deadline passed before its commit");
-                }
-                limitStatementsAndNetwork(leftForCommit, leftForCommit);
+                Duration leftAfterFlush = refuseUnlessCommitReserveLeft(deadline);
+                // The commit's own statement timeout is one more round trip, so it comes before the final check.
+                limitStatements(leftAfterFlush);
+                Duration leftForCommit = refuseUnlessCommitReserveLeft(deadline);
+                // Local only: no statement may run between the final check and the commit.
+                limitNetwork(leftForCommit);
             }
         });
     }
@@ -103,15 +105,30 @@ public class AuthWriteDeadline {
         return Duration.ofNanos(deadline - nanoTime.getAsLong());
     }
 
-    private void limitStatementsAndNetwork(Duration statementTimeout, Duration networkTimeout) {
+    private Duration refuseUnlessCommitReserveLeft(long deadline) {
+        Duration left = remaining(deadline);
+        if (left.compareTo(MIN_FOR_COMMIT) < 0) {
+            throw new QueryTimeoutException("The auth request deadline passed before its commit");
+        }
+        return left;
+    }
+
+    // The network backstop goes in first, so the SET LOCAL round trip itself is bounded.
+    private void limitStatements(Duration statementTimeout) {
+        limitNetwork(statementTimeout.plus(SOCKET_BACKSTOP_MARGIN));
         long statementMillis = Math.max(1, statementTimeout.toMillis());
-        int networkMillis = (int) Math.max(1, networkTimeout.toMillis());
         entityManager.unwrap(Session.class).doWork(connection -> {
-            // SET LOCAL ends with the transaction; HikariCP resets the network timeout on return.
+            // SET LOCAL ends with the transaction.
             try (Statement statement = connection.createStatement()) {
                 statement.execute("SET LOCAL statement_timeout = " + statementMillis);
             }
-            connection.setNetworkTimeout(Runnable::run, networkMillis);
         });
+    }
+
+    // Changes only the local socket timeout; it sends nothing to PostgreSQL. HikariCP resets it on return.
+    private void limitNetwork(Duration networkTimeout) {
+        int networkMillis = (int) Math.max(1, networkTimeout.toMillis());
+        entityManager.unwrap(Session.class)
+                .doWork(connection -> connection.setNetworkTimeout(Runnable::run, networkMillis));
     }
 }
