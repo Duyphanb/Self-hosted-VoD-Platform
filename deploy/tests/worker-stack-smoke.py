@@ -125,10 +125,10 @@ class Stack:
     def exec(self, container, script, label, *arguments):
         return self.run(["docker", "exec", "-i", container, "sh", "-c", script, "sh", *arguments], label)
 
-    def sql(self, statement):
+    def sql(self, statement, *, timeout=120):
         return self.run(["docker", "exec", "-i", self.postgres, "sh", "-c",
                          'psql -X -q -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
-                        "SQL", input_text=statement).strip()
+                        "SQL", input_text=statement, timeout=timeout).strip()
 
     def request(self, path, token=None, body=None, content_type=None, timeout=60):
         status, _, content = self.raw_request(path, token, body, content_type, timeout)

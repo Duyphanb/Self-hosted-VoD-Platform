@@ -16,12 +16,16 @@ import tempfile
 import time
 import uuid
 
+from chrome_process_tree import run_browser_tree
 from proxy_network import disposable_proxy_environment, start_with_proxy_retry
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "deploy/docker-compose.yml"
 SERVICES = ("backend", "frontend", "worker")
 PREFIX = "vod-auth-audit-chrome-"
+READY_TIMEOUT_SECONDS = 360
+PROFILE_CLEANUP_TIMEOUT_SECONDS = 10
+WINDOWS_TRANSIENT_FILE_ERRORS = {5, 32, 33, 145}
 
 
 class SmokeFailure(RuntimeError):
@@ -85,15 +89,19 @@ def create_clip(image):
 
 def wait_for_ready(stack, asset):
     started = time.monotonic()
-    while time.monotonic() - started < 360:
-        status = stack.sql(f"SELECT status FROM video_assets WHERE id = '{asset}';")
+    deadline = started + READY_TIMEOUT_SECONDS
+    while (remaining := deadline - time.monotonic()) > 0:
+        try:
+            status = stack.sql(f"SELECT status FROM video_assets WHERE id = '{asset}';", timeout=remaining)
+        except subprocess.TimeoutExpired:
+            break
         if status == "READY":
             print(f"READY wait seconds: {time.monotonic() - started:.2f}", flush=True)
             return
         if status == "FAILED":
             raise SmokeFailure("worker marked the uploaded asset FAILED")
-        time.sleep(1)
-    raise SmokeFailure("uploaded asset did not reach READY in 360 seconds")
+        time.sleep(max(0, min(1, deadline - time.monotonic())))
+    raise SmokeFailure(f"uploaded asset did not reach READY in {READY_TIMEOUT_SECONDS} seconds")
 
 
 def seed(project, base_url, env, worker_image):
@@ -124,6 +132,22 @@ def seed(project, base_url, env, worker_image):
     return movie_id, asset
 
 
+def remove_browser_output(output):
+    # Windows can briefly retain file handles after the job's last process terminates.
+    deadline = time.monotonic() + PROFILE_CLEANUP_TIMEOUT_SECONDS
+    while True:
+        try:
+            shutil.rmtree(output)
+            return
+        except OSError as error:
+            if os.name != "nt" or getattr(error, "winerror", None) not in WINDOWS_TRANSIENT_FILE_ERRORS:
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(0.2, remaining))
+
+
 def run_browser(project, base_url, env):
     stage = "prepare fixture"
     try:
@@ -136,14 +160,22 @@ def run_browser(project, base_url, env):
             "VOD_CHROME_EMAIL": env["NEWMAN_ADMIN_EMAIL"], "VOD_CHROME_PASSWORD": env["NEWMAN_ADMIN_PASSWORD"],
         })
         stage = "Chrome playback scenario"
-        npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
-        with tempfile.TemporaryDirectory(prefix=project + "-") as output:
+        node = shutil.which("node")
+        if node is None:
+            raise SmokeFailure("Node.js is required for the Chrome playback scenario")
+        output = tempfile.mkdtemp(prefix=project + "-")
+        try:
             browser_env.update({
                 "TMP": output, "TEMP": output, "TMPDIR": output,
                 "VOD_CHROME_OUTPUT": str(Path(output) / "results"),
             })
-            result = command([npm, "--prefix", "frontend", "run", "test:e2e:chrome"],
-                             stage, env=browser_env, timeout=360, check=False)
+            cli = ROOT / "frontend/node_modules/@playwright/test/cli.js"
+            result = run_browser_tree([node, str(cli), "test", "--config", "playwright.chrome.config.ts"],
+                                      cwd=ROOT / "frontend", env=browser_env, timeout=360,
+                                      after_stop=lambda: remove_browser_output(output))
+        finally:
+            if not Path(output).exists():
+                print(f"Browser temp cleanup verified for {project}", flush=True)
         for line in result.stdout.splitlines():
             if line.startswith("CHROME_SMOKE "):
                 print(line, flush=True)
@@ -157,11 +189,11 @@ def run_browser(project, base_url, env):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", default=PREFIX + secrets.token_hex(6))
+    parser.add_argument("--project", default=PREFIX + "local", help="Label prefix, extended with a per-run nonce")
     args = parser.parse_args()
-    project = args.project
-    if not re.fullmatch(PREFIX + r"[a-z0-9][a-z0-9-]{0,35}", project):
+    if not re.fullmatch(PREFIX + r"[a-z0-9][a-z0-9-]{0,35}", args.project):
         raise SmokeFailure("use a fresh vod-auth-audit-chrome-* project")
+    project = args.project + "-" + secrets.token_hex(8)
     if project_resources(project):
         raise SmokeFailure("project already owns resources")
     images = [f"{project}-{service}:latest" for service in SERVICES]
@@ -183,24 +215,38 @@ def main():
         return command(compose + ["up", "-d", "--no-build", "--wait", "--wait-timeout", "180"],
                        "start Compose project", env=env, timeout=230, check=False)
 
+    def remove_image(image):
+        if command(["docker", "image", "inspect", image], "inspect image", check=False).returncode == 0:
+            command(["docker", "image", "rm", image], "remove project image")
+
+    def verify_cleanup():
+        if project_resources(project):
+            raise SmokeFailure("disposable project cleanup left resources")
+        print(f"Cleanup verified for {project}: zero containers, volumes or networks", flush=True)
+
+    first_failure = None
     try:
         print(f"Building disposable project {project}", flush=True)
         command(compose + ["build", *SERVICES], "build Compose images", env=env, timeout=1200)
         result = start_with_proxy_retry(start, down, env)
-        if result.returncode and "rabbitmq" in result.stderr:
-            print("Retrying broker startup on the disposable project", flush=True)
-            result = start()
         if result.returncode:
             raise SmokeFailure("Compose project did not become healthy")
         run_browser(project, f"http://127.0.0.1:{port}", env)
+    except BaseException as failure:
+        first_failure = failure
     finally:
-        down()
-        for image in images:
-            if command(["docker", "image", "inspect", image], "inspect image", check=False).returncode == 0:
-                command(["docker", "image", "rm", image], "remove project image")
-        if project_resources(project):
-            raise SmokeFailure("disposable project cleanup left resources")
-        print(f"Cleanup verified for {project}: zero containers, volumes or networks", flush=True)
+        steps = [("Compose teardown", down)]
+        steps.extend(("project image cleanup", lambda image=image: remove_image(image)) for image in images)
+        steps.append(("project resource verification", verify_cleanup))
+        for label, cleanup in steps:
+            try:
+                cleanup()
+            except BaseException as failure:
+                print(f"FAIL: {label}", file=sys.stderr, flush=True)
+                if first_failure is None:
+                    first_failure = failure
+    if first_failure is not None:
+        raise first_failure
 
 
 def cancelled(_signum, _frame):
@@ -209,6 +255,9 @@ def cancelled(_signum, _frame):
 
 if __name__ == "__main__":
     signal.signal(signal.SIGTERM, cancelled)
+    signal.signal(signal.SIGINT, cancelled)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, cancelled)
     try:
         main()
     except SmokeFailure as failure:
