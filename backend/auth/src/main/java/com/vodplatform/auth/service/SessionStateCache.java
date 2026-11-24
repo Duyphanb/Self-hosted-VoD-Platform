@@ -97,11 +97,6 @@ public class SessionStateCache {
         return running == null ? null : running.finished;
     }
 
-    // Visible for tests.
-    boolean isLoading(UUID id) {
-        return inFlight.containsKey(id);
-    }
-
     // Visible for tests: the number of cached sessions after Caffeine's pending evictions.
     long cachedSessionCount() {
         entries.cleanUp();

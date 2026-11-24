@@ -250,15 +250,16 @@ class SessionStateCacheTest {
         try (var callers = Executors.newSingleThreadExecutor()) {
             var caller = callers.submit(() -> cache.read(SESSION_ID));
             assertThat(reading.await(10, TimeUnit.SECONDS)).isTrue();
-            var stillRegisteredWhenCompleted = new AtomicReference<Boolean>();
-            // The callback runs on the completing thread at the moment the callers wake.
-            cache.runningLoad(SESSION_ID)
-                    .whenComplete((result, failure) -> stillRegisteredWhenCompleted.set(cache.isLoading(SESSION_ID)));
+            CompletableFuture<?> originalLoad = cache.runningLoad(SESSION_ID);
+            // The callback runs on the completing thread as the callers wake. A replacement load may already be
+            // registered by then; only the original one must be gone.
+            CompletableFuture<Boolean> detachedBeforeCompletion =
+                    originalLoad.handle((result, failure) -> cache.runningLoad(SESSION_ID) != originalLoad);
             cache.invalidate(SESSION_ID);
             releaseRead.countDown();
 
             assertThat(caller.get(10, TimeUnit.SECONDS)).isEqualTo(ACTIVE);
-            assertThat(stillRegisteredWhenCompleted.get()).isFalse();
+            assertThat(detachedBeforeCompletion.get(10, TimeUnit.SECONDS)).isTrue();
         }
         verify(reader, times(2)).read(SESSION_ID, false);
     }
