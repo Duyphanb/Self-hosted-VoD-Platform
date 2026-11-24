@@ -47,12 +47,12 @@ public class LoginService {
         this.dummyPasswordHash = passwordEncoder.encode("invalid-login-placeholder");
     }
 
-    @Transactional
+    @Transactional(timeout = AuthTransactions.TIMEOUT_SECONDS)
     public IssuedAuthentication login(LoginRequest request) {
         return login(request, null);
     }
 
-    @Transactional
+    @Transactional(timeout = AuthTransactions.TIMEOUT_SECONDS)
     public IssuedAuthentication login(LoginRequest request, String presentedToken) {
         Optional<LoginCredentials> userCandidate = userRepository.findLoginCredentials(request.email());
         String passwordHash = userCandidate

@@ -21,7 +21,7 @@ public class LogoutService {
         this.clock = clock;
     }
 
-    @Transactional
+    @Transactional(timeout = AuthTransactions.TIMEOUT_SECONDS)
     public void logout(String value) {
         refreshTokenService.locate(value)
                 .flatMap(location -> sessions.lock(location.sessionId(), location.userId()))

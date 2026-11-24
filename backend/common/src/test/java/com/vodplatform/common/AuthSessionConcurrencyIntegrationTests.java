@@ -60,6 +60,30 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
     }
 
     @Test
+    void aRefreshBehindALongUserLockIs503WithinTheTransactionTimeoutAndRotatesNothing() throws Exception {
+        Cookie original = issued();
+        String tokenHashQuery = "select token_hash from refresh_tokens where user_id=?";
+        String hashBefore = jdbc.queryForObject(tokenHashQuery, String.class, user);
+        try (var worker = Executors.newSingleThreadExecutor();
+             Connection held = holdRow("users", user, "FOR UPDATE")) {
+            long started = System.nanoTime();
+            var refreshed = worker.submit(() -> refresh(original).andReturn().getResponse());
+            try {
+                var response = refreshed.get(20, TimeUnit.SECONDS);
+                assertThat(response.getStatus()).isEqualTo(503);
+                assertThat(response.getContentAsString()).contains("AUTH_STATE_UNAVAILABLE");
+                assertThat(response.getHeader("Set-Cookie")).isNull();
+                assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(15));
+            } finally {
+                held.rollback();
+            }
+        }
+        assertThat(jdbc.queryForList(tokenHashQuery, String.class, user)).containsExactly(hashBefore);
+        assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=? and revoked_at is not null",
+                Integer.class, user)).isZero();
+    }
+
+    @Test
     void pruningUsesItsOwnSchedulerAndCannotOccupyTheRelayScheduler() throws Exception {
         var scheduled = AuthSessionPruningJob.class.getMethod("prune").getAnnotation(Scheduled.class);
         assertThat(scheduled.scheduler()).isEqualTo("authPruningScheduler");
