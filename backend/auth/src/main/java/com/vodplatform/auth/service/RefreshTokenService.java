@@ -1,6 +1,6 @@
 package com.vodplatform.auth.service;
 
-import com.vodplatform.auth.config.AuthTokenProperties;
+import com.vodplatform.auth.persistence.AuthSessionEntity;
 import com.vodplatform.auth.persistence.RefreshTokenEntity;
 import com.vodplatform.auth.persistence.RefreshTokenRepository;
 import com.vodplatform.auth.persistence.UserEntity;
@@ -12,6 +12,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -20,47 +21,49 @@ public class RefreshTokenService {
 
     private static final int TOKEN_BYTES = 32;
 
-    public void revokeValid(String value) {
-        if (value == null || value.isBlank() || value.length() > 128) return;
-        refreshTokenRepository.findByTokenHash(hash(value))
-                .filter(token -> token.getRevokedAt() == null && token.getExpiresAt().isAfter(clock.instant())
-                        && token.getUser().getStatus() == com.vodplatform.auth.persistence.UserStatus.ACTIVE)
-                .ifPresent(token -> token.revoke(clock.instant()));
-    }
-
     private final RefreshTokenRepository refreshTokenRepository;
-    private final AuthTokenProperties properties;
     private final SecureRandom secureRandom;
     private final Clock clock;
 
     public RefreshTokenService(
             RefreshTokenRepository refreshTokenRepository,
-            AuthTokenProperties properties,
             SecureRandom secureRandom,
             Clock clock
     ) {
         this.refreshTokenRepository = refreshTokenRepository;
-        this.properties = properties;
         this.secureRandom = secureRandom;
         this.clock = clock;
     }
 
-    public IssuedRefreshToken issue(UserEntity user) {
+    public IssuedRefreshToken issue(UserEntity user, AuthSessionEntity session) {
         byte[] tokenBytes = new byte[TOKEN_BYTES];
         secureRandom.nextBytes(tokenBytes);
         String value = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
         String hash = hash(value);
         Instant createdAt = clock.instant();
-        Instant expiresAt = createdAt.plus(properties.refreshTokenTtl());
 
         refreshTokenRepository.save(new RefreshTokenEntity(
                 UUID.randomUUID(),
                 user,
                 hash,
-                expiresAt,
+                session,
                 createdAt
         ));
-        return new IssuedRefreshToken(value, hash, expiresAt);
+        return new IssuedRefreshToken(value, hash, session.getExpiresAt());
+    }
+
+    Optional<LocatedToken> locate(String value) {
+        if (value == null || value.isBlank() || value.length() > 128) {
+            return Optional.empty();
+        }
+        String tokenHash = hash(value);
+        return refreshTokenRepository.locate(tokenHash)
+                .map(location -> new LocatedToken(tokenHash, location.getUserId(), location.getSessionId()));
+    }
+
+    Optional<RefreshTokenEntity> lock(LocatedToken location) {
+        return refreshTokenRepository.findByTokenHash(location.hash())
+                .filter(token -> location.sessionId().equals(token.getSessionId()));
     }
 
     public String hash(String value) {
@@ -70,5 +73,8 @@ public class RefreshTokenService {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is not available", exception);
         }
+    }
+
+    record LocatedToken(String hash, UUID userId, UUID sessionId) {
     }
 }

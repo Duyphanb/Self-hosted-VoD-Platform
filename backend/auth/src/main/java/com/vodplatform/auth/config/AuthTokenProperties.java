@@ -19,11 +19,15 @@ public record AuthTokenProperties(
                 || secret.getBytes(StandardCharsets.UTF_8).length < MINIMUM_HS256_SECRET_BYTES) {
             throw new IllegalArgumentException("JWT secret must contain at least 32 UTF-8 bytes");
         }
-        if (accessTokenTtl == null || accessTokenTtl.isZero() || accessTokenTtl.isNegative()) {
-            throw new IllegalArgumentException("Access token TTL must be positive");
+        if (!between(accessTokenTtl, Duration.ofMinutes(1), Duration.ofMinutes(15))) {
+            throw new IllegalArgumentException("Access token TTL must be between 1 and 15 minutes");
         }
-        if (refreshTokenTtl == null || refreshTokenTtl.isZero() || refreshTokenTtl.isNegative()) {
-            throw new IllegalArgumentException("Refresh token TTL must be positive");
+        if (!between(refreshTokenTtl, Duration.ofDays(1), Duration.ofDays(30))) {
+            throw new IllegalArgumentException("Session TTL must be between 1 and 30 days");
         }
+    }
+
+    private static boolean between(Duration ttl, Duration min, Duration max) {
+        return ttl != null && ttl.compareTo(min) >= 0 && ttl.compareTo(max) <= 0;
     }
 }

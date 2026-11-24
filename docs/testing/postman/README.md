@@ -28,17 +28,19 @@ If `NGINX_HTTP_PORT` uses a host port other than `80`, change `baseUrl` in the i
 
 The first request generates a unique synthetic `testEmail` for the run. The ordered flow then:
 
-1. registers the user;
-2. proves duplicate registration is rejected;
-3. proves invalid credentials are rejected;
-4. logs in and captures the access token plus the refresh cookie;
-5. rotates the refresh token;
-6. proves the prior refresh token cannot be replayed;
-7. calls the protected current-profile endpoint;
-8. revokes the current refresh token;
-9. proves the logged-out token cannot refresh;
-10. proves repeated logout is idempotent;
-11. proves logout without a submitted token is an idempotent no-op.
+1. Registers the user.
+2. Confirms that duplicate registration is rejected.
+3. Confirms that invalid credentials are rejected.
+4. Signs in and captures the access token and refresh cookie.
+5. Rotates the refresh token and captures the successor.
+6. Reads the protected current-profile endpoint.
+7. Replays the previous refresh token and receives 401, revoking the session.
+8. Confirms that the access token from the revoked session receives 401.
+9. Signs in again to start a fresh session for the logout checks.
+10. Logs out of the fresh session.
+11. Confirms that its refresh cookie receives 401.
+12. Confirms that repeated logout is idempotent.
+13. Confirms that logout without a cookie is idempotent.
 
 Run the whole collection rather than starting in the middle because later requests depend on variables captured by earlier requests.
 
@@ -53,7 +55,10 @@ npx --yes newman@6.2.2 run docs/testing/postman/vod-platform-sprint-2-auth.postm
 
 Newman exits nonzero when a request, assertion, or script fails. `--silent` prevents failed assertions from printing token-bearing response values. The command does not write runtime tokens back to the committed environment file unless an explicit export option is added.
 
-CI runs this collection after the PostgreSQL auth regression script against a unique, disposable Compose project and removes its volumes on exit. It starts only the Auth dependencies and Nginx/frontend; it does not verify object storage or the media pipeline. The object-store image availability and maintenance decision remains tracked in Issue #14.
+CI runs this collection after the PostgreSQL auth regression script against a unique, disposable Compose project
+and removes its volumes on exit. The auth collection exercises the auth endpoints through Nginx. Separate CI
+steps exercise object storage and the media pipeline. The object-store image availability and maintenance
+decision remains tracked in Issue #14.
 
 ## Sprint 3 Catalog Collection
 

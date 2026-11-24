@@ -29,7 +29,7 @@ class LogoutIntegrationTests extends CookieAuthFixture implements PostgresTestDa
     void logoutIsIdempotentClearsCookieAndIgnoresBodiesAndDuplicates(String kind) throws Exception {
         Cookie token = issued();
         if (kind.equals("revoked")) {
-            jdbc.update("update refresh_tokens set revoked_at=? where user_id=?", Timestamp.from(now), user);
+            jdbc.update("update auth_sessions set revoked_at=? where user_id=?", Timestamp.from(now), user);
         }
         var request = post("/api/v1/auth/logout").header("Origin", ORIGIN);
         if (kind.equals("valid") || kind.equals("revoked") || kind.equals("duplicate")) {
@@ -47,7 +47,7 @@ class LogoutIntegrationTests extends CookieAuthFixture implements PostgresTestDa
         }
         var result = mvc.perform(request).andExpect(status().isNoContent()).andReturn();
         assertThat(HttpCookie.parse(result.getResponse().getHeader("Set-Cookie")).getFirst().getMaxAge()).isZero();
-        assertThat(revoked()).isEqualTo(kind.equals("valid") || kind.equals("revoked") ? 1 : 0);
+        assertThat(revokedSessions()).isEqualTo(kind.equals("valid") || kind.equals("revoked") ? 1 : 0);
         mvc.perform(post("/api/v1/auth/logout").header("Origin", ORIGIN)).andExpect(status().isNoContent());
     }
 
@@ -55,13 +55,14 @@ class LogoutIntegrationTests extends CookieAuthFixture implements PostgresTestDa
     void successfulLoginRevokesASingleValidPresentedCookie() throws Exception {
         Cookie original = issued();
         login(original).andExpect(status().isOk());
-        assertThat(revoked()).isEqualTo(1);
+        assertThat(revokedSessions()).isEqualTo(1);
+        refresh(original).andExpect(status().isUnauthorized());
     }
 
     @Test
     void loginWithDuplicateCookiesRevokesNothing() throws Exception {
         Cookie original = issued();
         login(original, new Cookie("vod_refresh", "other-cookie")).andExpect(status().isOk());
-        assertThat(revoked()).isZero();
+        assertThat(revokedSessions()).isZero();
     }
 }

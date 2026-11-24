@@ -19,7 +19,8 @@ sequenceDiagram
     Admin->>Frontend: Select movie and video file
     Frontend->>Nginx: POST /api/v1/admin/movies/{movieId}/video
     Nginx->>Backend: Stream body unbuffered with Authorization
-    Backend->>Backend: Validate JWT and ROLE_ADMIN before multipart parsing
+    Backend->>Backend: Validate JWT, then read session and live ROLE_ADMIN before multipart parsing
+    Note over Frontend,Backend: An auth-state read failure returns 503 AUTH_STATE_UNAVAILABLE, upload not accepted
     Backend->>Backend: Spool to dedicated temp disk, validate size, MIME and signature family
     Backend->>PostgreSQL: Check movie and in-flight asset (early advisory check)
     Note over Backend,PostgreSQL: Spool I/O failure returns 503 UPLOAD_STORAGE_UNAVAILABLE and a precheck DB failure 500 UPLOAD_DATABASE_ERROR, both before any PUT
@@ -161,7 +162,7 @@ sequenceDiagram
     Admin->>Frontend: Click retry on failed video asset
     Frontend->>Nginx: POST /api/v1/admin/video-assets/{videoAssetId}/retry
     Nginx->>Backend: Forward request with Authorization
-    Backend->>Backend: Validate JWT and ROLE_ADMIN
+    Backend->>Backend: Validate JWT, then read session and live ROLE_ADMIN
     Backend->>PostgreSQL: BEGIN, same movie-row lock as upload commit, load newest asset/latest attempt
     alt requested asset is newest FAILED and conditional claim wins
         Backend->>PostgreSQL: Conditionally FAILED to QUEUED, clear failure, insert next QUEUED attempt with published_at NULL
@@ -194,20 +195,20 @@ sequenceDiagram
     User->>Frontend: Open watch page
     Frontend->>Nginx: GET /api/v1/movies/{movieId}/playback
     Nginx->>Backend: Forward request with Authorization
-    Backend->>Backend: Validate JWT and access rules
+    Backend->>Backend: Validate JWT and session
     Backend->>PostgreSQL: Apply movie visibility first, then load newest READY by created_at/id and saved progress
     Note over Backend,PostgreSQL: Hidden/missing movie is 404; no current asset is 409 VIDEO_NOT_READY
     Backend-->>Nginx: Playback info with /hls/video-assets/{videoAssetId}/master.m3u8
     Nginx-->>Frontend: Playback info
     Frontend->>Nginx: GET /hls/video-assets/{videoAssetId}/master.m3u8 with Authorization
     Nginx->>Backend: Forward HLS request with Authorization
-    Backend->>Backend: Validate JWT, visibility and current READY asset (else 404)
+    Backend->>Backend: Validate JWT and session<br/>Apply visibility and current READY asset checks (else 404)
     Backend->>MinIO: Read master at stored attempt-scoped key
     Backend-->>Nginx: HLS playlist with MIME type
     Nginx-->>Frontend: HLS playlist
     Frontend->>Nginx: GET /hls/video-assets/{videoAssetId}/segments/{segmentName} with Authorization
     Nginx->>Backend: Forward HLS segment request
-    Backend->>Backend: Validate JWT, visibility, current READY asset and segmentName (else 404)
+    Backend->>Backend: Validate JWT and session<br/>Check visibility, current READY asset and segmentName (else 404)
     Backend->>MinIO: Read segment under prefix derived from stored master key
     Backend-->>Nginx: HLS segment with MIME type
     Nginx-->>Frontend: HLS segment
@@ -232,7 +233,7 @@ sequenceDiagram
 
     Frontend->>Nginx: PUT /api/v1/movies/{movieId}/progress every 10 seconds while playing, and on pause, seek, end and page hide
     Nginx->>Backend: Forward progress request with Authorization
-    Backend->>Backend: Validate JWT
+    Backend->>Backend: Validate JWT and session
     Backend->>PostgreSQL: BEGIN, apply movie visibility (404), load current READY asset (409 VIDEO_NOT_READY)
     Backend->>Backend: Require videoAssetId to be the current asset (409 VIDEO_ASSET_NOT_CURRENT)
     Backend->>Backend: Clamp position to the asset duration, derive finished at 90% or from the ended flag
@@ -268,18 +269,22 @@ sequenceDiagram
     else Origin and Fetch-Site accepted
         Backend->>Backend: Reject missing, duplicate or over-long cookie before hashing
         opt One bounded cookie present
-            Backend->>PostgreSQL: Lock token row and check hash, expiry, revocation and active user
+            Backend->>PostgreSQL: Locate by hash, then lock owner, session and token in order<br/>Check active state
         end
         alt Authentication state unavailable
             Backend-->>Nginx: 503 ApiError AUTH_STATE_UNAVAILABLE without clearing cookie
             Nginx-->>Frontend: 503 JSON ApiError, keep cookie
             Frontend-->>User: Retryable error, retain local identity
         else Cookie invalid, expired, revoked, replayed or user inactive
+            opt Replay of a rotated token in an active session
+                Backend->>PostgreSQL: Revoke the session and commit
+                Backend->>Backend: Invalidate cached session state after commit
+            end
             Backend-->>Nginx: 401 ApiError UNAUTHORIZED with Set-Cookie vod_refresh cleared
             Nginx-->>Frontend: 401 JSON ApiError and clearing cookie
             Frontend-->>User: Require login
         else Token valid
-            Backend->>PostgreSQL: Revoke old token and store rotated hash atomically<br/>Sliding expiry remains 7 days in Issue 6.9
+            Backend->>PostgreSQL: Revoke old token and store rotated hash in the same session<br/>Keep absolute expiry
             Backend-->>Nginx: 200 AuthResponse without refreshToken<br/>Set-Cookie rotated vod_refresh
             Nginx-->>Frontend: User, accessToken, expiresInSeconds JSON<br/>HttpOnly Secure SameSite=Strict cookie
             Frontend->>Frontend: Keep access token in memory only
@@ -287,7 +292,8 @@ sequenceDiagram
     end
 ```
 
-This is the delivered [ADR-012 Issue 6.9](adr/ADR-012.md) flow. Cookie scope is host-only with `Path=/api/v1/auth`; `Max-Age` follows the token's remaining lifetime. A replay rejects only the presented token; session/family revocation belongs to Issue 6.10.
+The host-only cookie has `Path=/api/v1/auth` and a `Max-Age` equal to the remaining absolute session lifetime.
+An authentication-state outage keeps the cookie and leaves the request retryable. See [ADR-012](adr/ADR-012.md).
 
 ## Search
 

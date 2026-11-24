@@ -116,7 +116,8 @@ def main():
     direct_id = str(uuid.uuid4())
     sql(f"""DO $$ BEGIN
         BEGIN
-            INSERT INTO users SELECT '{direct_id}'::uuid, upper(email), password_hash,
+            INSERT INTO users (id, email, password_hash, display_name, status, created_at, updated_at)
+            SELECT '{direct_id}'::uuid, upper(email), password_hash,
                 display_name, status, created_at, updated_at FROM users WHERE id = '{user_id}';
             RAISE EXCEPTION 'Case-duplicate insert unexpectedly succeeded';
         EXCEPTION WHEN unique_violation THEN NULL;
@@ -203,24 +204,30 @@ def main():
     assert sorted(status for status, _ in outcomes) == [200, 401]
     rotated = next(body for status, body in outcomes if status == 200).refresh_cookie
     assert refresh(original)[0] == 401
+    assert refresh(rotated)[0] == 401, "Replay did not revoke the successor session"
+    assert request("/api/v1/users/me", token=access)[0] == 401, "Replay did not invalidate the warmed session cache"
+
+    current = login()[1]
+    rotated = current.refresh_cookie
     assert request("/api/v1/auth/logout", cookie=rotated)[0] == 204
     assert request("/api/v1/auth/logout", cookie=rotated)[0] == 204
     assert request("/api/v1/auth/logout", method="POST")[0] == 204
     assert refresh(rotated)[0] == 401
-    # Existing access JWTs remain valid until expiration under the frozen model.
-    assert request("/api/v1/users/me", token=access)[0] == 200
+    assert request("/api/v1/users/me", token=current["accessToken"])[0] == 401
     print("PASS concurrent rotation, replay rejection and idempotent logout")
 
-    # Hold a real PostgreSQL row lock across expiry, before the HTTP request starts.
+    # Hold a real PostgreSQL row lock across expiry, before the HTTP request starts. The 3-second wait stays below
+    # the refresh's statement timeout (the time left minus the 2 s commit reserve, about 4 s) and leaves it more
+    # than 2 s for the commit.
     session = login()[1]
     digest = hashlib.sha256(session.refresh_cookie.encode()).hexdigest()
-    sql(f"UPDATE refresh_tokens SET expires_at = now() + interval '5 seconds' WHERE token_hash = '{digest}';")
+    sql(f"UPDATE refresh_tokens SET expires_at = now() + interval '2 seconds' WHERE token_hash = '{digest}';")
     holder = subprocess.Popen([
         "docker", "exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
         "-U", "vod_app", "-d", "vod_platform", "-At"
     ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        holder.stdin.write(f"BEGIN; SELECT expires_at > now() FROM refresh_tokens WHERE token_hash = '{digest}' FOR UPDATE; SELECT 'LOCKED'; SELECT pg_sleep(6); COMMIT;\n")
+        holder.stdin.write(f"BEGIN; SELECT expires_at > now() FROM refresh_tokens WHERE token_hash = '{digest}' FOR UPDATE; SELECT 'LOCKED'; SELECT pg_sleep(3); COMMIT;\n")
         holder.stdin.flush()
         assert holder.stdout.readline().strip() == "BEGIN"
         assert holder.stdout.readline().strip() == "t"

@@ -2,6 +2,8 @@ package com.vodplatform.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vodplatform.auth.persistence.AuthSessionEntity;
+import com.vodplatform.auth.persistence.AuthSessionRepository;
 import com.vodplatform.auth.persistence.RefreshTokenEntity;
 import com.vodplatform.auth.persistence.RefreshTokenRepository;
 import com.vodplatform.auth.persistence.RoleEntity;
@@ -63,6 +65,7 @@ class CatalogPersistenceContextTests implements PostgresTestDatabase {
                 UserEntity.class,
                 RoleEntity.class,
                 RefreshTokenEntity.class,
+                AuthSessionEntity.class,
                 Movie.class,
                 Genre.class,
                 Person.class,
@@ -81,6 +84,7 @@ class CatalogPersistenceContextTests implements PostgresTestDatabase {
         assertThat(applicationContext.getBeanNamesForType(UserRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(RoleRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(RefreshTokenRepository.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(AuthSessionRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(VideoAssetRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(EncodingJobRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(PlaybackProgressRepository.class)).hasSize(1);

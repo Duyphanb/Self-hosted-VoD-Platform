@@ -2,7 +2,9 @@ package com.vodplatform.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -11,10 +13,14 @@ import com.vodplatform.auth.service.IssuedAuthentication;
 import com.vodplatform.auth.dto.LoginRequest;
 import com.vodplatform.auth.dto.UserProfile;
 import com.vodplatform.auth.exception.InvalidCredentialsException;
+import com.vodplatform.auth.persistence.AuthSessionEntity;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
+import com.vodplatform.auth.persistence.UserRepository.LoginCredentials;
 import com.vodplatform.auth.persistence.UserStatus;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,6 +33,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 @ExtendWith(MockitoExtension.class)
 class LoginServiceTest {
+
+    private static final Instant NOW = Instant.parse("2030-01-01T00:00:00Z");
+    private static final UUID USER_ID = UUID.randomUUID();
 
     @Mock
     private UserRepository userRepository;
@@ -46,6 +55,12 @@ class LoginServiceTest {
     @Mock
     private UserEntity user;
 
+    @Mock
+    private AuthSessionService sessions;
+
+    private final AuthSessionEntity session = new AuthSessionEntity(
+            UUID.randomUUID(), USER_ID, NOW, NOW.plusSeconds(604800));
+
     private LoginService loginService;
 
     @BeforeEach
@@ -56,7 +71,9 @@ class LoginServiceTest {
                 passwordEncoder,
                 jwtAccessTokenService,
                 refreshTokenService,
-                userProfileMapper
+                userProfileMapper,
+                sessions,
+                Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
 
@@ -69,12 +86,13 @@ class LoginServiceTest {
                 "Viewer",
                 List.of("ROLE_USER")
         );
-        when(userRepository.findByEmail(request.email())).thenReturn(Optional.of(user));
+        candidate(request, "stored-bcrypt-hash", true);
         when(user.getPasswordHash()).thenReturn("stored-bcrypt-hash");
         when(user.getStatus()).thenReturn(UserStatus.ACTIVE);
         when(passwordEncoder.matches(request.password(), "stored-bcrypt-hash")).thenReturn(true);
-        when(jwtAccessTokenService.issue(user)).thenReturn(new IssuedAccessToken("access-token", 900));
-        when(refreshTokenService.issue(user)).thenReturn(new IssuedRefreshToken(
+        when(sessions.start(USER_ID, NOW)).thenReturn(session);
+        when(jwtAccessTokenService.issue(user, session)).thenReturn(new IssuedAccessToken("access-token", 900));
+        when(refreshTokenService.issue(user, session)).thenReturn(new IssuedRefreshToken(
                 "refresh-token",
                 "refresh-hash",
                 Instant.parse("2030-01-08T00:00:00Z")
@@ -98,14 +116,15 @@ class LoginServiceTest {
                 "Viewer",
                 List.of("ROLE_USER")
         );
-        when(userRepository.findByEmail(request.email())).thenReturn(Optional.of(user));
+        candidate(request, "legacy-bcrypt-hash", true);
         when(user.getPasswordHash()).thenReturn("legacy-bcrypt-hash");
         when(user.getStatus()).thenReturn(UserStatus.ACTIVE);
         when(passwordEncoder.matches(request.password(), "legacy-bcrypt-hash")).thenReturn(true);
         when(passwordEncoder.upgradeEncoding("legacy-bcrypt-hash")).thenReturn(true);
         when(passwordEncoder.encode(request.password())).thenReturn("versioned-bcrypt-hash");
-        when(jwtAccessTokenService.issue(user)).thenReturn(new IssuedAccessToken("access-token", 900));
-        when(refreshTokenService.issue(user)).thenReturn(new IssuedRefreshToken(
+        when(sessions.start(USER_ID, NOW)).thenReturn(session);
+        when(jwtAccessTokenService.issue(user, session)).thenReturn(new IssuedAccessToken("access-token", 900));
+        when(refreshTokenService.issue(user, session)).thenReturn(new IssuedRefreshToken(
                 "refresh-token",
                 "refresh-hash",
                 Instant.parse("2030-01-08T00:00:00Z")
@@ -120,19 +139,18 @@ class LoginServiceTest {
     @Test
     void unknownEmailUsesDummyHashAndReturnsGenericFailure() {
         LoginRequest request = new LoginRequest("missing@example.com", "wrong-password");
-        when(userRepository.findByEmail(request.email())).thenReturn(Optional.empty());
+        when(userRepository.findLoginCredentials(request.email())).thenReturn(Optional.empty());
         when(passwordEncoder.matches(request.password(), "dummy-hash")).thenReturn(false);
 
         assertGenericFailure(request);
-        verify(jwtAccessTokenService, never()).issue(user);
-        verify(refreshTokenService, never()).issue(user);
+        verify(jwtAccessTokenService, never()).issue(any(), any());
+        verify(refreshTokenService, never()).issue(any(), any());
     }
 
     @Test
     void wrongPasswordReturnsSameGenericFailure() {
         LoginRequest request = new LoginRequest("viewer@example.com", "wrong-password");
-        when(userRepository.findByEmail(request.email())).thenReturn(Optional.of(user));
-        when(user.getPasswordHash()).thenReturn("stored-bcrypt-hash");
+        candidate(request, "stored-bcrypt-hash", false);
         when(passwordEncoder.matches(request.password(), "stored-bcrypt-hash")).thenReturn(false);
 
         assertGenericFailure(request);
@@ -141,8 +159,7 @@ class LoginServiceTest {
     @Test
     void disabledUserReturnsSameGenericFailure() {
         LoginRequest request = new LoginRequest("viewer@example.com", "correct-password");
-        when(userRepository.findByEmail(request.email())).thenReturn(Optional.of(user));
-        when(user.getPasswordHash()).thenReturn("stored-bcrypt-hash");
+        candidate(request, "stored-bcrypt-hash", true);
         when(user.getStatus()).thenReturn(UserStatus.DISABLED);
         when(passwordEncoder.matches(request.password(), "stored-bcrypt-hash")).thenReturn(true);
 
@@ -153,5 +170,15 @@ class LoginServiceTest {
         assertThatThrownBy(() -> loginService.login(request))
                 .isInstanceOf(InvalidCredentialsException.class)
                 .hasMessage("Invalid email or password");
+    }
+
+    private void candidate(LoginRequest request, String passwordHash, boolean passwordMatches) {
+        LoginCredentials credentials = mock(LoginCredentials.class);
+        when(credentials.getPasswordHash()).thenReturn(passwordHash);
+        when(userRepository.findLoginCredentials(request.email())).thenReturn(Optional.of(credentials));
+        if (passwordMatches) {
+            when(credentials.getId()).thenReturn(USER_ID);
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        }
     }
 }

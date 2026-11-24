@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.progress.service.ProgressNormalizer;
 import com.vodplatform.progress.service.StoredProgress;
@@ -20,12 +21,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
@@ -41,7 +42,8 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
     private static final Instant T0 = Instant.parse("2026-11-01T00:00:00.123456Z");
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
-    @Autowired JwtEncoder encoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
     @Autowired ObjectMapper mapper;
     @Autowired EntityManagerFactory entityManagerFactory;
     private final List<UUID> movies = new ArrayList<>();
@@ -211,16 +213,23 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
     }
 
     @Test
-    void fullHttpWiringUsesFourStatementsForBothTwoAndFiftyItems() throws Exception {
-        for (int i = 0; i < 2; i++) valid(40, 100, T0.plusSeconds(i));
+    void sessionMissAddsOneReadAndTheProjectionUsesFourStatementsForTwoOrFiftyItems() throws Exception {
+        for (int index = 0; index < 2; index++) {
+            valid(40, 100, T0.plusSeconds(index));
+        }
         var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         boolean enabled = statistics.isStatisticsEnabled();
         statistics.setStatisticsEnabled(true);
         try {
             statistics.clear();
             assertThat(list(token).size()).isEqualTo(2);
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(5);
+            statistics.clear();
+            assertThat(list(token).size()).isEqualTo(2);
             assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
-            for (int i = 2; i < 50; i++) valid(40, 100, T0.plusSeconds(i));
+            for (int index = 2; index < 50; index++) {
+                valid(40, 100, T0.plusSeconds(index));
+            }
             statistics.clear();
             assertThat(list(token).size()).isEqualTo(50);
             assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
@@ -301,11 +310,6 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
     }
 
     private String token(UUID id, String role) {
-        Instant now = Instant.now();
-        var claims = JwtClaimsSet.builder().subject(id.toString()).issuedAt(now).expiresAt(now.plusSeconds(600))
-                .claim("userId", id.toString()).claim("email", "continue@example.test")
-                .claim("roles", List.of(role)).build();
-        return "Bearer " + encoder.encode(JwtEncoderParameters.from(
-                JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();
+        return "Bearer " + bearerSessions.tokenFor(id, "continue@example.test", role);
     }
 }

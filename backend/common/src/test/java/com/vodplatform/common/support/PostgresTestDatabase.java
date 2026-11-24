@@ -34,6 +34,8 @@ import org.testcontainers.utility.DockerImageName;
         "spring.jpa.hibernate.ddl-auto=validate",
         // As the runtime Flyway container (FLYWAY_VALIDATE_MIGRATION_NAMING).
         "spring.flyway.validate-migration-naming=true",
+        // Contexts share one database. Pruning tests invoke the job explicitly.
+        "auth.sessions.prune-cron=-",
         // Spring caches up to 32 contexts, each with its own pool on this one server (100 connections):
         // a pool starts with one connection and grows on demand.
         "spring.datasource.hikari.maximum-pool-size=5",

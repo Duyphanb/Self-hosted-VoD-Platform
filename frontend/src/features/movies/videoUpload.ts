@@ -76,6 +76,13 @@ export function classifyUploadFailure(error: unknown, options: { userCancelled?:
   const { status, apiError } = error;
   const trustedCode = apiError?.status === status ? apiError.code : null;
   if (status >= 500 && status <= 599) {
+    if (status === 503 && trustedCode === 'AUTH_STATE_UNAVAILABLE') {
+      return failure(
+        'notAccepted',
+        'Upload not accepted (no committed asset/job pair). Authentication was unavailable. ' +
+          'Select Upload to retry manually.'
+      );
+    }
     if (status === 503 && trustedCode === 'UPLOAD_STORAGE_UNAVAILABLE') {
       return failure('notAccepted', 'Upload not accepted (no committed asset/job pair). Storage was unavailable. Select Upload to retry manually.');
     }

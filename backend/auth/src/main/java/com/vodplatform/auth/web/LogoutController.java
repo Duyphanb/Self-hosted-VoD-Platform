@@ -25,7 +25,9 @@ public class LogoutController {
             jakarta.servlet.http.HttpServletRequest request
     ) {
         String token = cookie.read(request);
-        if (token != null) logoutService.logout(token);
+        if (token != null) {
+            logoutService.logout(token);
+        }
         return ResponseEntity.noContent().header("Set-Cookie", cookie.cleared()).build();
     }
 }

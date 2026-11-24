@@ -6,7 +6,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
-import com.vodplatform.auth.config.AuthTokenProperties;
+import com.vodplatform.auth.persistence.AuthSessionEntity;
 import com.vodplatform.auth.persistence.RefreshTokenEntity;
 import com.vodplatform.auth.persistence.RefreshTokenRepository;
 import com.vodplatform.auth.persistence.UserEntity;
@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -31,20 +32,16 @@ class RefreshTokenServiceTest {
             return null;
         }).when(secureRandom).nextBytes(any(byte[].class));
         Instant createdAt = Instant.parse("2030-01-01T00:00:00Z");
-        AuthTokenProperties properties = new AuthTokenProperties(
-                "test-only-secret-with-at-least-32-bytes",
-                Duration.ofMinutes(15),
-                Duration.ofDays(7)
-        );
         RefreshTokenService service = new RefreshTokenService(
                 repository,
-                properties,
                 secureRandom,
                 Clock.fixed(createdAt, ZoneOffset.UTC)
         );
         UserEntity user = mock(UserEntity.class);
 
-        IssuedRefreshToken issuedToken = service.issue(user);
+        Instant expiresAt = createdAt.plus(Duration.ofDays(6));
+        var session = new AuthSessionEntity(UUID.randomUUID(), UUID.randomUUID(), createdAt.minusSeconds(1), expiresAt);
+        IssuedRefreshToken issuedToken = service.issue(user, session);
 
         ArgumentCaptor<RefreshTokenEntity> entityCaptor = ArgumentCaptor.forClass(RefreshTokenEntity.class);
         verify(repository).save(entityCaptor.capture());
@@ -55,7 +52,8 @@ class RefreshTokenServiceTest {
         assertThat(storedToken.getTokenHash()).isNotEqualTo(issuedToken.value());
         assertThat(storedToken.getUser()).isSameAs(user);
         assertThat(storedToken.getCreatedAt()).isEqualTo(createdAt);
-        assertThat(storedToken.getExpiresAt()).isEqualTo(createdAt.plus(Duration.ofDays(7)));
+        assertThat(storedToken.getSessionId()).isEqualTo(session.getId());
+        assertThat(storedToken.getExpiresAt()).isEqualTo(expiresAt);
         assertThat(storedToken.getRevokedAt()).isNull();
     }
 }

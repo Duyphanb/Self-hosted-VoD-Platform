@@ -14,6 +14,8 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationProvider;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
@@ -34,7 +36,9 @@ public class SecurityConfiguration {
 
     public SecurityConfiguration(CorsProperties origins, com.vodplatform.shared.error.ApiErrorFactory errors,
                                  tools.jackson.databind.ObjectMapper mapper) {
-        this.origins = origins; this.errors = errors; this.mapper = mapper;
+        this.origins = origins;
+        this.errors = errors;
+        this.mapper = mapper;
     }
 
     private static final List<String> CORS_ALLOWED_METHODS = List.of(
@@ -91,9 +95,15 @@ public class SecurityConfiguration {
             ApiAuthenticationEntryPoint authenticationEntryPoint,
             ApiAccessDeniedHandler accessDeniedHandler,
             AccessTokenAuthenticationConverter authenticationConverter,
+            JwtDecoder decoder,
             CorsConfigurationSource corsConfigurationSource
     ) throws Exception {
         applyStatelessDefaults(http, corsConfigurationSource);
+        var bearerProvider = new JwtAuthenticationProvider(decoder);
+        bearerProvider.setJwtAuthenticationConverter(authenticationConverter);
+        var adminProvider = new JwtAuthenticationProvider(decoder);
+        adminProvider.setJwtAuthenticationConverter(authenticationConverter::convertAdmin);
+
         http.authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(ADMIN_ENDPOINTS).hasRole("ADMIN")
                         .anyRequest().authenticated())
@@ -102,7 +112,8 @@ public class SecurityConfiguration {
                         .accessDeniedHandler(accessDeniedHandler))
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .authenticationEntryPoint(authenticationEntryPoint)
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(authenticationConverter)));
+                        .authenticationManagerResolver(request -> ADMIN_ENDPOINTS.matches(request)
+                                ? adminProvider::authenticate : bearerProvider::authenticate));
         return http.build();
     }
 

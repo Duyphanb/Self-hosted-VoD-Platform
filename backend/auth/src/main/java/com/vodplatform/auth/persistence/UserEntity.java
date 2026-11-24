@@ -14,9 +14,11 @@ import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
+import org.hibernate.annotations.DynamicUpdate;
 
 @Entity
 @Table(name = "users")
+@DynamicUpdate
 public class UserEntity {
 
     @Id
@@ -35,6 +37,9 @@ public class UserEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private UserStatus status;
+
+    @Column(name = "auth_epoch", nullable = false)
+    private int authEpoch;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -103,6 +108,10 @@ public class UserEntity {
 
     public UserStatus getStatus() {
         return status;
+    }
+
+    public int getAuthEpoch() {
+        return authEpoch;
     }
 
     public Instant getUpdatedAt() {

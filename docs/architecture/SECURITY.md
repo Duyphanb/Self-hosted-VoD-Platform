@@ -20,30 +20,48 @@ MVP uses bearer JWT access tokens plus persisted refresh tokens.
 - Refresh tokens are opaque random values stored in PostgreSQL as hashes only.
 - Refresh tokens have an expiration timestamp and can be revoked.
 - `POST /api/v1/auth/refresh` rotates the refresh token: the old token is revoked and a new token is issued.
-- `POST /api/v1/auth/logout` revokes the cookie token when present and always clears the cookie; the frontend clears its memory session immediately.
+- A successful `POST /api/v1/auth/logout` revokes the cookie's session and clears the cookie. The SPA clears memory
+  immediately and keeps a pending marker until the server confirms logout.
 - Passwords are hashed with BCrypt.
 - Login passwords share the registration maximum of 72 characters (UTF-16 code units); longer passwords return 400 `VALIDATION_ERROR`. Cookie values longer than 128 characters are rejected before hashing: refresh returns 401 `UNAUTHORIZED` and clears the cookie; logout ignores them and clears the cookie. New hashes pre-hash the full UTF-8 password with SHA-256, so a password longer than 72 bytes is never truncated by BCrypt.
 - Login failures return a generic authentication error.
 - Email identities are case-insensitive through PostgreSQL `lower(email)` for both lookup and uniqueness. Preserve stored spelling and do not collapse dots or plus tags. Existing identity collisions block migration rather than merging accounts; see [ADR-008](adr/ADR-008.md).
 
-### Browser session (ADR-012, current: Issue 6.9; planned: Issue 6.10)
+### Browser session (ADR-012)
 
-[ADR-012](adr/ADR-012.md) supersedes ADR-007. Current behaviour after Issue 6.9:
+[ADR-012](adr/ADR-012.md) supersedes ADR-007.
 
-- The refresh token travels only in the `vod_refresh` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, host-only, `Max-Age` equal to the token's remaining lifetime. It never appears in a body, `localStorage`, `sessionStorage` or IndexedDB. `Secure` may be disabled only for loopback-only local development; the production preflight rejects it. A request with two `vod_refresh` cookies is invalid; no subdomain of the deployment's domain may be controlled by a third party (otherwise the cookie becomes `__Host-vod_refresh` with `Path=/`).
+- The host-only `vod_refresh` cookie uses `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, with `Max-Age` equal
+  to the remaining session lifetime. It stays out of request and response bodies and browser storage. The local
+  loopback-only exception for `Secure` is rejected by production preflight. Duplicate cookies are invalid. If a third
+  party controls any subdomain of the deployment's domain, ADR-012 requires `__Host-vod_refresh` with `Path=/`.
 - The access token is kept in JavaScript memory only and sent only in the `Authorization` header. No cookie authenticates `/api/v1/*` resources or `/hls/*`.
-- `refresh` and `logout` take no body and require an allowed `Origin`; `login` and `register` reject a present, disallowed `Origin`; `Sec-Fetch-Site: cross-site` is rejected on all four (403 `ORIGIN_NOT_ALLOWED`). Login revokes a refresh token presented with it.
-- The refresh token still slides for 7 days. A replay returns 401 and clears the cookie without revoking the successor token. A database/pool failure during refresh returns 503 `AUTH_STATE_UNAVAILABLE` without clearing the cookie.
-- Login ignores duplicate cookies; refresh rejects them with 401; logout revokes none and clears them. Only a successful login revokes one valid presented token.
+- `refresh` and `logout` take no body and require an allowed `Origin`. `login` and `register` reject a disallowed
+  `Origin` when present. `Sec-Fetch-Site: cross-site` is rejected on all four with 403 `ORIGIN_NOT_ALLOWED`.
+- Successful login revokes the session of one valid presented cookie. Login ignores duplicate cookies. Refresh
+  rejects duplicates with 401 and clears the cookie. Logout clears duplicate cookies without selecting a session.
 - The SPA serializes login, refresh/bootstrap and logout with the Web Lock `vod.auth.session.v1`; request timeouts abort inside that lock. Without Web Locks only the documented single-tab fallback is supported. Storage contains only a versioned generation/user-id/logout-pending marker. Every protected request checks it before sending and committing; focus, visibility and pageshow reconcile memory with it. BroadcastChannel only wakes tabs.
 - Only refresh 401 ends the local session. Network failures, timeouts and 5xx allow retry. An unconfirmed logout stays pending across reloads and retries logout instead of restoring a session. Blocked storage falls back to memory with a visible notice.
 - Local Compose keeps `Secure=true`: Chromium and Firefox accept and send this cookie over loopback HTTP (`localhost` and `127.0.0.1`). Plain HTTP on a LAN address cannot sign in; use HTTPS (#136). The production preflight requires a nonempty public-origin allowlist and `AUTH_COOKIE_SECURE=true`.
 
-After Issue 6.10 (required before public deployment):
+- Each sign-in is a server-side session with an absolute 7-day default lifetime (allowed 1–30 days). Rotation keeps the
+  same expiry. The 11th active session evicts the oldest. Replaying a rotated refresh token revokes its entire session.
+- Access tokens live 5 minutes by default (allowed 1–15), have a 5-second clock skew, and carry `sid` and `ver`.
+  Bearer requests validate session ownership, expiry, revocation, account status and `auth_epoch`. Cache entries can
+  authorize only for 30 seconds from load start. Backend revocations invalidate after commit. Operator SQL changes
+  apply within 30 seconds, with refresh and admin operations reading PostgreSQL directly on each request.
+- Admin writes and `/api/v1/admin/**` require both the signed `ROLE_ADMIN` claim and the current database role.
+  Authentication state failures return 503 `AUTH_STATE_UNAVAILABLE` and preserve the cookie. Invalid sessions return
+  401 `UNAUTHORIZED`. A direct HLS 503 uses the existing player retry path.
+- Disabling an account, changing roles or signing out everywhere increments `auth_epoch` and revokes the account's
+  sessions in one transaction. See the [deployment runbook](../deployment/README.md).
 
-- Each sign-in is a server-side session with an absolute 7-day lifetime (rotation never extends it) and at most 10 active sessions per user. Replaying an already rotated refresh token revokes the whole session.
-- Access tokens live 5 minutes (allowed 1-15), are validated with a 5-second clock skew, and carry `sid` and `ver`. Every authenticated request checks the session and the user's `auth_epoch` through a cache whose entries authorize for 30 seconds from the start of their load, so a logout, an account disabling or a role change committed at time C is enforced for every request after C + 30 seconds; refresh and admin operations read PostgreSQL directly and apply it at once. If the state cannot be read the request fails with 503 `AUTH_STATE_UNAVAILABLE`, never 401, and never lets a token through.
-- Disabling an account or changing its roles increments `auth_epoch` and revokes the user's sessions in one transaction. Expired and revoked sessions are pruned 30 days after they end.
+### Personal data in the auth store
+
+`auth_sessions` holds the session and account IDs and creation, expiry and revocation timestamps. `refresh_tokens`
+holds token hashes, account and session IDs, and lifecycle timestamps. A daily job removes sessions that ended more
+than 30 days earlier, cascades their refresh rows and removes legacy rows without a session. Tokens and cookies stay
+out of logs. A session ID may appear as an identifier.
 
 ## RBAC Model
 
@@ -124,7 +142,16 @@ Owner-approved 2026-10-29 in #100/#103/#116 ([ADR-010](adr/ADR-010.md)):
 - Authorize from headers before multipart parsing. Spring spools at threshold 0B to the dedicated `TEMP_UPLOAD_DIR` in the container layer, then streams to storage with known length and bounded heap. Clean request temp files on completion/abort; validate and sweep only stale regular `upload_*.tmp` files non-recursively before the connector starts (no ApplicationRunner, general `/tmp` sweep or symlink traversal).
 - Generate `{movieId}/{videoAssetId}.{ext}` for a new asset per upload. Enforce one in-flight asset per movie with `ux_video_assets_movie_in_flight`; race losers receive 409 `VIDEO_UPLOAD_IN_PROGRESS` and compensate only their own uncommitted raw PUT. Commit new asset/job as QUEUED before publication; publish failure after commit retains media for relay. UPLOADED is reserved.
 - Edge upload limit equals backend multipart file/request limit (2048 MiB default); multipart overhead counts toward the total. Other routes have a 1 MiB edge ceiling. [Upload transport](INFRASTRUCTURE.md#upload-transport) defines buffering, idle timeouts, safe ApiError JSON and mandatory consistency checks.
-- Browser early errors may appear as status 0. SPA pre-checks complement server enforcement; never replay an upload automatically after 401 or imply Cancel after the body has been sent can cancel committed work. Once the body was fully sent, any 5xx or network error means the upload result is unknown, unless the `ApiError` `code` is `UPLOAD_STORAGE_UNAVAILABLE` (503) or `UPLOAD_DATABASE_ERROR` (500): then the upload was not accepted (no committed asset/job pair), so show a failure and allow manual retry. Edge 502/503/504, `UPLOAD_OUTCOME_UNKNOWN` (raw retained), `INTERNAL_ERROR` and unmapped 500s stay unknown; never infer the result from MovieDetail.videoStatus. Upload error bodies carry a safe `requestId` and no keys, URLs, bucket names or SDK text. Deliberate re-upload is safe: in-flight returns 409 VIDEO_UPLOAD_IN_PROGRESS; after completion it creates a newer asset with extra storage for manual purge. Never auto-resubmit; a direct newest-asset view arrives with #168, not a new endpoint here.
+- Browser early errors may appear as status 0. SPA pre-checks complement server enforcement; never replay an
+  upload automatically after 401 or imply Cancel after the body has been sent can cancel committed work. Once
+  the body was fully sent, any 5xx or network error means the upload result is unknown, with three confirmed
+  pre-acceptance exceptions. These are `AUTH_STATE_UNAVAILABLE` (503 before multipart parsing),
+  `UPLOAD_STORAGE_UNAVAILABLE` (503), and `UPLOAD_DATABASE_ERROR` (500). Show a failure and allow manual retry
+  for those responses. Edge 502/503/504, `UPLOAD_OUTCOME_UNKNOWN` (raw retained), `INTERNAL_ERROR` and unmapped
+  500s stay unknown; never infer the result from MovieDetail.videoStatus. Upload error bodies carry a safe
+  `requestId` and no keys, URLs, bucket names or SDK text. Deliberate re-upload is safe: in-flight returns 409
+  VIDEO_UPLOAD_IN_PROGRESS; after completion it creates a newer asset with extra storage for manual purge. Never
+  auto-resubmit; a direct newest-asset view arrives with #168, not a new endpoint here.
 
 Deferred safeguards:
 

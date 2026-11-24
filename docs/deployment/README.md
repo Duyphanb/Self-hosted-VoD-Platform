@@ -22,9 +22,22 @@ Use this folder for Phase 5 deployment and operations artifacts.
 
 Do not put business requirements or implementation code here. Deployment docs should describe how to operate the implemented system.
 
-## Browser session upgrade (Issue 6.9)
+## Browser session upgrades
 
-Deploy the backend and SPA together: refresh/logout no longer accept a JSON token, and login/refresh no longer return one. Old SPA bundles sign out once after this upgrade; reload to get the new bundle and sign in again. No database migration is required.
+For Issue 6.10, set `JWT_ACCESS_TOKEN_TTL_MINUTES=5` in existing environment files before starting the new backend.
+The old value `60` fails startup. The allowed ranges are 1–15 minutes for access tokens and 1–30 days for
+`JWT_REFRESH_TOKEN_TTL_DAYS`, which now sets the absolute session lifetime. The default session lifetime is 7 days.
+
+Apply Flyway V6 before serving traffic. It leaves existing users and refresh rows in place. Existing refresh rows lack
+a session ID and return 401 on use. Existing access tokens lack `sid` and `ver` and also return 401. Each browser must
+sign in once after the upgrade. The daily cleanup subsequently removes legacy refresh rows.
+
+### Upgrade from before Issue 6.9
+
+Deploy the backend and SPA together: refresh/logout no longer accept a JSON token, and login/refresh no longer
+return one. Old SPA bundles sign out once after this upgrade; reload to get the new bundle and sign in again.
+The Issue 6.9 cookie change requires no database migration. A direct upgrade to Issue 6.10 also requires Flyway
+V6 before serving traffic.
 
 For a local `.env` created before Issue 6.9, update the existing value explicitly; new Compose defaults do not replace it:
 
@@ -36,7 +49,8 @@ Add any non-default edge origin, for example `http://localhost:8088`. Keeping on
 
 Set `CORS_ALLOWED_ORIGINS` to the browser-visible public origin (include a non-default port). Refresh/logout require an exact allowed `Origin`, independently of Nginx's forwarded origin and CORS. An empty allowlist fails production preflight. Leave `AUTH_COOKIE_SECURE=true`; production preflight rejects false. Local false is restricted at application startup to a nonempty loopback-only allowlist. Loopback HTTP works with Secure cookies in Chromium and Firefox; LAN HTTP sign-in does not. Use HTTPS (#136) for other devices.
 
-Only refresh 401 clears the browser session. A refresh state-store outage returns 503 `AUTH_STATE_UNAVAILABLE` and preserves the cookie. An unconfirmed logout stays pending in the SPA and must be retried; bearer revocation/session enforcement in Issue 6.10 remains planned before public deployment.
+Auth-state read failures return 503 `AUTH_STATE_UNAVAILABLE` and preserve the cookie. An unconfirmed logout stays
+pending in the SPA and must be retried. A rejected refresh returns 401 and clears the cookie.
 
 ## First Administrator
 
@@ -53,32 +67,71 @@ Local stack shown; for production, replace `--env-file .env` with
 ADMIN_EMAIL='admin@example.com'
 docker compose --env-file .env -f deploy/docker-compose.yml exec -T postgres \
   sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v email="$1"' sh "$ADMIN_EMAIL" <<'SQL'
-INSERT INTO user_roles (user_id, role_id)
-SELECT u.id, r.id
-FROM users u
-JOIN roles r ON r.name = 'ROLE_ADMIN'
-WHERE lower(u.email) = lower(:'email')
-ON CONFLICT DO NOTHING;
+BEGIN;
+SELECT id FROM users WHERE lower(email) = lower(:'email') FOR UPDATE;
+WITH granted AS (
+    INSERT INTO user_roles (user_id, role_id)
+    SELECT u.id, r.id
+    FROM users u
+    JOIN roles r ON r.name = 'ROLE_ADMIN'
+    WHERE lower(u.email) = lower(:'email')
+    ON CONFLICT DO NOTHING
+    RETURNING user_id
+), updated AS (
+    UPDATE users SET auth_epoch = auth_epoch + 1, updated_at = now()
+    WHERE id IN (SELECT user_id FROM granted)
+    RETURNING id
+)
+UPDATE auth_sessions SET revoked_at = now()
+WHERE user_id IN (SELECT id FROM updated) AND revoked_at IS NULL;
 SELECT count(*) AS admin_role_granted
 FROM users u
 JOIN user_roles ur ON ur.user_id = u.id
 JOIN roles r ON r.id = ur.role_id
 WHERE lower(u.email) = lower(:'email') AND r.name = 'ROLE_ADMIN';
+COMMIT;
 SQL
 ```
 
 `admin_role_granted` must be `1`; `0` means no account uses that email. The
-statement is idempotent. Roles are carried in the access token, so the new role
-applies after the next token refresh or sign-in.
+transaction is idempotent. A new grant revokes existing sessions and requires a new sign-in with the role.
 
 The catalog runtime smoke in CI (`deploy/tests/catalog-runtime-smoke.py`)
 promotes its administrator by running the `sh -c` command and the SQL of this
 block as written here, so keep the block's form when editing it.
 
-To remove the role, delete the `user_roles` row and revoke the user's active
-refresh tokens (`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = ...
-AND revoked_at IS NULL`). An access token already issued stays valid until it
-expires (60 minutes by default); the accepted delay is tracked in issue #72.
+## Disable an account, remove an admin role, or sign out everywhere
+
+Run the following with the same `psql -X -v ON_ERROR_STOP=1` connection as above. Set `user_id` to the verified account
+UUID and choose exactly one operation: `disable_account`, `remove_admin_role`, or `sign_out_everywhere`.
+
+```sql
+\set user_id '00000000-0000-0000-0000-000000000000'
+\set disable_account false
+\set remove_admin_role false
+\set sign_out_everywhere true
+
+BEGIN;
+SELECT id FROM users WHERE id = :'user_id'::uuid FOR UPDATE;
+\if :disable_account
+    UPDATE users SET status = 'DISABLED' WHERE id = :'user_id'::uuid;
+\elif :remove_admin_role
+    DELETE FROM user_roles WHERE user_id = :'user_id'::uuid
+      AND role_id = (SELECT id FROM roles WHERE name = 'ROLE_ADMIN');
+\elif :sign_out_everywhere
+    -- The epoch and revocation below are the sign-out operation.
+\else
+    ROLLBACK;
+    \quit
+\endif
+UPDATE users SET auth_epoch = auth_epoch + 1, updated_at = now() WHERE id = :'user_id'::uuid;
+UPDATE auth_sessions SET revoked_at = now() WHERE user_id = :'user_id'::uuid AND revoked_at IS NULL;
+COMMIT;
+```
+
+Refresh and admin operations enforce the change when the transaction commits. Ordinary bearer and HLS requests enforce
+it within 30 seconds. A user who retains an active account can sign in again. Session rows and their refresh tokens
+are pruned in batches once they have been expired or revoked for more than 30 days.
 
 ## Database Collation
 

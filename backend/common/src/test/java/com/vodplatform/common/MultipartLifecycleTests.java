@@ -2,18 +2,25 @@ package com.vodplatform.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.vodplatform.auth.persistence.AuthSessionRepository;
 import com.vodplatform.common.contract.ApiContract;
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.common.web.MultipartRouteFilter;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
 import com.vodplatform.encoding.messaging.PublishOutcome;
 import com.vodplatform.shared.storage.ObjectStorage;
+import com.vodplatform.upload.web.VideoUploadController;
 
 import jakarta.servlet.Filter;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,6 +33,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -38,15 +46,12 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -119,7 +124,8 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
 
     @LocalServerPort int port;
 
-    @Autowired JwtEncoder jwtEncoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
 
     @Autowired ObjectMapper mapper;
 
@@ -130,6 +136,8 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
     @MockitoBean ObjectStorage storage;
 
     @MockitoBean EncodingJobPublisher publisher;
+    @MockitoSpyBean AuthSessionRepository authSessions;
+    @MockitoSpyBean VideoUploadController uploadController;
 
     private final HttpClient client =
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
@@ -192,24 +200,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
     }
 
     private String bearer(String role) {
-        Instant now = Instant.now();
-        String id = UUID.randomUUID().toString();
-        var claims =
-                JwtClaimsSet.builder()
-                        .subject(id)
-                        .issuedAt(now)
-                        .expiresAt(now.plusSeconds(300))
-                        .claim("userId", id)
-                        .claim("email", "multipart-test@example.com")
-                        .claim("roles", List.of(role))
-                        .build();
-        return "Bearer "
-                + jwtEncoder
-                        .encode(
-                                JwtEncoderParameters.from(
-                                        JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
-                                        claims))
-                        .getTokenValue();
+        return "Bearer " + bearerSessions.token(role);
     }
 
     /** A multipart body whose file has a valid ISO-BMFF signature ({@code ftyp} at offset 4). */
@@ -596,6 +587,26 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
                         assertThat(error.get("requestId").asString()).isEqualTo("upload.denied_1");
                     });
         }
+    }
+
+    @Test
+    void authStateOutageRejectsMultipartBeforeSpoolingOrCallingTheUploadHandler() throws Exception {
+        String admin = bearer("ROLE_ADMIN");
+        doThrow(new DataAccessResourceFailureException("fixture")).when(authSessions).readState(any(), anyBoolean());
+        var request = request(UPLOAD)
+                .header("Authorization", admin)
+                .header("Content-Type", CONTENT_TYPE)
+                .header("X-Request-ID", "upload.auth_state")
+                .POST(HttpRequest.BodyPublishers.ofString(body(700))).build();
+
+        assertNoSpool(() -> {
+            var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            var error = contractError(UPLOAD, response, 503, "AUTH_STATE_UNAVAILABLE");
+            assertThat(error.get("requestId").asString()).isEqualTo("upload.auth_state");
+            assertThat(response.headers().firstValue("Set-Cookie")).isEmpty();
+        });
+        verify(uploadController, never()).upload(any(), any(), any());
+        verifyNoInteractions(storage, publisher);
     }
 
     static Stream<String> uploadPathTricks() {

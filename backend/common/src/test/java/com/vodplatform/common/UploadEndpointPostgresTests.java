@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.vodplatform.common.contract.ApiContract;
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
 import com.vodplatform.encoding.messaging.PublishOutcome;
@@ -21,15 +22,11 @@ import jakarta.servlet.MultipartConfigElement;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import tools.jackson.databind.ObjectMapper;
@@ -73,7 +70,8 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
 
     @Autowired JdbcTemplate jdbc;
 
-    @Autowired JwtEncoder jwtEncoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
 
     @Autowired ObjectMapper mapper;
 
@@ -113,24 +111,7 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
     }
 
     private String admin() {
-        Instant now = Instant.now();
-        String id = UUID.randomUUID().toString();
-        var claims =
-                JwtClaimsSet.builder()
-                        .subject(id)
-                        .issuedAt(now)
-                        .expiresAt(now.plusSeconds(300))
-                        .claim("userId", id)
-                        .claim("email", "race-admin@example.com")
-                        .claim("roles", List.of("ROLE_ADMIN"))
-                        .build();
-        return "Bearer "
-                + jwtEncoder
-                        .encode(
-                                JwtEncoderParameters.from(
-                                        JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
-                                        claims))
-                        .getTokenValue();
+        return "Bearer " + bearerSessions.token("ROLE_ADMIN");
     }
 
     @Test

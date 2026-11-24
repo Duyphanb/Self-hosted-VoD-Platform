@@ -14,6 +14,7 @@ import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
 import com.vodplatform.auth.persistence.UserStatus;
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Instant;
 import java.util.List;
@@ -26,16 +27,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 
@@ -133,8 +131,11 @@ class UserProfileIntegrationTests implements PostgresTestDatabase {
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
+
     @Autowired
-    private JwtEncoder jwtEncoder;
+    private JdbcTemplate jdbc;
 
     private UserEntity currentUser;
     private UserEntity otherUser;
@@ -244,17 +245,21 @@ class UserProfileIntegrationTests implements PostgresTestDatabase {
                 "disabled@example.com",
                 "disabled-password-hash",
                 "Disabled Viewer",
-                UserStatus.DISABLED,
+                UserStatus.ACTIVE,
                 now,
                 now
         );
         disabledUser.addRole(roleRepository.findByName("ROLE_USER").orElseThrow());
         userRepository.saveAndFlush(disabledUser);
+        String cachedToken = tokenFor(disabledUser);
+        mockMvc.perform(get("/api/v1/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + cachedToken))
+                .andExpect(status().isOk());
+        jdbc.update("update users set status = 'DISABLED' where id = ?", disabledUser.getId());
 
         // The token itself is valid, so the 401 comes from the auth exception advice applied to
         // the user controller, not from the security entry point (which adds WWW-Authenticate).
         mockMvc.perform(get("/api/v1/users/me")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenFor(disabledUser)))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + cachedToken))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().doesNotExist(HttpHeaders.WWW_AUTHENTICATE))
                 .andExpect(jsonPath("$.timestamp").exists())
@@ -264,19 +269,7 @@ class UserProfileIntegrationTests implements PostgresTestDatabase {
     }
 
     private String tokenFor(UserEntity user) {
-        Instant now = Instant.now();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .subject(user.getId().toString())
-                .issuedAt(now)
-                .expiresAt(now.plusSeconds(300))
-                .claim("userId", user.getId().toString())
-                .claim("email", user.getEmail())
-                .claim("roles", List.of("ROLE_USER"))
-                .build();
-        return jwtEncoder.encode(JwtEncoderParameters.from(
-                JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
-                claims
-        )).getTokenValue();
+        return bearerSessions.tokenFor(user.getId(), user.getEmail(), "ROLE_USER");
     }
 
 }

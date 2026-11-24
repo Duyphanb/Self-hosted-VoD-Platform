@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -13,7 +14,6 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
-import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -23,6 +23,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.skyscreamer.jsonassert.Customization;
 import org.skyscreamer.jsonassert.JSONCompareMode;
 import org.skyscreamer.jsonassert.comparator.CustomComparator;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -30,11 +31,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.json.JsonAssert;
 import org.springframework.test.json.JsonComparator;
 import org.springframework.test.web.servlet.MockMvc;
@@ -102,8 +98,8 @@ class AdminUrlAuthorizationIntegrationTests implements PostgresTestDatabase {
     @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
-    private JwtEncoder jwtEncoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
 
     static Stream<ProbeRequest> adminOperationsWithInvalidInput() {
         return Stream.of(
@@ -268,21 +264,7 @@ class AdminUrlAuthorizationIntegrationTests implements PostgresTestDatabase {
     }
 
     private String bearerToken(String role) {
-        UUID userId = UUID.randomUUID();
-        Instant now = Instant.now();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .subject(userId.toString())
-                .issuedAt(now)
-                .expiresAt(now.plusSeconds(300))
-                .claim("userId", userId.toString())
-                .claim("email", "admin-url-test@example.com")
-                .claim("roles", List.of(role))
-                .build();
-        String token = jwtEncoder.encode(JwtEncoderParameters.from(
-                JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
-                claims
-        )).getTokenValue();
-        return "Bearer " + token;
+        return "Bearer " + bearerSessions.token(role);
     }
 
     record ProbeRequest(HttpMethod method, String path, String body) {

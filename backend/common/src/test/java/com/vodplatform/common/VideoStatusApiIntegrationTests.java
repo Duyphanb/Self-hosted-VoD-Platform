@@ -12,6 +12,7 @@ import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.catalog.persistence.MovieSort;
 import com.vodplatform.catalog.persistence.MovieStatus;
 import com.vodplatform.catalog.service.MovieService;
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -22,17 +23,13 @@ import java.util.UUID;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,7 +49,8 @@ class VideoStatusApiIntegrationTests implements PostgresTestDatabase {
             """;
 
     @Autowired private MockMvc mockMvc;
-    @Autowired private JwtEncoder jwtEncoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
     @Autowired private MovieRepository movies;
     @Autowired private MovieService movieService;
     @Autowired private EntityManager entityManager;
@@ -137,12 +135,6 @@ class VideoStatusApiIntegrationTests implements PostgresTestDatabase {
     }
 
     private String bearer(String role) {
-        UUID user = UUID.randomUUID();
-        Instant now = Instant.now();
-        JwtClaimsSet claims = JwtClaimsSet.builder().subject(user.toString()).issuedAt(now)
-                .expiresAt(now.plusSeconds(300)).claim("userId", user.toString())
-                .claim("email", "availability@example.test").claim("roles", List.of(role)).build();
-        return "Bearer " + jwtEncoder.encode(JwtEncoderParameters.from(
-                JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(), claims)).getTokenValue();
+        return "Bearer " + bearerSessions.token(role);
     }
 }

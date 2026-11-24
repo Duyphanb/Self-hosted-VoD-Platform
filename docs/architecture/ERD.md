@@ -64,6 +64,8 @@ erDiagram
     users ||--o{ user_roles : has
     roles ||--o{ user_roles : assigned
     users ||--o{ refresh_tokens : owns
+    users ||--o{ auth_sessions : signs_in
+    auth_sessions o|--o{ refresh_tokens : rotates
 
     movies ||--o{ movie_genres : categorized
     genres ||--o{ movie_genres : used_by
@@ -93,6 +95,7 @@ erDiagram
 | `password_hash` | varchar(255) | not null | BCrypt hash |
 | `display_name` | varchar(100) | not null | Public display name |
 | `status` | varchar(20) | not null, check | `ACTIVE`, `DISABLED` |
+| `auth_epoch` | integer | not null, default 0 | JWT session version for account-wide revocation |
 | `created_at` | timestamptz | not null | Creation timestamp |
 | `updated_at` | timestamptz | not null | Last update timestamp |
 
@@ -124,6 +127,18 @@ Constraints:
 
 - primary key: (`user_id`, `role_id`)
 
+### `auth_sessions`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | uuid | PK | Session ID (`sid` in JWT) |
+| `user_id` | uuid | FK -> `users.id` on delete cascade, not null | Owner |
+| `created_at` | timestamptz | not null | Sign-in timestamp |
+| `expires_at` | timestamptz | not null | Absolute expiry across all rotations |
+| `revoked_at` | timestamptz | null | First revocation timestamp |
+
+Indexes cover `(user_id, created_at, id)` for the session cap and `(LEAST(expires_at, revoked_at), id)` for pruning.
+
 ### `refresh_tokens`
 
 | Column | Type | Constraints | Notes |
@@ -131,6 +146,7 @@ Constraints:
 | `id` | uuid | PK | Token record ID |
 | `user_id` | uuid | FK -> `users.id` on delete cascade, not null | Owner |
 | `token_hash` | varchar(255) | unique, not null | Hash only |
+| `session_id` | uuid | FK -> `auth_sessions.id` on delete cascade, nullable | Null only for legacy rows |
 | `expires_at` | timestamptz | not null | Expiration |
 | `revoked_at` | timestamptz | null | Revocation timestamp |
 | `created_at` | timestamptz | not null | Creation timestamp |
@@ -140,6 +156,7 @@ Indexes:
 - unique `ux_refresh_tokens_token_hash` on `token_hash`
 - `ix_refresh_tokens_user_id` on `user_id`
 - `ix_refresh_tokens_expires_at` on `expires_at`
+- `ix_refresh_tokens_session_id` on `session_id`
 
 ### `movies`
 
@@ -349,7 +366,8 @@ The `search_vector` is rebuilt by application code on any metadata change that a
 - Movie delete in API means archive: set `movies.status = 'ARCHIVED'`.
 - Hard delete is not part of MVP user/admin flow.
 - User-owned records are scoped by authenticated user ID.
-- Deleting a `users` row cascades to refresh tokens, playback progress, watchlist items, watch history, and ratings.
+- Deleting a `users` row cascades to auth sessions, refresh tokens, playback progress, watchlist items, watch history,
+  and ratings.
 - Media object cleanup is not automatic on movie archive.
 - Archiving a movie, or any non-`PUBLISHED` status, keeps the related watchlist items, watch history, playback progress, and ratings. They are hidden from user-facing lists and per-movie endpoints by the movie visibility rule in [SECURITY.md](SECURITY.md#movie-visibility), and reappear when the movie is restored.
 

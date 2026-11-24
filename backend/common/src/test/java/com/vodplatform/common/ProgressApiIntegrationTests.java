@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.common.support.MovieVisibilityRule;
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.progress.dto.ProgressRequest;
 import com.vodplatform.progress.persistence.WatchHistoryWriter;
@@ -24,13 +25,13 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.*;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.test.context.bean.override.mockito.*;
 import org.springframework.test.json.JsonCompareMode;
@@ -45,7 +46,8 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
     private static final Instant T0=Instant.parse("2026-11-01T00:00:00.123456789Z");
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
-    @Autowired JwtEncoder encoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
     @Autowired ObjectMapper mapper;
     @Autowired MovieRepository movies;
     @Autowired ProgressService service;
@@ -322,5 +324,7 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
     private UUID user() {UUID id=UUID.randomUUID();userIds.add(id);jdbc.update("insert into users(id,email,password_hash,display_name,status,created_at,updated_at) values(?,?,'unused','Progress fixture','ACTIVE',?,?)",id,id+"@example.test",Timestamp.from(T0),Timestamp.from(T0));return id;}
     private UUID movie() {UUID id=UUID.randomUUID();movieIds.add(id);jdbc.update("insert into movies(id,title,slug,description,status,created_at,updated_at) values(?,'Progress fixture',?,'Progress fixture','PUBLISHED',?,?)",id,"progress-"+id,Timestamp.from(T0),Timestamp.from(T0));return id;}
     private UUID asset(UUID movie,String state,Integer duration,int second) {UUID id=UUID.randomUUID();jdbc.update("insert into video_assets(id,movie_id,raw_bucket,raw_object_key,status,duration_seconds,created_at,updated_at) values(?,?,'fixture',?,?,?,?,?)",id,movie,id.toString(),state,duration,Timestamp.from(T0.plusSeconds(second)),Timestamp.from(T0));return id;}
-    private String token(UUID user,String role) {Instant time=Instant.now();var claims=JwtClaimsSet.builder().subject(user.toString()).issuedAt(time).expiresAt(time.plusSeconds(600)).claim("userId",user.toString()).claim("email","progress@example.test").claim("roles",List.of(role)).build();return "Bearer "+encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(),claims)).getTokenValue();}
+    private String token(UUID user, String role) {
+        return "Bearer " + bearerSessions.tokenFor(user, "progress@example.test", role);
+    }
 }

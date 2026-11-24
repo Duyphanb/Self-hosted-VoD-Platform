@@ -16,6 +16,7 @@ import com.vodplatform.catalog.dto.GenreResponse;
 import com.vodplatform.catalog.persistence.Genre;
 import com.vodplatform.catalog.persistence.GenreRepository;
 import com.vodplatform.catalog.web.GenreAdminController;
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.skyscreamer.jsonassert.Customization;
 import org.skyscreamer.jsonassert.JSONCompareMode;
 import org.skyscreamer.jsonassert.comparator.CustomComparator;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -34,11 +36,6 @@ import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.json.JsonAssert;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.json.JsonComparator;
@@ -72,8 +69,8 @@ class GenreAdminApiIntegrationTests implements PostgresTestDatabase {
     @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
-    private JwtEncoder jwtEncoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
 
     @Autowired
     private GenreAdminController genreAdminController;
@@ -258,20 +255,6 @@ class GenreAdminApiIntegrationTests implements PostgresTestDatabase {
     }
 
     private String bearerToken(String role) {
-        UUID userId = UUID.randomUUID();
-        Instant now = Instant.now();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .subject(userId.toString())
-                .issuedAt(now)
-                .expiresAt(now.plusSeconds(300))
-                .claim("userId", userId.toString())
-                .claim("email", "genre-admin-test@example.com")
-                .claim("roles", List.of(role))
-                .build();
-        String token = jwtEncoder.encode(JwtEncoderParameters.from(
-                JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
-                claims
-        )).getTokenValue();
-        return "Bearer " + token;
+        return "Bearer " + bearerSessions.token(role);
     }
 }

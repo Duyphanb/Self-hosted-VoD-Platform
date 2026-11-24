@@ -1,6 +1,7 @@
 package com.vodplatform.auth.service;
 
 import com.vodplatform.auth.config.AuthTokenProperties;
+import com.vodplatform.auth.persistence.AuthSessionEntity;
 import com.vodplatform.auth.persistence.RoleEntity;
 import com.vodplatform.auth.persistence.UserEntity;
 import java.time.Clock;
@@ -27,7 +28,7 @@ public class JwtAccessTokenService {
         this.clock = clock;
     }
 
-    public IssuedAccessToken issue(UserEntity user) {
+    public IssuedAccessToken issue(UserEntity user, AuthSessionEntity session) {
         Instant issuedAt = clock.instant();
         Instant expiresAt = issuedAt.plus(properties.accessTokenTtl());
         List<String> roles = user.getRoles().stream()
@@ -43,6 +44,8 @@ public class JwtAccessTokenService {
                 .claim("userId", userId)
                 .claim("email", user.getEmail())
                 .claim("roles", roles)
+                .claim("sid", session.getId().toString())
+                .claim("ver", user.getAuthEpoch())
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256)
                 .type("JWT")

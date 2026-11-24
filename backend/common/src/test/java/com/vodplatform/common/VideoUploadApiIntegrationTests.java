@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.exception.UploadDatabaseException;
@@ -29,17 +30,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockPart;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -69,7 +66,8 @@ class VideoUploadApiIntegrationTests implements PostgresTestDatabase {
 
     @Autowired JdbcTemplate jdbc;
 
-    @Autowired JwtEncoder jwtEncoder;
+    @RegisterExtension
+    final BearerSessionFixture bearerSessions = new BearerSessionFixture();
 
     @MockitoBean ObjectStorage storage;
 
@@ -117,24 +115,7 @@ class VideoUploadApiIntegrationTests implements PostgresTestDatabase {
     }
 
     private String admin() {
-        Instant now = Instant.now();
-        String id = UUID.randomUUID().toString();
-        var claims =
-                JwtClaimsSet.builder()
-                        .subject(id)
-                        .issuedAt(now)
-                        .expiresAt(now.plusSeconds(300))
-                        .claim("userId", id)
-                        .claim("email", "upload-admin@example.com")
-                        .claim("roles", List.of("ROLE_ADMIN"))
-                        .build();
-        return "Bearer "
-                + jwtEncoder
-                        .encode(
-                                JwtEncoderParameters.from(
-                                        JwsHeader.with(MacAlgorithm.HS256).type("JWT").build(),
-                                        claims))
-                        .getTokenValue();
+        return "Bearer " + bearerSessions.token("ROLE_ADMIN");
     }
 
     private ResultActions upload(UUID movieId, String declaredType, String requestId) throws Exception {
