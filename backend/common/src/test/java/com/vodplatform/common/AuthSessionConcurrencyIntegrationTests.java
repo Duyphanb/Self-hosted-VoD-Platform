@@ -7,14 +7,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.vodplatform.auth.service.AuthSessionPruningJob;
 import com.vodplatform.common.support.CookieAuthFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.zaxxer.hikari.HikariDataSource;
 import jakarta.servlet.http.Cookie;
 import java.sql.Connection;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Future;
 import java.util.concurrent.Executors;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -72,6 +75,39 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
         assertThat(jdbc.queryForList(tokenHashQuery, String.class, user)).containsExactly(hashBefore);
         assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=? and revoked_at is not null",
                 Integer.class, user)).isZero();
+    }
+
+    @Test
+    void aRefreshThatGetsItsConnectionOnlyAfterItsDeadlineChangesNothing() throws Exception {
+        Cookie original = issued();
+        String tokenHashQuery = "select token_hash from refresh_tokens where user_id=?";
+        String hashBefore = jdbc.queryForObject(tokenHashQuery, String.class, user);
+        int poolSize = dataSource.unwrap(HikariDataSource.class).getMaximumPoolSize();
+        var heldConnections = new ArrayList<Connection>();
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            Future<MockHttpServletResponse> refreshed;
+            try {
+                for (int connection = 0; connection < poolSize; connection++) {
+                    heldConnections.add(dataSource.getConnection());
+                }
+                refreshed = worker.submit(() -> refresh(original).andReturn().getResponse());
+                // Longer than the 6-second request budget; the SPA would still be waiting until 10 s.
+                Thread.sleep(6_500);
+            } finally {
+                for (Connection connection : heldConnections) {
+                    connection.close();
+                }
+            }
+            var response = refreshed.get(20, TimeUnit.SECONDS);
+            assertThat(response.getStatus()).isEqualTo(503);
+            assertThat(response.getContentAsString()).contains("AUTH_STATE_UNAVAILABLE");
+            assertThat(response.getHeader("Set-Cookie")).isNull();
+        }
+        assertThat(jdbc.queryForList(tokenHashQuery, String.class, user)).containsExactly(hashBefore);
+        assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=? and revoked_at is not null",
+                Integer.class, user)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from auth_sessions where user_id=? and revoked_at is null",
+                Integer.class, user)).isOne();
     }
 
     @Test

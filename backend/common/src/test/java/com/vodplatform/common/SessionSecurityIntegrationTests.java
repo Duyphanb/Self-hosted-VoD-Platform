@@ -254,7 +254,7 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
     }
 
     @Test
-    void loginRefreshAndLogoutRunOnAConnectionWhoseNetworkTimeoutEndsADeadCommit() throws Exception {
+    void loginRefreshAndLogoutLimitEachSocketWaitToTheTimeLeftInTheirRequest() throws Exception {
         var networkTimeouts = new CopyOnWriteArrayList<Integer>();
         doAnswer(invocation -> {
             invocation.callRealMethod();
@@ -267,7 +267,8 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         mvc.perform(post("/api/v1/auth/logout").header("Origin", ORIGIN).cookie(cookie(refreshed)))
                 .andExpect(status().isNoContent());
 
-        assertThat(networkTimeouts).containsExactly(7_000, 7_000, 7_000);
+        // Each request has 6 s from its arrival; the connection never waits longer than what is left.
+        assertThat(networkTimeouts).hasSize(3).allMatch(millis -> millis > 0 && millis <= 6_000);
     }
 
     @Test
