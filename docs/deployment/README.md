@@ -34,7 +34,10 @@ sign in once after the upgrade. The daily cleanup subsequently removes legacy re
 
 ### Upgrade from before Issue 6.9
 
-Deploy the backend and SPA together: refresh/logout no longer accept a JSON token, and login/refresh no longer return one. Old SPA bundles sign out once after this upgrade; reload to get the new bundle and sign in again. No database migration is required.
+Deploy the backend and SPA together: refresh/logout no longer accept a JSON token, and login/refresh no longer
+return one. Old SPA bundles sign out once after this upgrade; reload to get the new bundle and sign in again.
+The Issue 6.9 cookie change requires no database migration. A direct upgrade to Issue 6.10 also requires Flyway
+V6 before serving traffic.
 
 For a local `.env` created before Issue 6.9, update the existing value explicitly; new Compose defaults do not replace it:
 
