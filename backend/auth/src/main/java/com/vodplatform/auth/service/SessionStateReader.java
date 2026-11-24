@@ -55,7 +55,7 @@ public class SessionStateReader {
             EntityManager entityManager,
             PlatformTransactionManager transactionManager,
             @Qualifier("authStateReadExecutor") Executor executor,
-            @Value("${auth.sessions.state-read-timeout:10s}") Duration timeout
+            @Value("${auth.sessions.state-read-timeout:5s}") Duration timeout
     ) {
         this(
                 boundedConnectionRead(sessions, entityManager, transactionManager),
@@ -104,20 +104,32 @@ public class SessionStateReader {
     /**
      * Starts one physical read and completes when it ends, however long the caller waits.
      *
-     * <p>Cancelling the future before a worker takes the read means it never runs.
+     * <p>Cancelling the future before a worker takes the read means it never runs. A read still queued after
+     * {@link #timeout()} is retired unread: every caller has stopped waiting, and after a stall it would only
+     * delay fresh reads.
      */
     public CompletableFuture<Optional<SessionState>> readAsync(UUID id, boolean readAdminRole) {
         var result = new CompletableFuture<Optional<SessionState>>();
         try {
-            executor.execute(() -> runRead(result, id, readAdminRole));
+            long queuedAt = System.nanoTime();
+            executor.execute(() -> runRead(result, queuedAt, id, readAdminRole));
         } catch (RejectedExecutionException saturated) {
             result.completeExceptionally(new AuthStateUnavailableException(saturated));
         }
         return result;
     }
 
-    private void runRead(CompletableFuture<Optional<SessionState>> result, UUID id, boolean readAdminRole) {
+    private void runRead(
+            CompletableFuture<Optional<SessionState>> result,
+            long queuedAt,
+            UUID id,
+            boolean readAdminRole
+    ) {
         if (result.isDone()) {
+            return;
+        }
+        if (System.nanoTime() - queuedAt > timeout.toNanos()) {
+            result.completeExceptionally(new AuthStateUnavailableException(null));
             return;
         }
         try {

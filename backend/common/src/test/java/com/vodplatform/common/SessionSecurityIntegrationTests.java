@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.vodplatform.auth.persistence.AuthSessionRepository;
+import com.vodplatform.auth.service.AuthSessionService;
 import com.vodplatform.auth.service.SessionStateReader;
 import com.vodplatform.common.support.CookieAuthFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -57,7 +59,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @SpringBootTest(properties = {
         "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
         "CORS_ALLOWED_ORIGINS=http://localhost",
-        // Short enough for the stalled-database tests; the default is 10 s.
+        // Short enough for the stalled-database tests; the default is 5 s.
         "auth.sessions.state-read-timeout=1s"
 })
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE)
@@ -74,6 +76,7 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
     @MockitoBean Ticker ticker;
     @MockitoSpyBean AuthSessionRepository sessions;
     @MockitoSpyBean SessionStateReader reader;
+    @MockitoSpyBean AuthSessionService authSessions;
 
     private final AtomicLong elapsedNanos = new AtomicLong();
 
@@ -248,6 +251,23 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         mvc.perform(get(PROFILE).header("Authorization", bearer(login))).andExpect(status().isUnauthorized());
 
         assertThat(networkTimeoutMillis.get()).isEqualTo(25_000);
+    }
+
+    @Test
+    void loginRefreshAndLogoutRunOnAConnectionWhoseNetworkTimeoutEndsADeadCommit() throws Exception {
+        var networkTimeouts = new CopyOnWriteArrayList<Integer>();
+        doAnswer(invocation -> {
+            invocation.callRealMethod();
+            networkTimeouts.add(DataSourceUtils.getConnection(dataSource).getNetworkTimeout());
+            return null;
+        }).when(authSessions).limitTransactionConnection();
+
+        var login = signedIn();
+        var refreshed = refresh(cookie(login)).andExpect(status().isOk()).andReturn();
+        mvc.perform(post("/api/v1/auth/logout").header("Origin", ORIGIN).cookie(cookie(refreshed)))
+                .andExpect(status().isNoContent());
+
+        assertThat(networkTimeouts).containsExactly(7_000, 7_000, 7_000);
     }
 
     @Test

@@ -13,6 +13,7 @@ import com.vodplatform.auth.persistence.UserStatus;
 import com.vodplatform.auth.security.AuthStateUnavailableException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -92,6 +93,37 @@ class SessionStateReaderTest {
         }
 
         verify(sessions, times(0)).readState(SESSION_ID, true);
+    }
+
+    @Test
+    void readsLeftInTheQueuePastTheTimeoutAreRetiredUnreadAndAFreshReadStillRuns() throws Exception {
+        var reading = new CountDownLatch(1);
+        when(sessions.readState(SESSION_ID, false)).thenAnswer(invocation -> {
+            reading.countDown();
+            assertThat(releaseRead.await(10, TimeUnit.SECONDS)).isTrue();
+            return ACTIVE;
+        });
+        UUID firstQueued = UUID.randomUUID();
+        UUID secondQueued = UUID.randomUUID();
+        UUID fresh = UUID.randomUUID();
+        when(sessions.readState(fresh, false)).thenReturn(ACTIVE);
+        var reader = readerOf(executor, Duration.ofMillis(100));
+
+        var stalled = reader.readAsync(SESSION_ID, false);
+        assertThat(reading.await(10, TimeUnit.SECONDS)).isTrue();
+        var expiredReads = List.of(reader.readAsync(firstQueued, false), reader.readAsync(secondQueued, false));
+        Thread.sleep(300);
+        var freshRead = reader.readAsync(fresh, false);
+        releaseRead.countDown();
+
+        assertThat(stalled.get(5, TimeUnit.SECONDS)).isEqualTo(ACTIVE);
+        for (var expired : expiredReads) {
+            assertThatThrownBy(() -> expired.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(AuthStateUnavailableException.class);
+        }
+        assertThat(freshRead.get(5, TimeUnit.SECONDS)).isEqualTo(ACTIVE);
+        verify(sessions, times(0)).readState(firstQueued, false);
+        verify(sessions, times(0)).readState(secondQueued, false);
     }
 
     @Test

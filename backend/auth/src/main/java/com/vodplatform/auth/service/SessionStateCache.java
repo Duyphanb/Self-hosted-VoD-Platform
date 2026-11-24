@@ -14,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -23,7 +25,7 @@ public class SessionStateCache {
 
     private static final Duration MAX_AGE = Duration.ofSeconds(30);
     private static final int MAX_ENTRIES = 10_000;
-    // Each attempt reads or waits for at most the reader's timeout (10 s by default, 20 s at most), so a
+    // Each attempt reads or waits for at most the reader's timeout (5 s by default, 20 s at most), so a
     // request gets 503 well before the edge's 60-second read timeout.
     private static final int MAX_LOAD_ATTEMPTS = 2;
 
@@ -89,6 +91,17 @@ public class SessionStateCache {
         }
     }
 
+    // Visible for tests: the completion of the load running for a session, or null.
+    CompletableFuture<?> runningLoad(UUID id) {
+        Load running = inFlight.get(id);
+        return running == null ? null : running.finished;
+    }
+
+    // Visible for tests.
+    boolean isLoading(UUID id) {
+        return inFlight.containsKey(id);
+    }
+
     // Visible for tests: the number of cached sessions after Caffeine's pending evictions.
     long cachedSessionCount() {
         entries.cleanUp();
@@ -131,19 +144,29 @@ public class SessionStateCache {
     }
 
     private void publish(UUID id, LoadedState result, Throwable failure) {
+        var detached = new AtomicReference<Load>();
+        var invalidated = new AtomicBoolean();
         inFlight.computeIfPresent(id, (key, running) -> {
-            if (running.invalidated) {
-                running.finished.complete(null);
-            } else if (failure != null) {
-                running.finished.completeExceptionally(failure);
-            } else {
-                if (isFresh(result)) {
-                    entries.put(key, result);
-                }
-                running.finished.complete(result);
+            // The invalidation check and the cache write share the per-key compute with invalidate().
+            invalidated.set(running.invalidated);
+            if (!running.invalidated && failure == null && isFresh(result)) {
+                entries.put(key, result);
             }
+            detached.set(running);
             return null;
         });
+        Load finished = detached.get();
+        if (finished == null) {
+            return;
+        }
+        // Waiters wake only after the load left the map, so a retry starts a new read instead of rejoining this one.
+        if (invalidated.get()) {
+            finished.finished.complete(null);
+        } else if (failure != null) {
+            finished.finished.completeExceptionally(failure);
+        } else {
+            finished.finished.complete(result);
+        }
     }
 
     private boolean isFresh(LoadedState value) {

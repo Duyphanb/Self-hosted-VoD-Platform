@@ -238,6 +238,48 @@ class SessionStateCacheTest {
         verify(reader, times(1)).read(SESSION_ID, false);
     }
 
+    @Test
+    void aLoadLeavesTheMapBeforeItsCallersWakeSoARetryStartsANewRead() throws Exception {
+        var reading = new CountDownLatch(1);
+        var releaseRead = new CountDownLatch(1);
+        when(reader.read(SESSION_ID, false)).thenAnswer(invocation -> {
+            reading.countDown();
+            assertThat(releaseRead.await(10, TimeUnit.SECONDS)).isTrue();
+            return ACTIVE;
+        }).thenReturn(ACTIVE);
+        try (var callers = Executors.newSingleThreadExecutor()) {
+            var caller = callers.submit(() -> cache.read(SESSION_ID));
+            assertThat(reading.await(10, TimeUnit.SECONDS)).isTrue();
+            var stillRegisteredWhenCompleted = new AtomicReference<Boolean>();
+            // The callback runs on the completing thread at the moment the callers wake.
+            cache.runningLoad(SESSION_ID)
+                    .whenComplete((result, failure) -> stillRegisteredWhenCompleted.set(cache.isLoading(SESSION_ID)));
+            cache.invalidate(SESSION_ID);
+            releaseRead.countDown();
+
+            assertThat(caller.get(10, TimeUnit.SECONDS)).isEqualTo(ACTIVE);
+            assertThat(stillRegisteredWhenCompleted.get()).isFalse();
+        }
+        verify(reader, times(2)).read(SESSION_ID, false);
+    }
+
+    @Test
+    void aCallerInsideATransactionSeesItsOwnStateWhileOthersKeepTheCommittedSnapshot() {
+        Optional<SessionState> revokedInTransaction = Optional.empty();
+        when(reader.read(SESSION_ID, false)).thenReturn(ACTIVE).thenReturn(revokedInTransaction);
+        assertThat(cache.read(SESSION_ID)).isEqualTo(ACTIVE);
+
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertThat(cache.read(SESSION_ID)).isEqualTo(revokedInTransaction);
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+
+        assertThat(cache.read(SESSION_ID)).isEqualTo(ACTIVE);
+        verify(reader, times(2)).read(SESSION_ID, false);
+    }
+
     private void waitUntilJoining(AtomicReference<Thread> waiter) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         while (System.nanoTime() < deadline) {
