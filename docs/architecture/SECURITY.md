@@ -142,7 +142,16 @@ Owner-approved 2026-10-29 in #100/#103/#116 ([ADR-010](adr/ADR-010.md)):
 - Authorize from headers before multipart parsing. Spring spools at threshold 0B to the dedicated `TEMP_UPLOAD_DIR` in the container layer, then streams to storage with known length and bounded heap. Clean request temp files on completion/abort; validate and sweep only stale regular `upload_*.tmp` files non-recursively before the connector starts (no ApplicationRunner, general `/tmp` sweep or symlink traversal).
 - Generate `{movieId}/{videoAssetId}.{ext}` for a new asset per upload. Enforce one in-flight asset per movie with `ux_video_assets_movie_in_flight`; race losers receive 409 `VIDEO_UPLOAD_IN_PROGRESS` and compensate only their own uncommitted raw PUT. Commit new asset/job as QUEUED before publication; publish failure after commit retains media for relay. UPLOADED is reserved.
 - Edge upload limit equals backend multipart file/request limit (2048 MiB default); multipart overhead counts toward the total. Other routes have a 1 MiB edge ceiling. [Upload transport](INFRASTRUCTURE.md#upload-transport) defines buffering, idle timeouts, safe ApiError JSON and mandatory consistency checks.
-- Browser early errors may appear as status 0. SPA pre-checks complement server enforcement; never replay an upload automatically after 401 or imply Cancel after the body has been sent can cancel committed work. Once the body was fully sent, any 5xx or network error means the upload result is unknown, unless the `ApiError` `code` is `UPLOAD_STORAGE_UNAVAILABLE` (503) or `UPLOAD_DATABASE_ERROR` (500): then the upload was not accepted (no committed asset/job pair), so show a failure and allow manual retry. Edge 502/503/504, `UPLOAD_OUTCOME_UNKNOWN` (raw retained), `INTERNAL_ERROR` and unmapped 500s stay unknown; never infer the result from MovieDetail.videoStatus. Upload error bodies carry a safe `requestId` and no keys, URLs, bucket names or SDK text. Deliberate re-upload is safe: in-flight returns 409 VIDEO_UPLOAD_IN_PROGRESS; after completion it creates a newer asset with extra storage for manual purge. Never auto-resubmit; a direct newest-asset view arrives with #168, not a new endpoint here.
+- Browser early errors may appear as status 0. SPA pre-checks complement server enforcement; never replay an
+  upload automatically after 401 or imply Cancel after the body has been sent can cancel committed work. Once
+  the body was fully sent, any 5xx or network error means the upload result is unknown, with three confirmed
+  pre-acceptance exceptions. These are `AUTH_STATE_UNAVAILABLE` (503 before multipart parsing),
+  `UPLOAD_STORAGE_UNAVAILABLE` (503), and `UPLOAD_DATABASE_ERROR` (500). Show a failure and allow manual retry
+  for those responses. Edge 502/503/504, `UPLOAD_OUTCOME_UNKNOWN` (raw retained), `INTERNAL_ERROR` and unmapped
+  500s stay unknown; never infer the result from MovieDetail.videoStatus. Upload error bodies carry a safe
+  `requestId` and no keys, URLs, bucket names or SDK text. Deliberate re-upload is safe: in-flight returns 409
+  VIDEO_UPLOAD_IN_PROGRESS; after completion it creates a newer asset with extra storage for manual purge. Never
+  auto-resubmit; a direct newest-asset view arrives with #168, not a new endpoint here.
 
 Deferred safeguards:
 

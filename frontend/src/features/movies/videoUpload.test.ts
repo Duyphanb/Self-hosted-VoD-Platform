@@ -61,6 +61,14 @@ describe('upload transfer percent', () => {
 });
 
 describe('upload failure classification', () => {
+  it('allows manual retry after the upload was refused before multipart parsing', () => {
+    expect(classifyUploadFailure(apiFailure(503, 'AUTH_STATE_UNAVAILABLE'))).toMatchObject({
+      kind: 'notAccepted',
+      message: expect.stringContaining('Select Upload to retry manually'),
+      requestId: 'request-175'
+    });
+  });
+
   it.each([[503, 'UPLOAD_STORAGE_UNAVAILABLE'], [500, 'UPLOAD_DATABASE_ERROR']])('permits manual retry only for exact %s/%s', (status, code) => {
     expect(classifyUploadFailure(apiFailure(status as number, code as string))).toMatchObject({
       kind: 'notAccepted', message: expect.stringContaining('not accepted (no committed asset/job pair)'), requestId: 'request-175', serverMessage: 'Safe server detail'
@@ -70,7 +78,7 @@ describe('upload failure classification', () => {
   it.each([
     [500, 'UPLOAD_OUTCOME_UNKNOWN'], [500, 'INTERNAL_ERROR'], [500, 'SOMETHING_ELSE'],
     [502, 'UPSTREAM_UNAVAILABLE'], [503, 'UPSTREAM_UNAVAILABLE'], [504, 'UPSTREAM_TIMEOUT'],
-    [503, 'UPLOAD_DATABASE_ERROR'], [500, 'UPLOAD_STORAGE_UNAVAILABLE']
+    [503, 'UPLOAD_DATABASE_ERROR'], [500, 'UPLOAD_STORAGE_UNAVAILABLE'], [500, 'AUTH_STATE_UNAVAILABLE']
   ])('treats %s/%s as unknown irrespective of transfer phase', (status, code) => {
     expect(classifyUploadFailure(apiFailure(status as number, code as string))).toMatchObject({ kind: 'unknown', message: 'Upload result unknown' });
   });

@@ -621,9 +621,9 @@ paths:
         malformed multipart body returns 400 MALFORMED_REQUEST; more parts than
         the server's part-count limit return 413 PAYLOAD_TOO_LARGE.
         Early rejections may appear as a connection error in browsers.
-        Backend failures return ApiError with requestId: 503 UPLOAD_STORAGE_UNAVAILABLE
-        (raw storage or spool I/O) and 500 UPLOAD_DATABASE_ERROR mean the upload
-        was not accepted (no committed asset/job pair; manual retry allowed);
+        Backend failures return ApiError with requestId. The upload was not accepted and manual retry is allowed
+        for 503 AUTH_STATE_UNAVAILABLE (before multipart parsing), 503 UPLOAD_STORAGE_UNAVAILABLE
+        (raw storage or spool I/O), and 500 UPLOAD_DATABASE_ERROR.
         500 UPLOAD_OUTCOME_UNKNOWN means the commit could not be confirmed and the
         raw object is retained. Once the body was fully sent, treat any other 5xx
         (including INTERNAL_ERROR and edge 502/503/504) or a network error as an
@@ -683,7 +683,8 @@ paths:
           $ref: "#/components/responses/UpstreamUnavailable"
         "503":
           description: >
-            AUTH_STATE_UNAVAILABLE - authentication state could not be read before upload acceptance.
+            AUTH_STATE_UNAVAILABLE - authentication state could not be read before multipart parsing.
+            The upload was not accepted. Manual retry is allowed.
             UPLOAD_STORAGE_UNAVAILABLE from the backend - raw storage or spool I/O
             failed before commit; the upload was not accepted; manual retry allowed.
             UPSTREAM_UNAVAILABLE from the edge - no backend was reachable; once the
