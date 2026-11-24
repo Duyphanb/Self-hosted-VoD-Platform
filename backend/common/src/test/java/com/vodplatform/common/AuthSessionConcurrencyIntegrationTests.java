@@ -408,6 +408,7 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
     // The SPA aborts login, refresh and logout after 10 s (authSessionLock.ts), so the typed 503 must come first.
     private void assertUnavailableBeforeTheSpaGivesUp(Connection held, Callable<MockHttpServletResponse> request)
             throws Exception {
+        int holder = backendPid(held);
         try (var worker = Executors.newSingleThreadExecutor()) {
             long started = System.nanoTime();
             var pending = worker.submit(request);
@@ -416,9 +417,13 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
                 assertThat(response.getStatus()).isEqualTo(503);
                 assertThat(response.getContentAsString()).contains("AUTH_STATE_UNAVAILABLE");
                 assertThat(response.getHeader("Set-Cookie")).isNull();
-                // The 5-second statement timeout cancels the lock wait and keeps the connection; the 7-second
-                // network timeout would also end it, but by discarding the connection.
-                assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(6_500));
+                // PostgreSQL cancels the lock wait at the time left minus the 2 s commit reserve (about 4 s). The
+                // network backstop would end it only a second later, by dropping the connection and leaving its
+                // backend waiting behind the holder.
+                assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(4_500));
+                assertThat(jdbc.queryForObject(
+                        "select count(*) from pg_stat_activity where ? = any(pg_blocking_pids(pid))",
+                        Integer.class, holder)).isZero();
             } finally {
                 held.rollback();
             }

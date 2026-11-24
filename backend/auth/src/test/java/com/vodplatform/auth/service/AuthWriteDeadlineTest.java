@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.when;
 import jakarta.persistence.EntityManager;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -28,6 +30,7 @@ class AuthWriteDeadlineTest {
 
     private final AtomicLong nanos = new AtomicLong();
     private final List<Integer> networkTimeouts = new CopyOnWriteArrayList<>();
+    private final List<Long> statementTimeouts = new CopyOnWriteArrayList<>();
     private Duration flushTakes = Duration.ZERO;
     private final AuthWriteDeadline deadline = new AuthWriteDeadline(entityManagerRecordingTimeouts(), nanos::get);
 
@@ -43,7 +46,7 @@ class AuthWriteDeadlineTest {
     }
 
     @Test
-    void aTransactionStartingInTimeLimitsEachSocketWaitToTheTimeLeft() {
+    void postgresCancelsEachStatementBeforeTheCommitReserveAndTheSocketWaitsLonger() {
         deadline.startRequest();
         advance(Duration.ofSeconds(2));
 
@@ -51,8 +54,9 @@ class AuthWriteDeadlineTest {
         advance(Duration.ofSeconds(1));
         beforeCommit();
 
-        // At commit: once before the flush and once after it.
-        assertThat(networkTimeouts).containsExactly(4_000, 3_000, 3_000);
+        // Entry with 4 s left; flush with 3 s left; commit with 3 s left.
+        assertThat(statementTimeouts).containsExactly(2_000L, 1_000L, 3_000L);
+        assertThat(networkTimeouts).containsExactly(3_000, 2_000, 3_000);
     }
 
     @Test
@@ -62,30 +66,43 @@ class AuthWriteDeadlineTest {
         advance(Duration.ofMillis(5_001));
 
         assertThatThrownBy(deadline::enterTransaction).isInstanceOf(QueryTimeoutException.class);
+        assertThat(statementTimeouts).isEmpty();
         assertThat(networkTimeouts).isEmpty();
         assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
     }
 
     @Test
-    void aTransactionReachingItsCommitTooLateIsRefused() {
+    void aTransactionThatCouldNotKeepItsCommitReserveIsRefusedAtTheStart() {
+        deadline.startRequest();
+        // 2.5 s left: enough for neither a body nor the 2 s commit reserve after it.
+        advance(Duration.ofMillis(3_500));
+
+        assertThatThrownBy(deadline::enterTransaction).isInstanceOf(QueryTimeoutException.class);
+        assertThat(statementTimeouts).isEmpty();
+    }
+
+    @Test
+    void aTransactionReachingItsFlushTooLateIsRefusedWithoutFlushing() {
         deadline.startRequest();
         deadline.enterTransaction();
-        advance(Duration.ofMillis(5_001));
+        advance(Duration.ofMillis(4_001));
+        flushTakes = Duration.ofHours(1);
 
         assertThatThrownBy(this::beforeCommit).isInstanceOf(QueryTimeoutException.class);
-        assertThat(networkTimeouts).containsExactly(6_000, 999);
+        assertThat(nanos.get()).isEqualTo(Duration.ofMillis(4_001).toNanos());
+        assertThat(statementTimeouts).containsExactly(4_000L);
     }
 
     @Test
     void theTimeTheFlushTakesCountsBeforeTheCommit() {
         deadline.startRequest();
         deadline.enterTransaction();
-        advance(Duration.ofSeconds(4));
+        advance(Duration.ofSeconds(3));
         flushTakes = Duration.ofMillis(1_500);
 
-        // 2 s were left before the flush, 0.5 s after it: less than the 2 s kept for the commit.
+        // 3 s were left before the flush, 1.5 s after it: less than the 2 s kept for the commit.
         assertThatThrownBy(this::beforeCommit).isInstanceOf(QueryTimeoutException.class);
-        assertThat(networkTimeouts).containsExactly(6_000, 2_000);
+        assertThat(statementTimeouts).containsExactly(4_000L, 1_000L);
     }
 
     @Test
@@ -96,7 +113,7 @@ class AuthWriteDeadlineTest {
 
         deadline.enterTransaction();
 
-        assertThat(networkTimeouts).containsExactly(6_000, 6_000);
+        assertThat(statementTimeouts).containsExactly(4_000L, 4_000L);
     }
 
     private void beforeCommit() {
@@ -105,15 +122,25 @@ class AuthWriteDeadlineTest {
         }
     }
 
+    private static long statementTimeoutOf(String sql) {
+        String prefix = "SET LOCAL statement_timeout = ";
+        assertThat(sql).startsWith(prefix);
+        return Long.parseLong(sql.substring(prefix.length()));
+    }
+
     private void advance(Duration duration) {
         nanos.addAndGet(duration.toNanos());
     }
 
     private EntityManager entityManagerRecordingTimeouts() {
         Connection connection = mock(Connection.class);
+        Statement statement = mock(Statement.class);
         try {
             doAnswer(invocation -> networkTimeouts.add(invocation.getArgument(1)))
                     .when(connection).setNetworkTimeout(any(), anyInt());
+            when(connection.createStatement()).thenReturn(statement);
+            doAnswer(invocation -> statementTimeouts.add(statementTimeoutOf(invocation.getArgument(0))))
+                    .when(statement).execute(anyString());
         } catch (SQLException impossible) {
             throw new AssertionError(impossible);
         }

@@ -21,7 +21,7 @@ public class LogoutService {
         this.clock = clock;
     }
 
-    @Transactional(timeout = AuthTransactions.TIMEOUT_SECONDS)
+    @Transactional
     public void logout(String value) {
         sessions.limitTransactionConnection();
         refreshTokenService.locate(value)

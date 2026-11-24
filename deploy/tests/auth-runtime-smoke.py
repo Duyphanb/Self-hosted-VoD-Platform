@@ -216,9 +216,9 @@ def main():
     assert request("/api/v1/users/me", token=current["accessToken"])[0] == 401
     print("PASS concurrent rotation, replay rejection and idempotent logout")
 
-    # Hold a real PostgreSQL row lock across expiry, before the HTTP request starts. The 3-second wait leaves the
-    # refresh more than the 2 s its 6-second request deadline keeps for the commit, and stays below the
-    # 5-second statement timeout.
+    # Hold a real PostgreSQL row lock across expiry, before the HTTP request starts. The 3-second wait stays below
+    # the refresh's statement timeout (the time left minus the 2 s commit reserve, about 4 s) and leaves it more
+    # than 2 s for the commit.
     session = login()[1]
     digest = hashlib.sha256(session.refresh_cookie.encode()).hexdigest()
     sql(f"UPDATE refresh_tokens SET expires_at = now() + interval '2 seconds' WHERE token_hash = '{digest}';")

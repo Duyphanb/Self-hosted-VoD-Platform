@@ -39,7 +39,7 @@ public class RefreshTokenRotationService {
     }
 
     // A replay returns 401 after committing the family revocation.
-    @Transactional(noRollbackFor = InvalidRefreshTokenException.class, timeout = AuthTransactions.TIMEOUT_SECONDS)
+    @Transactional(noRollbackFor = InvalidRefreshTokenException.class)
     public IssuedAuthentication rotate(String token) {
         sessions.limitTransactionConnection();
         var location = refreshTokenService.locate(token).orElseThrow(InvalidRefreshTokenException::new);
