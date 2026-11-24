@@ -2,7 +2,7 @@ package com.vodplatform.auth.service;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.vodplatform.auth.persistence.AuthSessionEntity;
@@ -43,7 +43,8 @@ class LogoutServiceTest {
     void omittedTokenIsAnIdempotentNoOp() {
         service.logout(null);
 
-        verifyNoInteractions(sessions);
+        verify(sessions).limitTransactionConnection();
+        verifyNoMoreInteractions(sessions);
     }
 
     @Test
@@ -52,7 +53,8 @@ class LogoutServiceTest {
 
         service.logout("unknown-token");
 
-        verifyNoInteractions(sessions);
+        verify(sessions).limitTransactionConnection();
+        verifyNoMoreInteractions(sessions);
     }
 
     @Test
@@ -62,7 +64,8 @@ class LogoutServiceTest {
 
         service.logout("raw-token");
 
+        verify(sessions).limitTransactionConnection();
         verify(sessions).lock(location.sessionId(), location.userId());
-        org.mockito.Mockito.verifyNoMoreInteractions(sessions);
+        verifyNoMoreInteractions(sessions);
     }
 }

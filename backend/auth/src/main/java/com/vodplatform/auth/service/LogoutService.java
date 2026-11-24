@@ -23,6 +23,7 @@ public class LogoutService {
 
     @Transactional(timeout = AuthTransactions.TIMEOUT_SECONDS)
     public void logout(String value) {
+        sessions.limitTransactionConnection();
         refreshTokenService.locate(value)
                 .flatMap(location -> sessions.lock(location.sessionId(), location.userId()))
                 .ifPresent(session -> sessions.revoke(session, clock.instant()));

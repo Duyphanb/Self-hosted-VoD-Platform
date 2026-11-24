@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -26,6 +27,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -60,27 +62,38 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
     }
 
     @Test
-    void aRefreshBehindALongUserLockIs503WithinTheTransactionTimeoutAndRotatesNothing() throws Exception {
+    void aRefreshBehindALongUserLockIs503BeforeTheSpaGivesUpAndRotatesNothing() throws Exception {
         Cookie original = issued();
         String tokenHashQuery = "select token_hash from refresh_tokens where user_id=?";
         String hashBefore = jdbc.queryForObject(tokenHashQuery, String.class, user);
-        try (var worker = Executors.newSingleThreadExecutor();
-             Connection held = holdRow("users", user, "FOR UPDATE")) {
-            long started = System.nanoTime();
-            var refreshed = worker.submit(() -> refresh(original).andReturn().getResponse());
-            try {
-                var response = refreshed.get(20, TimeUnit.SECONDS);
-                assertThat(response.getStatus()).isEqualTo(503);
-                assertThat(response.getContentAsString()).contains("AUTH_STATE_UNAVAILABLE");
-                assertThat(response.getHeader("Set-Cookie")).isNull();
-                assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(15));
-            } finally {
-                held.rollback();
-            }
+        try (Connection held = holdRow("users", user, "FOR UPDATE")) {
+            assertUnavailableBeforeTheSpaGivesUp(held, () -> refresh(original).andReturn().getResponse());
         }
         assertThat(jdbc.queryForList(tokenHashQuery, String.class, user)).containsExactly(hashBefore);
         assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=? and revoked_at is not null",
                 Integer.class, user)).isZero();
+    }
+
+    @Test
+    void aLoginBehindALongUserLockIs503BeforeTheSpaGivesUpAndStartsNoSession() throws Exception {
+        String sessionCount = "select count(*) from auth_sessions where user_id=?";
+        Integer sessionsBefore = jdbc.queryForObject(sessionCount, Integer.class, user);
+        try (Connection held = holdRow("users", user, "FOR UPDATE")) {
+            assertUnavailableBeforeTheSpaGivesUp(held, () -> login().andReturn().getResponse());
+        }
+        assertThat(jdbc.queryForObject(sessionCount, Integer.class, user)).isEqualTo(sessionsBefore);
+    }
+
+    @Test
+    void aLogoutBehindALongSessionLockIs503BeforeTheSpaGivesUpAndRevokesNothing() throws Exception {
+        Cookie original = issued();
+        UUID sessionId = singleId("auth_sessions");
+        try (Connection held = holdRow("auth_sessions", sessionId, "FOR UPDATE")) {
+            assertUnavailableBeforeTheSpaGivesUp(held, () -> mvc.perform(post("/api/v1/auth/logout")
+                    .header("Origin", ORIGIN).cookie(original)).andReturn().getResponse());
+        }
+        assertThat(jdbc.queryForObject("select count(*) from auth_sessions where id=? and revoked_at is null",
+                Integer.class, sessionId)).isOne();
     }
 
     @Test
@@ -319,6 +332,26 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
 
     private UUID singleId(String table) {
         return jdbc.queryForObject("select id from " + table + " where user_id=?", UUID.class, user);
+    }
+
+    // The SPA aborts login, refresh and logout after 10 s (authSessionLock.ts), so the typed 503 must come first.
+    private void assertUnavailableBeforeTheSpaGivesUp(Connection held, Callable<MockHttpServletResponse> request)
+            throws Exception {
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            long started = System.nanoTime();
+            var pending = worker.submit(request);
+            try {
+                var response = pending.get(20, TimeUnit.SECONDS);
+                assertThat(response.getStatus()).isEqualTo(503);
+                assertThat(response.getContentAsString()).contains("AUTH_STATE_UNAVAILABLE");
+                assertThat(response.getHeader("Set-Cookie")).isNull();
+                // The 5-second statement timeout cancels the lock wait and keeps the connection; the 7-second
+                // network timeout would also end it, but by discarding the connection.
+                assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofMillis(6_500));
+            } finally {
+                held.rollback();
+            }
+        }
     }
 
     private Connection holdRow(String table, UUID id) throws Exception {

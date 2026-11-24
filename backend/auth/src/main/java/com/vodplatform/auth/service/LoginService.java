@@ -54,6 +54,7 @@ public class LoginService {
 
     @Transactional(timeout = AuthTransactions.TIMEOUT_SECONDS)
     public IssuedAuthentication login(LoginRequest request, String presentedToken) {
+        sessions.limitTransactionConnection();
         Optional<LoginCredentials> userCandidate = userRepository.findLoginCredentials(request.email());
         String passwordHash = userCandidate
                 .map(LoginCredentials::getPasswordHash)

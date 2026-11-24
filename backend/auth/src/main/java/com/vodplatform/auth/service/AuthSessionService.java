@@ -3,10 +3,12 @@ package com.vodplatform.auth.service;
 import com.vodplatform.auth.config.AuthTokenProperties;
 import com.vodplatform.auth.persistence.AuthSessionEntity;
 import com.vodplatform.auth.persistence.AuthSessionRepository;
+import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.hibernate.Session;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -19,11 +21,24 @@ public class AuthSessionService {
     private final AuthSessionRepository sessions;
     private final AuthTokenProperties properties;
     private final SessionStateCache cache;
+    private final EntityManager entityManager;
 
-    public AuthSessionService(AuthSessionRepository sessions, AuthTokenProperties properties, SessionStateCache cache) {
+    public AuthSessionService(
+            AuthSessionRepository sessions,
+            AuthTokenProperties properties,
+            SessionStateCache cache,
+            EntityManager entityManager
+    ) {
         this.sessions = sessions;
         this.properties = properties;
         this.cache = cache;
+        this.entityManager = entityManager;
+    }
+
+    // Called first in the login, refresh and logout transactions. HikariCP resets the timeout on return.
+    public void limitTransactionConnection() {
+        entityManager.unwrap(Session.class).doWork(connection ->
+                connection.setNetworkTimeout(Runnable::run, AuthTransactions.NETWORK_TIMEOUT_MILLIS));
     }
 
     // The caller holds the user's row lock, which serializes the active-session count with other logins.
