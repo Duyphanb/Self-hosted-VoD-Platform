@@ -52,10 +52,11 @@ public class AuthSessionPruningJob {
             return false;
         }
 
+        // No ORDER BY: any 500 tokens will do, so the session index stops after 500 rows instead of sorting
+        // every remaining token of the batch.
         int deletedTokens = jdbc.sql("""
                 DELETE FROM refresh_tokens WHERE id IN (
-                    SELECT id FROM refresh_tokens WHERE session_id IN (:sessionIds)
-                    ORDER BY session_id, id LIMIT :limit
+                    SELECT id FROM refresh_tokens WHERE session_id IN (:sessionIds) LIMIT :limit
                 )
                 """).param("sessionIds", locked).param("limit", BATCH_SIZE).update();
         if (deletedTokens == 0) {
