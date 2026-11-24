@@ -216,17 +216,18 @@ def main():
     assert request("/api/v1/users/me", token=current["accessToken"])[0] == 401
     print("PASS concurrent rotation, replay rejection and idempotent logout")
 
-    # Hold a real PostgreSQL row lock across expiry, before the HTTP request starts. The wait stays below the
-    # 5-second statement timeout and the 6-second request deadline of the auth transactions.
+    # Hold a real PostgreSQL row lock across expiry, before the HTTP request starts. The 3-second wait leaves the
+    # refresh more than the 2 s its 6-second request deadline keeps for the commit, and stays below the
+    # 5-second statement timeout.
     session = login()[1]
     digest = hashlib.sha256(session.refresh_cookie.encode()).hexdigest()
-    sql(f"UPDATE refresh_tokens SET expires_at = now() + interval '3 seconds' WHERE token_hash = '{digest}';")
+    sql(f"UPDATE refresh_tokens SET expires_at = now() + interval '2 seconds' WHERE token_hash = '{digest}';")
     holder = subprocess.Popen([
         "docker", "exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
         "-U", "vod_app", "-d", "vod_platform", "-At"
     ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        holder.stdin.write(f"BEGIN; SELECT expires_at > now() FROM refresh_tokens WHERE token_hash = '{digest}' FOR UPDATE; SELECT 'LOCKED'; SELECT pg_sleep(4); COMMIT;\n")
+        holder.stdin.write(f"BEGIN; SELECT expires_at > now() FROM refresh_tokens WHERE token_hash = '{digest}' FOR UPDATE; SELECT 'LOCKED'; SELECT pg_sleep(3); COMMIT;\n")
         holder.stdin.flush()
         assert holder.stdout.readline().strip() == "BEGIN"
         assert holder.stdout.readline().strip() == "t"
