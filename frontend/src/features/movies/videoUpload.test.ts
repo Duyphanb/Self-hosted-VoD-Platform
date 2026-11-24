@@ -80,7 +80,10 @@ describe('upload failure classification', () => {
     [502, 'UPSTREAM_UNAVAILABLE'], [503, 'UPSTREAM_UNAVAILABLE'], [504, 'UPSTREAM_TIMEOUT'],
     [503, 'UPLOAD_DATABASE_ERROR'], [500, 'UPLOAD_STORAGE_UNAVAILABLE'], [500, 'AUTH_STATE_UNAVAILABLE']
   ])('treats %s/%s as unknown irrespective of transfer phase', (status, code) => {
-    expect(classifyUploadFailure(apiFailure(status as number, code as string))).toMatchObject({ kind: 'unknown', message: 'Upload result unknown' });
+    expect(classifyUploadFailure(apiFailure(status as number, code as string))).toMatchObject({
+      kind: 'unknown',
+      message: 'Upload result unknown'
+    });
   });
 
   it('does not trust malformed, non-ApiError or inconsistent-status 5xx bodies for the not-accepted exception', () => {

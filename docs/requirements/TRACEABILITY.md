@@ -50,7 +50,7 @@ Updated 2026-11-14 for the Sprint 6 streaming design ([ADR-011](../architecture/
 | NFR-012 | All features | Documentation review before milestone completion |
 | NFR-013 | All MVP features | This traceability matrix plus test artifacts |
 | NFR-014 | F-021, F-022 | Compose service-name verification |
-| NFR-015 | Backend API features | Contract ApiError tests, edge 413/502/503/504 JSON/status/requestId, backend upload 503 `UPLOAD_STORAGE_UNAVAILABLE` and 500 `UPLOAD_DATABASE_ERROR`/`UPLOAD_OUTCOME_UNKNOWN`/`INTERNAL_ERROR` with requestId, and SPA not-accepted versus unknown-result/no-auto-resubmit handling even while videoStatus stays READY |
+| NFR-015 | Backend API features | Contract ApiError tests, edge 413/502/503/504 JSON/status/requestId, backend upload 503 `AUTH_STATE_UNAVAILABLE`/`UPLOAD_STORAGE_UNAVAILABLE` and 500 `UPLOAD_DATABASE_ERROR`/`UPLOAD_OUTCOME_UNKNOWN`/`INTERNAL_ERROR` with requestId, and SPA not-accepted versus unknown-result/no-auto-resubmit handling even while videoStatus stays READY |
 | NFR-016 | Frontend features | UI state tests or manual checklist |
 
 ## Sprint 4 design-to-test plan

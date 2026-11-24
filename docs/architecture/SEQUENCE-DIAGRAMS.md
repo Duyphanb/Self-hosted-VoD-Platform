@@ -20,6 +20,7 @@ sequenceDiagram
     Frontend->>Nginx: POST /api/v1/admin/movies/{movieId}/video
     Nginx->>Backend: Stream body unbuffered with Authorization
     Backend->>Backend: Validate JWT, then read session and live ROLE_ADMIN before multipart parsing
+    Note over Frontend,Backend: An auth-state read failure returns 503 AUTH_STATE_UNAVAILABLE, upload not accepted
     Backend->>Backend: Spool to dedicated temp disk, validate size, MIME and signature family
     Backend->>PostgreSQL: Check movie and in-flight asset (early advisory check)
     Note over Backend,PostgreSQL: Spool I/O failure returns 503 UPLOAD_STORAGE_UNAVAILABLE and a precheck DB failure 500 UPLOAD_DATABASE_ERROR, both before any PUT
