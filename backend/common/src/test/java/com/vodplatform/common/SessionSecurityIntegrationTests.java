@@ -22,10 +22,13 @@ import java.sql.Connection;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +40,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
@@ -147,7 +151,7 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         mvc.perform(get(ADMIN).header("Authorization", authorization)).andExpect(status().isForbidden());
         mvc.perform(post("/api/v1/movies").header("Authorization", authorization)).andExpect(status().isForbidden());
         verify(reader, times(3)).read(sessionId(), true);
-        verify(reader, times(1)).read(sessionId(), false);
+        verify(reader, times(1)).readAsync(sessionId(), false);
     }
 
     @Test
@@ -209,7 +213,41 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
             assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(3));
             holder.rollback();
         }
-        verify(reader, times(1)).read(id, false);
+        verify(reader, times(1)).readAsync(id, false);
+    }
+
+    @Test
+    void requestsDuringASustainedStallShareOnePhysicalReadAndTheNextRequestSucceedsAfterwards() throws Exception {
+        var login = signedIn();
+        UUID id = sessionId();
+        var profile = get(PROFILE).header("Authorization", bearer(login));
+        try (Connection holder = lockSessionTable()) {
+            for (int request = 0; request < 3; request++) {
+                mvc.perform(profile)
+                        .andExpect(status().isServiceUnavailable())
+                        .andExpect(jsonPath("$.code").value("AUTH_STATE_UNAVAILABLE"));
+            }
+            verify(reader, times(1)).readAsync(id, false);
+            holder.rollback();
+        }
+
+        mvc.perform(profile).andExpect(status().isOk());
+        verify(reader, times(1)).readAsync(id, false);
+    }
+
+    @Test
+    void theSessionReadRunsOnAConnectionWhoseNetworkTimeoutEndsADeadRead() throws Exception {
+        var login = signedIn();
+        var networkTimeoutMillis = new AtomicInteger(-1);
+        doAnswer(invocation -> {
+            // The transaction-bound connection is the one the query is about to use.
+            networkTimeoutMillis.set(DataSourceUtils.getConnection(dataSource).getNetworkTimeout());
+            return Optional.empty();
+        }).when(sessions).readState(sessionId(), false);
+
+        mvc.perform(get(PROFILE).header("Authorization", bearer(login))).andExpect(status().isUnauthorized());
+
+        assertThat(networkTimeoutMillis.get()).isEqualTo(25_000);
     }
 
     @Test
@@ -237,11 +275,11 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
             state.setRollbackOnly();
         });
         mvc.perform(profile).andExpect(status().isOk());
-        verify(reader, times(1)).read(sessionId(), false);
+        verify(reader, times(1)).readAsync(sessionId(), false);
 
         transaction.executeWithoutResult(state -> logoutAndCheckCache(login, profile));
         mvc.perform(profile).andExpect(status().isUnauthorized());
-        verify(reader, times(2)).read(sessionId(), false);
+        verify(reader, times(2)).readAsync(sessionId(), false);
     }
 
     @Test
@@ -251,11 +289,13 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         var selected = new CountDownLatch(1);
         var resume = new CountDownLatch(1);
         doAnswer(invocation -> {
-            Object oldSnapshot = invocation.callRealMethod();
-            selected.countDown();
-            assertThat(resume.await(10, TimeUnit.SECONDS)).isTrue();
-            return oldSnapshot;
-        }).doCallRealMethod().when(reader).read(id, false);
+            CompletableFuture<?> physicalRead = (CompletableFuture<?>) invocation.callRealMethod();
+            return physicalRead.thenApply(oldSnapshot -> {
+                selected.countDown();
+                awaitQuietly(resume);
+                return oldSnapshot;
+            });
+        }).doCallRealMethod().when(reader).readAsync(id, false);
         try (var caller = Executors.newSingleThreadExecutor()) {
             var response = caller.submit(() -> mvc.perform(get(PROFILE).header("Authorization", bearer(login)))
                     .andReturn().getResponse().getStatus());
@@ -268,7 +308,7 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
             }
             assertThat(response.get(10, TimeUnit.SECONDS)).isEqualTo(401);
         }
-        verify(reader, times(2)).read(id, false);
+        verify(reader, times(2)).readAsync(id, false);
     }
 
     private void logoutAndCheckCache(MvcResult login, MockHttpServletRequestBuilder profile) {
@@ -288,6 +328,15 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
 
     private MvcResult signedIn() throws Exception {
         return login().andExpect(status().isOk()).andReturn();
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
+        }
     }
 
     // A real stall: the session-state query waits for this table lock until the holder rolls back.

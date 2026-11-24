@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -67,7 +68,8 @@ public class SessionStateCache {
         throw new AuthStateUnavailableException(null);
     }
 
-    // A caller sharing another request's load waits no longer than a read of its own could take.
+    // Every caller waits at most the reader's timeout. A load outlives callers that gave up: it stays registered
+    // until its physical read ends, so later misses join it instead of starting a second read.
     private LoadedState await(Load load) {
         try {
             return load.finished.get(reader.timeout().toNanos(), TimeUnit.NANOSECONDS);
@@ -104,14 +106,28 @@ public class SessionStateCache {
     }
 
     private void populate(UUID id) {
-        try {
-            // A previous load may have published between the fast-path miss and registration.
-            LoadedState cached = entries.getIfPresent(id);
-            LoadedState result = isFresh(cached) ? cached : loadFromStore(id);
-            publish(id, result, null);
-        } catch (RuntimeException | Error failure) {
-            publish(id, null, failure);
+        // A previous load may have published between the fast-path miss and registration.
+        LoadedState cached = entries.getIfPresent(id);
+        if (isFresh(cached)) {
+            publish(id, cached, null);
+            return;
         }
+        // The age counts from the start of this physical read (ADR-012 D6).
+        long startedAt = ticker.read();
+        reader.readAsync(id, false).whenComplete((state, failure) -> {
+            if (failure == null) {
+                publish(id, new LoadedState(startedAt, state), null);
+            } else {
+                publish(id, null, unwrapped(failure));
+            }
+        });
+    }
+
+    private static Throwable unwrapped(Throwable failure) {
+        if (failure instanceof CompletionException && failure.getCause() != null) {
+            return failure.getCause();
+        }
+        return failure;
     }
 
     private void publish(UUID id, LoadedState result, Throwable failure) {
@@ -128,12 +144,6 @@ public class SessionStateCache {
             }
             return null;
         });
-    }
-
-    private LoadedState loadFromStore(UUID id) {
-        long startedAt = ticker.read();
-        Optional<SessionState> state = reader.read(id, false);
-        return new LoadedState(startedAt, state);
     }
 
     private boolean isFresh(LoadedState value) {

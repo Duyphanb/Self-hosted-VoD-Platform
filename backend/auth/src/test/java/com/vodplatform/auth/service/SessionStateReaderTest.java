@@ -47,7 +47,7 @@ class SessionStateReaderTest {
     @Test
     void returnsTheStoredStateReadOnTheExecutor() {
         when(sessions.readState(SESSION_ID, true)).thenReturn(ACTIVE);
-        var reader = new SessionStateReader(sessions, executor, Duration.ofSeconds(1));
+        var reader = readerOf(executor, Duration.ofSeconds(1));
 
         assertThat(reader.read(SESSION_ID, true)).isEqualTo(ACTIVE);
     }
@@ -60,7 +60,7 @@ class SessionStateReaderTest {
             assertThat(releaseRead.await(10, TimeUnit.SECONDS)).isTrue();
             return ACTIVE;
         });
-        var reader = new SessionStateReader(sessions, executor, Duration.ofMillis(200));
+        var reader = readerOf(executor, Duration.ofMillis(200));
 
         long started = System.nanoTime();
         assertThatThrownBy(() -> reader.read(SESSION_ID, false)).isInstanceOf(AuthStateUnavailableException.class);
@@ -77,7 +77,7 @@ class SessionStateReaderTest {
             assertThat(releaseRead.await(10, TimeUnit.SECONDS)).isTrue();
             return ACTIVE;
         });
-        var reader = new SessionStateReader(sessions, executor, Duration.ofMillis(200));
+        var reader = readerOf(executor, Duration.ofMillis(200));
         try (var callers = Executors.newSingleThreadExecutor()) {
             var stalled = callers.submit(() -> reader.read(SESSION_ID, false));
             assertThat(reading.await(10, TimeUnit.SECONDS)).isTrue();
@@ -99,7 +99,7 @@ class SessionStateReaderTest {
         Executor saturated = task -> {
             throw new RejectedExecutionException("fixture");
         };
-        var reader = new SessionStateReader(sessions, saturated, Duration.ofSeconds(1));
+        var reader = readerOf(saturated, Duration.ofSeconds(1));
 
         assertThatThrownBy(() -> reader.read(SESSION_ID, false)).isInstanceOf(AuthStateUnavailableException.class);
     }
@@ -110,7 +110,7 @@ class SessionStateReaderTest {
         Executor unused = task -> {
             throw new AssertionError("A caller inside a transaction must not use the executor");
         };
-        var reader = new SessionStateReader(sessions, unused, Duration.ofSeconds(1));
+        var reader = readerOf(unused, Duration.ofSeconds(1));
         TransactionSynchronizationManager.setActualTransactionActive(true);
         try {
             assertThat(reader.read(SESSION_ID, false)).isEqualTo(ACTIVE);
@@ -122,7 +122,7 @@ class SessionStateReaderTest {
     @Test
     void aDatabaseFailureIsUnavailable() {
         when(sessions.readState(SESSION_ID, false)).thenThrow(new DataAccessResourceFailureException("fixture"));
-        var reader = new SessionStateReader(sessions, executor, Duration.ofSeconds(1));
+        var reader = readerOf(executor, Duration.ofSeconds(1));
 
         assertThatThrownBy(() -> reader.read(SESSION_ID, false))
                 .isInstanceOf(AuthStateUnavailableException.class)
@@ -134,8 +134,13 @@ class SessionStateReaderTest {
     void rejectsATimeoutOutsideTheFreshnessWindow(String timeout) {
         Duration outOfRange = Duration.parse("PT" + timeout.toUpperCase());
 
-        assertThatThrownBy(() -> new SessionStateReader(sessions, executor, outOfRange))
+        assertThatThrownBy(() -> readerOf(executor, outOfRange))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    // The physical read is the repository call; the connection bound is covered by the integration tests.
+    private SessionStateReader readerOf(Executor readExecutor, Duration timeout) {
+        return new SessionStateReader(sessions::readState, sessions::readState, readExecutor, timeout);
     }
 
     private static ThreadPoolTaskExecutor singleThreadExecutor() {

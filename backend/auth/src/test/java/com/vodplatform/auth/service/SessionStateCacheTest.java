@@ -3,6 +3,7 @@ package com.vodplatform.auth.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -18,13 +19,16 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -41,9 +45,19 @@ class SessionStateCacheTest {
     private final AtomicLong nanos = new AtomicLong();
     private final SessionStateCache cache = new SessionStateCache(reader, nanos::get, 20);
 
+    // Physical reads run here, as on the reader's executor; each one calls the stubbed synchronous read.
+    private final ExecutorService readThreads = Executors.newCachedThreadPool();
+
     @BeforeEach
-    void readerTimeout() {
+    void stubTheAsynchronousRead() {
         when(reader.timeout()).thenReturn(Duration.ofSeconds(10));
+        when(reader.readAsync(any(), anyBoolean())).thenAnswer(invocation -> CompletableFuture.supplyAsync(
+                () -> reader.read(invocation.getArgument(0), invocation.getArgument(1)), readThreads));
+    }
+
+    @AfterEach
+    void stopReadThreads() {
+        readThreads.shutdownNow();
     }
 
     @Test
@@ -147,7 +161,7 @@ class SessionStateCacheTest {
     }
 
     @Test
-    void aCallerSharingAStalledLoadGetsUnavailableAfterTheReaderTimeout() throws Exception {
+    void theStarterAndASharingCallerOfAStalledLoadGetUnavailableAfterTheReaderTimeout() throws Exception {
         when(reader.timeout()).thenReturn(Duration.ofMillis(200));
         var reading = new CountDownLatch(1);
         var releaseRead = new CountDownLatch(1);
@@ -170,7 +184,9 @@ class SessionStateCacheTest {
             } finally {
                 releaseRead.countDown();
             }
-            assertThat(loader.get(10, TimeUnit.SECONDS)).isEqualTo(ACTIVE);
+            // The caller that started the read is bounded by the same timeout.
+            assertThatThrownBy(() -> loader.get(10, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(AuthStateUnavailableException.class);
         }
         verify(reader, times(1)).read(SESSION_ID, false);
     }
@@ -200,6 +216,26 @@ class SessionStateCacheTest {
 
         assertThat(cache.cachedSessionCount()).isZero();
         verify(reader, times(2)).read(SESSION_ID, false);
+    }
+
+    @Test
+    void callersThatGiveUpOnAStalledReadShareItAndItsResultStillArrives() {
+        when(reader.timeout()).thenReturn(Duration.ofMillis(100));
+        var releaseRead = new CountDownLatch(1);
+        when(reader.read(SESSION_ID, false)).thenAnswer(invocation -> {
+            assertThat(releaseRead.await(10, TimeUnit.SECONDS)).isTrue();
+            return ACTIVE;
+        });
+
+        for (int caller = 0; caller < 3; caller++) {
+            assertThatThrownBy(() -> cache.read(SESSION_ID)).isInstanceOf(AuthStateUnavailableException.class);
+        }
+        verify(reader, times(1)).readAsync(SESSION_ID, false);
+
+        releaseRead.countDown();
+        when(reader.timeout()).thenReturn(Duration.ofSeconds(10));
+        assertThat(cache.read(SESSION_ID)).isEqualTo(ACTIVE);
+        verify(reader, times(1)).read(SESSION_ID, false);
     }
 
     private void waitUntilJoining(AtomicReference<Thread> waiter) throws InterruptedException {
