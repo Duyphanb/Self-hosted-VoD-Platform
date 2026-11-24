@@ -14,9 +14,20 @@ SPEC.loader.exec_module(safe)
 
 class SafeNewmanTest(unittest.TestCase):
     def test_failure_emits_only_static_names_and_removes_raw_report(self):
-        collection = {"item": [{"name": "Login", "request": {}, "event": [{"script": {
-            "exec": ["pm.test('Status is 200', () => {});", "pm.test('dynamic ' + cookie, () => {});"]
-        }}]}]}
+        collection = {
+            "item": [{
+                "name": "Login",
+                "request": {},
+                "event": [{
+                    "script": {
+                        "exec": [
+                            "pm.test('Status is 200', () => {});",
+                            "pm.test('dynamic ' + cookie, () => {});",
+                        ],
+                    },
+                }],
+            }],
+        }
         private = "token-or-cookie-fixture"
         failures = [
             {"source": {"name": "Login"}, "error": {"test": "Status is 200", "message": private}},
