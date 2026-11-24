@@ -281,6 +281,18 @@ class SessionStateCacheTest {
         verify(reader, times(2)).read(SESSION_ID, false);
     }
 
+    @Test
+    void aLoadRetiredUnreadInTheQueueLetsItsCallersReadAgain() {
+        when(reader.read(SESSION_ID, false)).thenReturn(ACTIVE);
+        when(reader.readAsync(SESSION_ID, false))
+                .thenReturn(CompletableFuture.failedFuture(new SessionStateReader.RetiredUnreadException()))
+                .thenAnswer(invocation -> CompletableFuture.supplyAsync(
+                        () -> reader.read(SESSION_ID, false), readThreads));
+
+        assertThat(cache.read(SESSION_ID)).isEqualTo(ACTIVE);
+        verify(reader, times(2)).readAsync(SESSION_ID, false);
+    }
+
     private void waitUntilJoining(AtomicReference<Thread> waiter) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         while (System.nanoTime() < deadline) {

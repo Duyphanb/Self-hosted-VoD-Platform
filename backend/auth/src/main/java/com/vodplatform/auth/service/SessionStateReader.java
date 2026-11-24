@@ -105,8 +105,9 @@ public class SessionStateReader {
      * Starts one physical read and completes when it ends, however long the caller waits.
      *
      * <p>Cancelling the future before a worker takes the read means it never runs. A read still queued after
-     * {@link #timeout()} is retired unread: every caller has stopped waiting, and after a stall it would only
-     * delay fresh reads.
+     * {@link #timeout()} is retired unread with {@link RetiredUnreadException}: the caller that queued it has
+     * stopped waiting, and after a stall it would only delay fresh reads. Cache callers that joined the load later
+     * may still have time; the cache treats a retirement like an invalidated load and lets them read again.
      */
     public CompletableFuture<Optional<SessionState>> readAsync(UUID id, boolean readAdminRole) {
         var result = new CompletableFuture<Optional<SessionState>>();
@@ -129,7 +130,7 @@ public class SessionStateReader {
             return;
         }
         if (System.nanoTime() - queuedAt > timeout.toNanos()) {
-            result.completeExceptionally(new AuthStateUnavailableException(null));
+            result.completeExceptionally(new RetiredUnreadException());
             return;
         }
         try {
@@ -173,6 +174,14 @@ public class SessionStateReader {
             throw error;
         }
         return new AuthStateUnavailableException(cause);
+    }
+
+    /** A queued read that no worker started before the timeout; it never reached the database. */
+    public static final class RetiredUnreadException extends AuthStateUnavailableException {
+
+        RetiredUnreadException() {
+            super(null);
+        }
     }
 
     @FunctionalInterface

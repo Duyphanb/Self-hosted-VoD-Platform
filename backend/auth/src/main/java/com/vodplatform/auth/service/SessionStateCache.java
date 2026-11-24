@@ -126,7 +126,13 @@ public class SessionStateCache {
             if (failure == null) {
                 publish(id, new LoadedState(startedAt, state), null);
             } else {
-                publish(id, null, unwrapped(failure));
+                Throwable cause = unwrapped(failure);
+                if (cause instanceof SessionStateReader.RetiredUnreadException) {
+                    // No result, like an invalidated load: callers with time left start a new read.
+                    publish(id, null, null);
+                } else {
+                    publish(id, null, cause);
+                }
             }
         });
     }
