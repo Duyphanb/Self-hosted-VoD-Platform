@@ -5,8 +5,8 @@ import java.time.Duration;
 import java.util.function.LongSupplier;
 import org.hibernate.Session;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.TransactionTimedOutException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -18,19 +18,23 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * {@link #BUDGET} from the moment it reaches the application, connection-pool wait included:
  * <ul>
  *   <li>a transaction that starts with less than {@link #MIN_FOR_TRANSACTION} left changes nothing;</li>
- *   <li>a transaction that reaches its commit with less than {@link #MIN_FOR_COMMIT} left rolls back;</li>
+ *   <li>before the commit, the pending changes are flushed within the time left; with less than
+ *       {@link #MIN_FOR_COMMIT} left after that flush, the transaction rolls back;</li>
  *   <li>the connection's network timeout is always the time left, so no single socket wait can outlast the
- *       deadline, commit included.</li>
+ *       deadline, the flush and the commit included.</li>
  * </ul>
- * Each refusal is a {@link TransactionTimedOutException}, which the auth controllers answer with 503
- * {@code AUTH_STATE_UNAVAILABLE} (ADR-012 D6/D7). What remains is a commit whose acknowledgement is lost.
+ * Each refusal is a {@link QueryTimeoutException}: a runtime exception, so Spring rolls back explicitly even when
+ * it is thrown before the commit, and the auth controllers answer it with 503 {@code AUTH_STATE_UNAVAILABLE}
+ * (ADR-012 D6/D7). What remains is a commit whose acknowledgement is lost.
  */
 @Component
 public class AuthWriteDeadline {
 
     static final Duration BUDGET = Duration.ofSeconds(6);
     static final Duration MIN_FOR_TRANSACTION = Duration.ofSeconds(1);
-    static final Duration MIN_FOR_COMMIT = Duration.ofMillis(500);
+    // Longer than any healthy commit, and short enough that a slow final flush is refused before the 5-second
+    // statement timeout cancels it.
+    static final Duration MIN_FOR_COMMIT = Duration.ofSeconds(2);
 
     private final ThreadLocal<Long> deadlineNanos = new ThreadLocal<>();
     private final EntityManager entityManager;
@@ -57,25 +61,26 @@ public class AuthWriteDeadline {
 
     /** Called first in the login, refresh and logout transactions, before they change anything. */
     public void enterTransaction() {
-        if (deadlineNanos.get() == null) {
-            // Called outside a request (for example by a test): the deadline starts here.
-            startRequest();
-        }
-        // The transaction keeps this value: its commit may come after the request scope ended.
-        long deadline = deadlineNanos.get();
+        Long requestDeadline = deadlineNanos.get();
+        // Outside a request (for example a test) the deadline starts here and belongs to this transaction only.
+        // The transaction keeps the value: its commit may come after the request scope ended.
+        long deadline = requestDeadline != null ? requestDeadline : nanoTime.getAsLong() + BUDGET.toNanos();
         Duration left = remaining(deadline);
         if (left.compareTo(MIN_FOR_TRANSACTION) < 0) {
-            throw new TransactionTimedOutException("The auth request deadline passed before its transaction");
+            throw new QueryTimeoutException("The auth request deadline passed before its transaction");
         }
         limitNetworkWait(left);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void beforeCommit(boolean readOnly) {
-                Duration leftAtCommit = remaining(deadline);
-                if (leftAtCommit.compareTo(MIN_FOR_COMMIT) < 0) {
-                    throw new TransactionTimedOutException("The auth request deadline passed before its commit");
+                // Hibernate would flush only after this callback, so flush here, within the time left.
+                limitNetworkWait(remaining(deadline));
+                entityManager.flush();
+                Duration leftForCommit = remaining(deadline);
+                if (leftForCommit.compareTo(MIN_FOR_COMMIT) < 0) {
+                    throw new QueryTimeoutException("The auth request deadline passed before its commit");
                 }
-                limitNetworkWait(leftAtCommit);
+                limitNetworkWait(leftForCommit);
             }
         });
     }

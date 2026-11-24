@@ -20,7 +20,7 @@ import org.hibernate.jdbc.Work;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.transaction.TransactionTimedOutException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -28,6 +28,7 @@ class AuthWriteDeadlineTest {
 
     private final AtomicLong nanos = new AtomicLong();
     private final List<Integer> networkTimeouts = new CopyOnWriteArrayList<>();
+    private Duration flushTakes = Duration.ZERO;
     private final AuthWriteDeadline deadline = new AuthWriteDeadline(entityManagerRecordingTimeouts(), nanos::get);
 
     @BeforeEach
@@ -50,7 +51,8 @@ class AuthWriteDeadlineTest {
         advance(Duration.ofSeconds(1));
         beforeCommit();
 
-        assertThat(networkTimeouts).containsExactly(4_000, 3_000);
+        // At commit: once before the flush and once after it.
+        assertThat(networkTimeouts).containsExactly(4_000, 3_000, 3_000);
     }
 
     @Test
@@ -59,28 +61,42 @@ class AuthWriteDeadlineTest {
         // For example a connection-pool wait that outlasted the request budget.
         advance(Duration.ofMillis(5_001));
 
-        assertThatThrownBy(deadline::enterTransaction).isInstanceOf(TransactionTimedOutException.class);
+        assertThatThrownBy(deadline::enterTransaction).isInstanceOf(QueryTimeoutException.class);
         assertThat(networkTimeouts).isEmpty();
         assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
     }
 
     @Test
-    void aTransactionReachingItsCommitTooLateRollsBack() {
+    void aTransactionReachingItsCommitTooLateIsRefused() {
         deadline.startRequest();
         deadline.enterTransaction();
-        advance(Duration.ofMillis(5_501));
+        advance(Duration.ofMillis(5_001));
 
-        assertThatThrownBy(this::beforeCommit).isInstanceOf(TransactionTimedOutException.class);
-        assertThat(networkTimeouts).containsExactly(6_000);
+        assertThatThrownBy(this::beforeCommit).isInstanceOf(QueryTimeoutException.class);
+        assertThat(networkTimeouts).containsExactly(6_000, 999);
     }
 
     @Test
-    void outsideARequestTheDeadlineStartsWithTheTransaction() {
+    void theTimeTheFlushTakesCountsBeforeTheCommit() {
+        deadline.startRequest();
+        deadline.enterTransaction();
+        advance(Duration.ofSeconds(4));
+        flushTakes = Duration.ofMillis(1_500);
+
+        // 2 s were left before the flush, 0.5 s after it: less than the 2 s kept for the commit.
+        assertThatThrownBy(this::beforeCommit).isInstanceOf(QueryTimeoutException.class);
+        assertThat(networkTimeouts).containsExactly(6_000, 2_000);
+    }
+
+    @Test
+    void outsideARequestEachTransactionGetsItsOwnDeadline() {
         advance(Duration.ofHours(1));
+        deadline.enterTransaction();
+        advance(Duration.ofSeconds(7));
 
         deadline.enterTransaction();
 
-        assertThat(networkTimeouts).containsExactly(6_000);
+        assertThat(networkTimeouts).containsExactly(6_000, 6_000);
     }
 
     private void beforeCommit() {
@@ -108,6 +124,10 @@ class AuthWriteDeadlineTest {
         }).when(session).doWork(any());
         EntityManager entityManager = mock(EntityManager.class);
         when(entityManager.unwrap(Session.class)).thenReturn(session);
+        doAnswer(invocation -> {
+            advance(flushTakes);
+            return null;
+        }).when(entityManager).flush();
         return entityManager;
     }
 }
