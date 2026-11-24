@@ -30,6 +30,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 public class SessionStateReader {
 
     // Each result authorizes for 30 s from the start of its read, so a read must end well within that window.
+    private static final Duration MIN_TIMEOUT = Duration.ofMillis(1);
     private static final Duration MAX_TIMEOUT = Duration.ofSeconds(20);
 
     private final AuthSessionRepository sessions;
@@ -41,7 +42,7 @@ public class SessionStateReader {
             @Qualifier("authStateReadExecutor") Executor executor,
             @Value("${auth.sessions.state-read-timeout:10s}") Duration timeout
     ) {
-        if (timeout.isNegative() || timeout.isZero() || timeout.compareTo(MAX_TIMEOUT) > 0) {
+        if (timeout.compareTo(MIN_TIMEOUT) < 0 || timeout.compareTo(MAX_TIMEOUT) > 0) {
             throw new IllegalStateException("auth.sessions.state-read-timeout must be between 1 ms and 20 s");
         }
         this.sessions = sessions;

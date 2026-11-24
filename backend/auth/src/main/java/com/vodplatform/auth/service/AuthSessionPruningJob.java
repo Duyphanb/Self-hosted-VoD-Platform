@@ -52,8 +52,8 @@ public class AuthSessionPruningJob {
             return false;
         }
 
-        // No ORDER BY: any 500 tokens will do, so the session index stops after 500 rows instead of sorting
-        // every remaining token of the batch.
+        // No ORDER BY: any 500 tokens will do. The query returns at most 500 rows and never sorts every remaining
+        // token of a high-fan-out session.
         int deletedTokens = jdbc.sql("""
                 DELETE FROM refresh_tokens WHERE id IN (
                     SELECT id FROM refresh_tokens WHERE session_id IN (:sessionIds) LIMIT :limit

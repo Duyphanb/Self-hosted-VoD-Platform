@@ -240,7 +240,9 @@ describe('AdminMovieUploadPage through the data router', () => {
     [500, 'UPLOAD_DATABASE_ERROR']
   ] as const)(
     'classifies %s/%s as not accepted and only retries on a new click', async (status, code) => {
-      renderUpload(); await start(); respondError(status, code);
+      renderUpload();
+      await start();
+      respondError(status, code);
       await outcome('not accepted (no committed asset/job pair)');
       expect(FakeXhr.instances.length).toBe(1);
       fireEvent.click(uploadButton());

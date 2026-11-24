@@ -83,12 +83,14 @@ class SessionStateReaderTest {
             assertThat(reading.await(10, TimeUnit.SECONDS)).isTrue();
 
             assertThatThrownBy(() -> reader.read(SESSION_ID, true)).isInstanceOf(AuthStateUnavailableException.class);
+            var sentinel = new CountDownLatch(1);
+            executor.execute(sentinel::countDown);
             releaseRead.countDown();
             assertThatThrownBy(stalled::get).hasCauseInstanceOf(AuthStateUnavailableException.class);
+            // The worker runs queued tasks in order, so the expired read had its turn before the sentinel.
+            assertThat(sentinel.await(5, TimeUnit.SECONDS)).isTrue();
         }
 
-        executor.shutdown();
-        assertThat(executor.getThreadPoolExecutor().awaitTermination(5, TimeUnit.SECONDS)).isTrue();
         verify(sessions, times(0)).readState(SESSION_ID, true);
     }
 
@@ -128,7 +130,7 @@ class SessionStateReaderTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"0s", "-1s", "21s"})
+    @ValueSource(strings = {"0s", "-1s", "0.0005s", "21s"})
     void rejectsATimeoutOutsideTheFreshnessWindow(String timeout) {
         Duration outOfRange = Duration.parse("PT" + timeout.toUpperCase());
 

@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Component
 public class SessionStateCache {
@@ -42,6 +43,10 @@ public class SessionStateCache {
     }
 
     public Optional<SessionState> read(UUID id) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            // The reader then sees the caller's uncommitted rows, which must never reach the shared cache.
+            return reader.read(id, false);
+        }
         for (int attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
             LoadedState cached = entries.getIfPresent(id);
             if (isFresh(cached)) {

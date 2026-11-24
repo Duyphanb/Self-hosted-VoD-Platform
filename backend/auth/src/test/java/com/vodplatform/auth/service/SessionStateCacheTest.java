@@ -29,6 +29,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class SessionStateCacheTest {
 
@@ -184,6 +185,21 @@ class SessionStateCacheTest {
         }
 
         assertThat(cache.cachedSessionCount()).isLessThanOrEqualTo(20);
+    }
+
+    @Test
+    void aCallerInsideATransactionNeitherUsesNorFillsTheCache() {
+        when(reader.read(SESSION_ID, false)).thenReturn(ACTIVE);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertThat(cache.read(SESSION_ID)).isEqualTo(ACTIVE);
+            assertThat(cache.read(SESSION_ID)).isEqualTo(ACTIVE);
+        } finally {
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+
+        assertThat(cache.cachedSessionCount()).isZero();
+        verify(reader, times(2)).read(SESSION_ID, false);
     }
 
     private void waitUntilJoining(AtomicReference<Thread> waiter) throws InterruptedException {

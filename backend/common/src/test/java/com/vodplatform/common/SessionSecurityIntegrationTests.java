@@ -275,7 +275,12 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         try {
             mvc.perform(post("/api/v1/auth/logout").header("Origin", ORIGIN).cookie(cookie(login)))
                     .andExpect(status().isNoContent());
-            mvc.perform(profile).andExpect(status().isOk());
+            // Like a real request, the profile check runs outside this transaction, so it reads the cache.
+            try (var otherRequest = Executors.newSingleThreadExecutor()) {
+                int status = otherRequest.submit(() -> mvc.perform(profile).andReturn().getResponse().getStatus())
+                        .get(10, TimeUnit.SECONDS);
+                assertThat(status).isEqualTo(200);
+            }
         } catch (Exception failure) {
             throw new AssertionError(failure);
         }
