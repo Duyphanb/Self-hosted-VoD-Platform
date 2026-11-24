@@ -7,7 +7,15 @@ import subprocess
 import sys
 import time
 
-GATE = "import subprocess, sys; sys.exit(subprocess.call(sys.argv[1:]) if sys.stdin.read(1) == '1' else 1)"
+GATE = """
+import subprocess
+import sys
+
+if sys.stdin.read(1) != "1":
+    sys.exit(1)
+
+sys.exit(subprocess.call(sys.argv[1:]))
+"""
 
 
 class WindowsJob:

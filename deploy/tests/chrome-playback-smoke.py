@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 import uuid
 
 from chrome_process_tree import run_browser_tree
@@ -77,8 +78,15 @@ def project_resources(project):
                        "inspect project resources").stdout.strip()]
 
 
-def create_clip(image):
-    args = ["docker", "run", "--rm", "--network", "none", "--entrypoint", "ffmpeg", image,
+def clip_containers(project):
+    label = "label=vod.chrome-smoke.project=" + project
+    return command(["docker", "container", "ls", "-aq", "--filter", label],
+                   "inspect owned clip container").stdout.split()
+
+
+def create_clip(project, image):
+    args = ["docker", "run", "--rm", "--name", f"{project}-clip", "--label", f"vod.chrome-smoke.project={project}",
+            "--network", "none", "--entrypoint", "ffmpeg", image,
             "-nostdin", "-hide_banner", "-loglevel", "error",
             "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=120",
             "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=120",
@@ -107,9 +115,11 @@ def wait_for_ready(stack, asset):
 def seed(project, base_url, env, worker_image):
     worker = runpy.run_path(str(ROOT / "deploy/tests/worker-stack-smoke.py"))
     stack = worker["Stack"](project, base_url)
-    clip = create_clip(worker_image)
+    clip = create_clip(project, worker_image)
+    helper_env = {key: value for key, value in env.items() if key.lower() != "no_proxy"}
+    helper_env["no_proxy"] = "*"
     command([sys.executable, str(ROOT / "deploy/tests/newman-catalog-admin.py"),
-             "--project", project, "--base-url", base_url], "register and grant fixture administrator", env=env)
+             "--project", project, "--base-url", base_url], "register and grant fixture administrator", env=helper_env)
     login = json.dumps({"email": env["NEWMAN_ADMIN_EMAIL"], "password": env["NEWMAN_ADMIN_PASSWORD"]}).encode()
     status, auth = stack.request("/api/v1/auth/login", body=login, content_type="application/json")
     if status != 200:
@@ -194,7 +204,7 @@ def main():
     if not re.fullmatch(PREFIX + r"[a-z0-9][a-z0-9-]{0,35}", args.project):
         raise SmokeFailure("use a fresh vod-auth-audit-chrome-* project")
     project = args.project + "-" + secrets.token_hex(8)
-    if project_resources(project):
+    if project_resources(project) or clip_containers(project):
         raise SmokeFailure("project already owns resources")
     images = [f"{project}-{service}:latest" for service in SERVICES]
     for image in images:
@@ -220,12 +230,21 @@ def main():
             command(["docker", "image", "rm", image], "remove project image")
 
     def verify_cleanup():
-        if project_resources(project):
+        if project_resources(project) or clip_containers(project):
             raise SmokeFailure("disposable project cleanup left resources")
-        print(f"Cleanup verified for {project}: zero containers, volumes or networks", flush=True)
+        print(f"Cleanup verified for {project}: zero Compose resources or clip containers", flush=True)
+
+    def remove_clip():
+        clips = clip_containers(project)
+        if clips:
+            command(["docker", "container", "rm", "-f", *clips], "remove owned clip container", check=False)
+            if clip_containers(project):
+                raise SmokeFailure("owned clip container still present")
 
     first_failure = None
     try:
+        # This standalone driver uses the shared Stack transport only for its disposable loopback edge.
+        urllib.request.install_opener(urllib.request.build_opener(urllib.request.ProxyHandler({})))
         print(f"Building disposable project {project}", flush=True)
         command(compose + ["build", *SERVICES], "build Compose images", env=env, timeout=1200)
         result = start_with_proxy_retry(start, down, env)
@@ -235,7 +254,7 @@ def main():
     except BaseException as failure:
         first_failure = failure
     finally:
-        steps = [("Compose teardown", down)]
+        steps = [("clip container cleanup", remove_clip), ("Compose teardown", down)]
         steps.extend(("project image cleanup", lambda image=image: remove_image(image)) for image in images)
         steps.append(("project resource verification", verify_cleanup))
         for label, cleanup in steps:
