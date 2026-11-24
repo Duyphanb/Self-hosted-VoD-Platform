@@ -245,10 +245,6 @@ command equal to `ReferenceHlsEncodeFfmpegTests.referenceArguments`.
 - document manual checks that are not automated yet
 - support local and VPS demo readiness
 
-## Boundary
-
-Do not put requirements or architecture source-of-truth here. Link back to `docs/requirements/` and `docs/architecture/` when needed.
-
 ## Chrome upload-to-playback smoke
 
 Issue #125 uses the real backend, Nginx, PostgreSQL, worker and installed Google Chrome.
@@ -259,18 +255,24 @@ npm --prefix frontend ci
 python deploy/tests/chrome-playback-smoke.py
 ```
 
-On Windows, start Docker Desktop first. Set `TMP` and `TEMP` to a writable directory on F: if needed.
-The driver selects a loopback port and private proxy subnet, generates fixture accounts and media, and
-removes its own Compose resources and image tags. Use the driver to supply the fixture environment to the
-separate `test:e2e:chrome` command. The existing `test:e2e` command keeps the Chromium/Firefox fixtures.
+On Windows, start Docker Desktop first. Use a writable temporary directory on a drive with sufficient free space.
+The driver selects a loopback port, a private proxy subnet, and a unique project name for every run.
+Use the driver to supply the fixture environment and private output directory to `test:e2e:chrome`.
+The driver removes its Compose resources, image tags and browser directory. The `test:e2e` command runs
+the Chromium/Firefox fixtures.
 
-The browser run checks codec support before signing in, follows the real watch route and observes a real
-HLS 401, one successful refresh, and a successful retry of the same resource. Chrome adds transport latency
-to segment loads so the clip does not fully buffer before expiry. It also delays progress traffic briefly
-in the expiry window so the HLS request can initiate recovery. Both routes use the real backend.
-The test removes the latency after recovery. Setup uses a 32 MiB upload limit and a 360-second READY deadline.
+The browser checks codec support before signing in and verifies decoded audio during playback. Chrome adds
+transport latency to keep segments available after JWT expiry and delays progress response delivery during
+the recovery window. The test checks that one refresh supplies the bearer for both retries and that reload
+uses a new credential issued by cookie bootstrap. Set `VOD_CHROME_TEST_CPU_RATE=4` to slow Chrome scheduling.
+Setup uses a 32 MiB upload limit and a 360-second READY deadline.
 
 Use **Chrome playback smoke** via `workflow_dispatch` after the workflow is present on the default branch.
 The workflow installs Google Chrome and requires no application credentials. Its output is limited to
 named checkpoints and allowlisted browser observations. The CI Newman wrapper prints static collection
 item and assertion names on failure and removes its temporary report before returning.
+
+## Boundary
+
+Do not put requirements or architecture source-of-truth here. Link back to `docs/requirements/` and
+`docs/architecture/` when needed.

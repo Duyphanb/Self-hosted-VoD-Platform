@@ -1,9 +1,18 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type CDPSession, type Locator } from '@playwright/test';
+import { installPlaybackMonitor, media, sampleCadenceIsNormal, type PlaybackFault } from './chrome-smoke-media';
+import {
+  hasBearer, issuedToken, loginRoute, recovery, refreshRoute, tokenTimes, watchTraffic
+} from './chrome-smoke-traffic';
 
-const codec = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
-const refreshRoute = '/api/v1/auth/refresh';
-
-type Observation = { route: string; status: number; at: number };
+const codec = 'video/mp4; codecs="avc1.64001E, mp4a.40.2"';
+const accessTtl = 60_000;
+const clockSkew = 5_000;
+const saveCadence = 10_000;
+const expiryMargin = 1_000;
+const segmentLatency = 4_500;
+const refreshLatency = 3_500;
+const lateProgressLatency = 15_000;
+const fixtureFrameRate = 24;
 
 function fixtureId(name: string): string {
   const value = process.env[name] ?? '';
@@ -17,53 +26,26 @@ function report(data: object): void {
   console.log('CHROME_SMOKE ' + JSON.stringify(data));
 }
 
-async function checkpoint(label: string, action: () => Promise<void>): Promise<void> {
+async function checkpoint<T>(label: string, action: () => Promise<T>): Promise<T> {
   try {
-    await test.step(label, action);
+    return await test.step(label, action);
   } catch (error) {
     report({ failed: label });
     throw error;
   }
 }
 
-function watchResponses(page: Page, origin: string, hlsPrefix: string): Observation[] {
-  const observations: Observation[] = [];
-  page.on('response', response => {
-    const url = new URL(response.url());
-    if (url.origin !== origin) return;
-    const route = url.pathname;
-    const isHls = route === hlsPrefix + 'master.m3u8'
-      || (route.startsWith(hlsPrefix) && /^segments\/seg_\d+\.ts$/.test(route.slice(hlsPrefix.length)));
-    if (!isHls && (route !== refreshRoute || response.request().method() !== 'POST')) return;
-    const observation = { route, status: response.status(), at: Date.now() };
-    observations.push(observation);
-    if (route === refreshRoute || observation.status === 401) report(observation);
+function waitUntil(at: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, at - Date.now())));
+}
+
+function shapeTraffic(cdp: CDPSession, rules: [string, number][]) {
+  return cdp.send('Network.emulateNetworkConditionsByRule', {
+    offline: false,
+    matchedNetworkConditions: rules.map(([urlPattern, latency]) => ({
+      urlPattern, latency, downloadThroughput: -1, uploadThroughput: -1
+    }))
   });
-  return observations;
-}
-
-function loadedRecovery(observations: Observation[], hlsPrefix: string): Observation[] {
-  const denied = observations.findIndex(result => result.route.startsWith(hlsPrefix) && result.status === 401);
-  if (denied < 0) return [];
-  const retry = observations.findIndex((result, index) => index > denied
-    && result.route === observations[denied].route && result.status === 200);
-  if (retry < 0) return [];
-  const refreshes = observations.slice(denied + 1, retry).filter(result => result.route === refreshRoute);
-  if (refreshes.length !== 1 || refreshes[0].status !== 200) return [];
-  return [observations[denied], refreshes[0], observations[retry]];
-}
-
-function media(video: Locator) {
-  return video.evaluate((element: HTMLVideoElement) => ({
-    seconds: element.currentTime,
-    frames: element.getVideoPlaybackQuality().totalVideoFrames - element.getVideoPlaybackQuality().droppedVideoFrames,
-    paused: element.paused,
-    seeking: element.seeking,
-    rate: element.playbackRate,
-    error: element.error?.code ?? null,
-    ready: element.readyState,
-    duration: element.duration
-  }));
 }
 
 async function playing(video: Locator): Promise<void> {
@@ -71,13 +53,18 @@ async function playing(video: Locator): Promise<void> {
   await expect.poll(async () => (await media(video)).paused).toBe(false);
 }
 
-test('Chrome uploads through the real stack and recovers expired HLS playback', async ({ page, browser, baseURL }) => {
+test('Chrome plays the uploaded asset and recovers expired HLS playback', async ({ page, browser, baseURL }) => {
+  const origin = baseURL!;
   const movie = fixtureId('VOD_CHROME_MOVIE_ID');
   const asset = fixtureId('VOD_CHROME_ASSET_ID');
   const watch = `/movies/${movie}/watch`;
+  const playbackRoute = `/api/v1/movies/${movie}/playback`;
   const progressRoute = `/api/v1/movies/${movie}/progress`;
   const hlsPrefix = `/hls/video-assets/${asset}/`;
-  const observations = watchResponses(page, baseURL!, hlsPrefix);
+  const traffic = watchTraffic(page, origin, hlsPrefix, [loginRoute, progressRoute, playbackRoute]);
+  const video = page.locator('video');
+  const mediaErrors: PlaybackFault[] = [];
+  const segments: [string, number] = [origin + hlsPrefix + 'segments/*', segmentLatency];
   report({ chrome: browser.version() });
 
   await checkpoint('Chrome supports H.264 and AAC', async () => {
@@ -86,76 +73,104 @@ test('Chrome uploads through the real stack and recovers expired HLS playback', 
     expect(supported).toBe(true);
   });
 
-  const video = page.locator('video');
-  const cdp = await page.context().newCDPSession(page);
-  const throttle = async (latency: number, delayProgress = false) => {
-    const rules = latency === 0 ? [] : [{
-      urlPattern: baseURL + hlsPrefix + 'segments/*',
-      latency,
-      downloadThroughput: -1,
-      uploadThroughput: -1
-    }];
-    if (delayProgress) {
-      rules.push({
-        urlPattern: baseURL + progressRoute,
-        latency: 9_000,
-        downloadThroughput: -1,
-        uploadThroughput: -1
-      });
+  const cdp = await checkpoint('Install playback observers and shape segment traffic', async () => {
+    await installPlaybackMonitor(page, mediaErrors);
+    const session = await page.context().newCDPSession(page);
+    const cpuRate = Number(process.env.VOD_CHROME_TEST_CPU_RATE ?? 1);
+    if (!Number.isFinite(cpuRate) || cpuRate < 1 || cpuRate > 8) {
+      throw new Error('Invalid Chrome CPU throttling rate');
     }
-    await cdp.send('Network.emulateNetworkConditionsByRule', {
-      offline: false,
-      matchedNetworkConditions: rules
-    });
-  };
-  await throttle(4500);
-  let loginAt = 0;
-  await checkpoint('Real UI login and uploaded asset start paused', async () => {
+    if (cpuRate > 1) {
+      await session.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
+    }
+    await shapeTraffic(session, [segments]);
+    return session;
+  });
+
+  const originalToken = await checkpoint('Real UI login and uploaded asset start paused', async () => {
     await page.goto('/login');
     await page.getByLabel('Email', { exact: true }).fill(process.env.VOD_CHROME_EMAIL ?? '');
     await page.getByLabel('Password', { exact: true }).fill(process.env.VOD_CHROME_PASSWORD ?? '');
-    const loginResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/auth/login'
-      && response.status() === 200);
+    const loginResponse = page.waitForResponse(response => new URL(response.url()).pathname === loginRoute
+      && response.request().method() === 'POST');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await loginResponse;
-    loginAt = Date.now();
+    const login = await loginResponse;
+    expect(new URL(login.url()).origin === origin).toBe(true);
+    const token = await issuedToken(login);
+    if (!token) {
+      throw new Error('Missing fixture login credential');
+    }
     await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
     await page.getByRole('link', { name: 'Chrome playback smoke' }).first().click();
     await page.getByRole('link', { name: 'Watch', exact: true }).click();
-    await expect(page).toHaveURL(baseURL + watch);
-    await expect.poll(async () => (await media(video)).ready, { timeout: 18_000 }).toBeGreaterThanOrEqual(2);
-    expect(observations.some(result => result.route === hlsPrefix + 'master.m3u8' && result.status === 200)).toBe(true);
+    await expect(page).toHaveURL(origin + watch);
+    await expect.poll(async () => (await media(video)).ready, { timeout: 22_000 }).toBeGreaterThanOrEqual(2);
+    expect(traffic.current().some(exchange => exchange.route === hlsPrefix + 'master.m3u8'
+      && exchange.response?.status() === 200)).toBe(true);
     const paused = await media(video);
     expect(paused.paused).toBe(true);
     expect(paused.error).toBeNull();
     expect(Math.abs(paused.duration - 120)).toBeLessThanOrEqual(2);
-    await video.evaluate((element: HTMLVideoElement) => {
-      element.addEventListener('error', () => {
-        element.dataset.smokeMediaError = String(element.error?.code ?? 0);
-      });
-    });
+    return token;
   });
 
-  // Align 10-second progress writes near seconds 60 and 70 of the JWT. The segment cadence is
-  // shorter than that interval and keeps unrequested segments available past JWT expiry + 5 s skew.
-  await new Promise(resolve => setTimeout(resolve, Math.max(0, loginAt + 20_000 - Date.now())));
-  let start = await media(video);
-  let started = performance.now();
-  await checkpoint('User starts native playback', async () => {
-    await playing(video);
-    start = await media(video);
-    started = performance.now();
+  const alignment = await checkpoint('User starts native playback', async () => {
+    const { issued, expires } = tokenTimes(originalToken);
+    const expectedExpiration = Math.min(expires, issued + accessTtl) + clockSkew;
+    // Phase the real progress timer so its next tick after JWT expiry sends the old token.
+    await video.focus();
+    const phase = expectedExpiration + expiryMargin - Date.now();
+    await waitUntil(Date.now() + Math.max(0, phase % saveCadence));
+    const start = await media(video);
+    const started = performance.now();
+    expect(start.paused).toBe(true);
+    await page.keyboard.press('Space');
+    await expect.poll(async () => (await media(video)).paused).toBe(false);
+    const monitor = await page.evaluate(() => window.chromeSmokePlayback);
+    expect(monitor.startKey && monitor.pausedAtKey && !monitor.unexpectedPlay).toBe(true);
+    return { start, started, issued, expires, expectedExpiration };
   });
 
+  const { start, started, issued, expires, expectedExpiration } = alignment;
+  const originalDocument = traffic.document();
+  const loginCompleted = traffic.current().find(exchange => exchange.route === loginRoute)?.completed ?? 0;
+  const originalExchanges = () => traffic.current(originalDocument)
+    .filter(exchange => exchange.started > loginCompleted);
+  const refreshCount = () => originalExchanges().filter(exchange => exchange.route === refreshRoute).length;
   await checkpoint('HLS 401 then one refresh then 200 on the same resource', async () => {
-    // Transport latency on the progress route gives HLS the first expiry recovery. Both routes
-    // still reach the real backend and the player keeps using its unmodified save timer.
-    await new Promise(resolve => setTimeout(resolve, Math.max(0, loginAt + 63_000 - Date.now())));
-    await throttle(4500, true);
-    await expect.poll(() => loadedRecovery(observations, hlsPrefix).length, { timeout: 22_000 }).toBe(3);
-    for (const event of loadedRecovery(observations, hlsPrefix)) report(event);
+    // Enter the expiry window after the preceding save tick. Delay delivery of the real progress
+    // response until after the real refresh without routing, fulfilling or changing either request.
+    await waitUntil(expectedExpiration - clockSkew);
+    await shapeTraffic(cdp, [segments, [origin + progressRoute, lateProgressLatency],
+      [origin + refreshRoute, refreshLatency]]);
+    await expect.poll(() => originalExchanges().some(exchange => exchange.route === refreshRoute
+      && exchange.response?.status() === 200), { timeout: 28_000 }).toBe(true);
+    const firstRefresh = originalExchanges().find(exchange => exchange.route === refreshRoute);
+    const hlsDenialBeforeRefresh = () => originalExchanges().some(exchange => exchange.route.startsWith(hlsPrefix)
+      && exchange.response?.status() === 401 && exchange.completed < (firstRefresh?.started ?? 0));
+    expect(hlsDenialBeforeRefresh()).toBe(true);
+    await shapeTraffic(cdp, []);
+    const result = () => recovery(originalExchanges(), hlsPrefix, progressRoute);
+    await expect.poll(() => result() !== null, { timeout: 32_000 }).toBe(true);
+    const { hlsDenied, progressDenied, refresh, hlsRetry, progressRetry } = result()!;
+    expect(refreshCount()).toBe(1);
+    expect(expires - issued).toBe(accessTtl);
+    expect(hlsDenied.at >= expires + clockSkew && hlsDenied.completed < refresh.started).toBe(true);
+    expect(progressDenied.started < refresh.completed && progressDenied.completed > refresh.completed).toBe(true);
+    const fresh = await issuedToken(refresh.response);
+    expect(fresh !== null && fresh !== originalToken).toBe(true);
+    expect(await hasBearer(hlsDenied, originalToken) && await hasBearer(progressDenied, originalToken)).toBe(true);
+    expect(await hasBearer(hlsRetry, fresh) && await hasBearer(progressRetry, fresh)).toBe(true);
+    const sequence = [hlsDenied, refresh, hlsRetry, progressDenied, progressRetry]
+      .sort((first, second) => first.completed - second.completed);
+    for (const event of sequence) {
+      report({ route: event.route, status: event.response?.status(), at: event.at });
+    }
   });
-  await throttle(0);
+
+  await checkpoint('No seek before the explicit user seek', async () => {
+    expect(await page.evaluate(() => !window.chromeSmokePlayback.unexpectedSeek)).toBe(true);
+  });
 
   await checkpoint('At least 60 seconds of media at normal rate before seeking', async () => {
     await expect.poll(async () => (await media(video)).seconds - start.seconds, { timeout: 40_000 })
@@ -163,20 +178,33 @@ test('Chrome uploads through the real stack and recovers expired HLS playback', 
     const end = await media(video);
     const seconds = end.seconds - start.seconds;
     const wall = (performance.now() - started) / 1000;
+    const monitor = await page.evaluate(() => window.chromeSmokePlayback);
     report({ mediaSeconds: seconds, wallSeconds: wall, framesStart: start.frames, framesEnd: end.frames,
-      mediaError: end.error });
-    expect(end.error).toBeNull();
-    await expect(video).not.toHaveAttribute('data-smoke-media-error', /\d+/);
+      mediaError: end.error, audioDecoded: end.audioBytes > start.audioBytes });
     expect(end.rate).toBe(1);
-    expect(end.frames).toBeGreaterThan(start.frames + 120);
     expect(seconds / wall).toBeGreaterThan(0.9);
     expect(seconds / wall).toBeLessThan(1.05);
+    expect(end.frames - start.frames).toBeGreaterThan(seconds * fixtureFrameRate * 0.8);
+    expect(monitor.samples.length > 10 && sampleCadenceIsNormal(monitor.samples, fixtureFrameRate)).toBe(true);
+  });
+
+  await checkpoint('Audio decoded during playback', async () => {
+    const end = await media(video);
+    expect(end.audible && end.audioBytes > start.audioBytes).toBe(true);
+  });
+
+  await checkpoint('HLS URLs have no query string', async () => {
+    expect(traffic.safeHlsUrls()).toBe(true);
   });
 
   await checkpoint('Seek to 84 seconds', async () => {
-    await video.evaluate((element: HTMLVideoElement) => {
+    const allowed = await video.evaluate((element: HTMLVideoElement) => {
+      if (window.chromeSmokePlayback.unexpectedSeek) return false;
+      window.chromeSmokePlayback.seekAllowed = true;
       element.currentTime = 84;
+      return true;
     });
+    expect(allowed).toBe(true);
     await expect.poll(async () => Math.abs((await media(video)).seconds - 84)).toBeLessThan(2);
     await expect.poll(async () => (await media(video)).seeking).toBe(false);
   });
@@ -189,37 +217,61 @@ test('Chrome uploads through the real stack and recovers expired HLS playback', 
     await expect.poll(async () => (await media(video)).seconds).toBeGreaterThan(pausedAt + 2);
   });
 
-  let saved = 0;
-  await checkpoint('Persist the paused position below 90 percent', async () => {
+  const saved = await checkpoint('Persist the paused position below 90 percent', async () => {
     const minimum = Math.floor((await media(video)).seconds);
     const save = page.waitForResponse(async response => {
       const url = new URL(response.url());
-      if (url.origin !== baseURL || url.pathname !== progressRoute) return false;
+      if (url.origin !== origin || url.pathname !== progressRoute) return false;
       if (response.request().method() !== 'PUT' || response.status() !== 200) return false;
       const progress = await response.json();
       return Number.isInteger(progress.currentSeconds) && progress.currentSeconds >= minimum;
     }, { timeout: 15_000 });
     await video.press('Space');
     const progress = await (await save).json();
-    saved = progress.currentSeconds;
+    const saved = Number(progress.currentSeconds);
     const paused = await media(video);
     expect(paused.paused).toBe(true);
     expect(saved).toBeGreaterThan(84);
     expect(saved).toBeLessThan(paused.duration * 0.9);
     expect(Math.abs(saved - paused.seconds)).toBeLessThanOrEqual(2);
     report({ savedSeconds: saved });
+    return saved;
+  });
+
+  await checkpoint('Exactly one refresh through the end of the original document', async () => {
+    await page.reload();
+    expect(refreshCount()).toBe(1);
+  });
+
+  await checkpoint('Cookie bootstrap supplies the new document playback request', async () => {
+    const firstRequest = (route: string) => traffic.current().find(exchange => exchange.route === route);
+    await expect.poll(() => Boolean(firstRequest(playbackRoute)?.completed), { timeout: 15_000 }).toBe(true);
+    const bootstrap = firstRequest(refreshRoute);
+    const playback = firstRequest(playbackRoute)!;
+    expect(playback.document > originalDocument && bootstrap?.document === playback.document).toBe(true);
+    expect(Boolean(bootstrap?.completed && bootstrap.completed < playback.started)).toBe(true);
+    expect(playback.response?.status()).toBe(200);
+    const token = await issuedToken(bootstrap?.response);
+    await expect.poll(() => page.evaluate(
+      routes => routes.every(route =>
+        performance.getEntriesByName(new URL(route, location.origin).href, 'resource').length > 0),
+      [refreshRoute, playbackRoute]
+    )).toBe(true);
+    expect(await hasBearer(playback, token)).toBe(true);
+    report({ route: refreshRoute, status: bootstrap?.response?.status(), at: bootstrap?.at });
   });
 
   await checkpoint('Cookie bootstrap resumes near the committed position', async () => {
-    const bootstrap = page.waitForResponse(response => new URL(response.url()).pathname === refreshRoute
-      && response.request().method() === 'POST' && response.status() === 200);
-    await page.reload();
-    await bootstrap;
     await expect.poll(async () => Math.abs((await media(video)).seconds - saved), { timeout: 15_000 })
       .toBeLessThanOrEqual(3);
     const resumed = await media(video);
     expect(resumed.paused).toBe(true);
-    expect(resumed.error).toBeNull();
     report({ resumeSeconds: resumed.seconds });
+  });
+
+  await checkpoint('No media error in either document', async () => {
+    expect(mediaErrors).toEqual([]);
+    expect((await media(video)).error).toBeNull();
+    expect(traffic.safeHlsUrls()).toBe(true);
   });
 });
