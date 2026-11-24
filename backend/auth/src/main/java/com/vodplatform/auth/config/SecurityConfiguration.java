@@ -36,7 +36,9 @@ public class SecurityConfiguration {
 
     public SecurityConfiguration(CorsProperties origins, com.vodplatform.shared.error.ApiErrorFactory errors,
                                  tools.jackson.databind.ObjectMapper mapper) {
-        this.origins = origins; this.errors = errors; this.mapper = mapper;
+        this.origins = origins;
+        this.errors = errors;
+        this.mapper = mapper;
     }
 
     private static final List<String> CORS_ALLOWED_METHODS = List.of(

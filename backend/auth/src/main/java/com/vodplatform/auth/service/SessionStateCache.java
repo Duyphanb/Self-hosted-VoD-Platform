@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.vodplatform.auth.persistence.SessionState;
+import com.vodplatform.auth.security.AuthStateUnavailableException;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
@@ -18,6 +19,7 @@ public class SessionStateCache {
 
     private static final Duration MAX_AGE = Duration.ofSeconds(30);
     private static final int MAX_ENTRIES = 10_000;
+    private static final int MAX_LOAD_ATTEMPTS = 2;
 
     private final SessionStateReader reader;
     private final Ticker ticker;
@@ -36,7 +38,7 @@ public class SessionStateCache {
     }
 
     public Optional<SessionState> read(UUID id) {
-        while (true) {
+        for (int attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
             LoadedState cached = entries.getIfPresent(id);
             if (isFresh(cached)) {
                 return cached.state();
@@ -60,6 +62,7 @@ public class SessionStateCache {
                 throw failure;
             }
         }
+        throw new AuthStateUnavailableException(null);
     }
 
     public void invalidate(UUID id) {

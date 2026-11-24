@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,8 +18,10 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -79,6 +83,45 @@ class SessionStateCacheTest {
                 verify(reader, times(invalidate ? 2 : 1)).read(SESSION_ID, false);
             } finally {
                 returnSnapshot.countDown();
+            }
+        }
+    }
+
+    @Test
+    void twoOverAgeLoadsFailAsUnavailableForBothTheLoaderAndTheWaitingCaller() throws Exception {
+        var firstReadStarted = new CountDownLatch(1);
+        var finishFirstRead = new CountDownLatch(1);
+        var loads = new AtomicInteger();
+        when(reader.read(SESSION_ID, false)).thenAnswer(invocation -> {
+            int load = loads.incrementAndGet();
+            if (load == 1) {
+                firstReadStarted.countDown();
+                assertThat(finishFirstRead.await(10, TimeUnit.SECONDS)).isTrue();
+            }
+            if (load <= 3) {
+                nanos.addAndGet(Duration.ofSeconds(30).toNanos());
+            }
+            return ACTIVE;
+        });
+        var waiterThread = new AtomicReference<Thread>();
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var loader = workers.submit(() -> cache.read(SESSION_ID));
+            try {
+                assertThat(firstReadStarted.await(10, TimeUnit.SECONDS)).isTrue();
+                var waiter = workers.submit(() -> {
+                    waiterThread.set(Thread.currentThread());
+                    return cache.read(SESSION_ID);
+                });
+                waitUntilJoining(waiterThread);
+                finishFirstRead.countDown();
+                assertThatThrownBy(() -> loader.get(10, TimeUnit.SECONDS))
+                        .isInstanceOf(ExecutionException.class).hasCauseInstanceOf(AuthStateUnavailableException.class);
+                assertThatThrownBy(() -> waiter.get(10, TimeUnit.SECONDS))
+                        .isInstanceOf(ExecutionException.class).hasCauseInstanceOf(AuthStateUnavailableException.class);
+                verify(reader, atLeast(2)).read(SESSION_ID, false);
+                verify(reader, atMost(3)).read(SESSION_ID, false);
+            } finally {
+                finishFirstRead.countDown();
             }
         }
     }

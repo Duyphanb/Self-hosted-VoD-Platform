@@ -31,10 +31,10 @@ public class AuthSessionPruningJob {
         this.clock = clock;
     }
 
-    @Scheduled(cron = "0 15 3 * * *", zone = "UTC")
+    @Scheduled(cron = "${auth.sessions.prune-cron:0 15 3 * * *}", zone = "UTC", scheduler = "authPruningScheduler")
     public void prune() {
         Instant cutoff = clock.instant().minus(RETENTION);
-        while (transactions.execute(status -> pruneSessions(cutoff)) == BATCH_SIZE) {
+        while (Boolean.TRUE.equals(transactions.execute(status -> pruneEndedSessions(cutoff)))) {
             // Commit each batch before getting the next one.
         }
         while (transactions.execute(status -> pruneLegacyTokens()) == BATCH_SIZE) {
@@ -42,16 +42,28 @@ public class AuthSessionPruningJob {
         }
     }
 
-    private int pruneSessions(Instant cutoff) {
-        List<UUID> removed = jdbc.sql("""
-                DELETE FROM auth_sessions WHERE id IN (
-                    SELECT id FROM auth_sessions WHERE LEAST(expires_at, revoked_at) < :cutoff
-                    ORDER BY LEAST(expires_at, revoked_at), id
-                    LIMIT :limit FOR UPDATE SKIP LOCKED
-                ) RETURNING id
+    private boolean pruneEndedSessions(Instant cutoff) {
+        List<UUID> locked = jdbc.sql("""
+                SELECT id FROM auth_sessions WHERE LEAST(expires_at, revoked_at) < :cutoff
+                ORDER BY LEAST(expires_at, revoked_at), id
+                LIMIT :limit FOR UPDATE SKIP LOCKED
                 """).param("cutoff", Timestamp.from(cutoff)).param("limit", BATCH_SIZE).query(UUID.class).list();
-        sessions.invalidateAfterCommit(removed);
-        return removed.size();
+        if (locked.isEmpty()) {
+            return false;
+        }
+
+        int deletedTokens = jdbc.sql("""
+                DELETE FROM refresh_tokens WHERE id IN (
+                    SELECT id FROM refresh_tokens WHERE session_id IN (:sessionIds)
+                    ORDER BY session_id, id LIMIT :limit
+                )
+                """).param("sessionIds", locked).param("limit", BATCH_SIZE).update();
+        if (deletedTokens == 0) {
+            // We still hold FOR UPDATE on every parent, so no new FK reference can appear before the delete.
+            jdbc.sql("DELETE FROM auth_sessions WHERE id IN (:sessionIds)").param("sessionIds", locked).update();
+            sessions.invalidateAfterCommit(locked);
+        }
+        return true;
     }
 
     private int pruneLegacyTokens() {

@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
@@ -57,6 +58,10 @@ class RefreshTokenIntegrationTests extends CookieAuthFixture implements Postgres
         Instant expiry = jdbc.queryForObject("select expires_at from refresh_tokens where user_id=?",
                 Timestamp.class, user).toInstant();
         assertThat(expiry).isEqualTo(now.plus(Duration.ofDays(7)));
+        UUID sessionId = jdbc.queryForObject("select id from auth_sessions where user_id=?", UUID.class, user);
+        String sessionExpiryQuery = "select expires_at from auth_sessions where id=?";
+        assertThat(jdbc.queryForObject(sessionExpiryQuery, Timestamp.class, sessionId))
+                .isEqualTo(Timestamp.from(expiry));
         assertThat(attributes.getMaxAge()).isEqualTo(Duration.between(now, expiry).getSeconds());
         when(clock.instant()).thenReturn(now.plusSeconds(100));
         var rotated = refresh(cookie(login)).andExpect(status().isOk())
@@ -65,10 +70,25 @@ class RefreshTokenIntegrationTests extends CookieAuthFixture implements Postgres
         assertThat(revoked()).isEqualTo(1);
         String rotatedCookieHeader = rotated.getResponse().getHeader("Set-Cookie");
         assertThat(HttpCookie.parse(rotatedCookieHeader).getFirst().getMaxAge()).isEqualTo(604700);
-        assertThat(jdbc.queryForObject("select count(distinct session_id) from refresh_tokens where user_id=?",
-                Integer.class, user)).isEqualTo(1);
+        assertThat(jdbc.queryForList("select distinct session_id from refresh_tokens where user_id=?",
+                UUID.class, user)).containsExactly(sessionId);
         assertThat(jdbc.queryForList("select expires_at from refresh_tokens where user_id=?", Timestamp.class, user))
                 .containsOnly(Timestamp.from(expiry));
+        assertThat(jdbc.queryForObject(sessionExpiryQuery, Timestamp.class, sessionId))
+                .isEqualTo(Timestamp.from(expiry));
+    }
+
+    @Test
+    void unexpiredRefreshTokenCannotExtendAnExpiredSession() throws Exception {
+        Cookie token = issued();
+        jdbc.update("update auth_sessions set expires_at=? where user_id=?", Timestamp.from(now), user);
+        assertThat(jdbc.queryForObject("select expires_at from refresh_tokens where user_id=?", Timestamp.class, user))
+                .isAfter(Timestamp.from(now));
+
+        var rejected = refresh(token).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED")).andReturn();
+        assertThat(HttpCookie.parse(rejected.getResponse().getHeader("Set-Cookie")).getFirst().getMaxAge()).isZero();
+        assertThat(revoked()).isZero();
     }
 
     @ParameterizedTest

@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Configuration(proxyBeanMethods = false)
@@ -22,5 +23,12 @@ public class AuthConfiguration {
     @Bean
     PasswordEncoder passwordEncoder() {
         return new VersionedBcryptPasswordEncoder();
+    }
+
+    @Bean(defaultCandidate = false)
+    ThreadPoolTaskScheduler authPruningScheduler() {
+        var scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setThreadNamePrefix("auth-pruning-");
+        return scheduler;
     }
 }

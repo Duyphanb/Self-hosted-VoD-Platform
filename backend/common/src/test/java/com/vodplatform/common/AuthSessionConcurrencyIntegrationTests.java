@@ -11,19 +11,24 @@ import jakarta.servlet.http.Cookie;
 import java.sql.Connection;
 import java.sql.Timestamp;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.annotation.Scheduled;
 
 @SpringBootTest(properties = {
         "auth.tokens.secret=test-only-secret-with-at-least-32-bytes",
@@ -34,6 +39,50 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
 
     @Autowired DataSource dataSource;
     @Autowired AuthSessionPruningJob pruning;
+    @Autowired @Qualifier("taskScheduler") TaskScheduler relayScheduler;
+    @Autowired @Qualifier("authPruningScheduler") TaskScheduler pruningScheduler;
+
+    @Test
+    void loginAndRefreshCanCommitWhileTheUserHasAForeignKeyLock() throws Exception {
+        try (var worker = Executors.newSingleThreadExecutor();
+             Connection held = holdRow("users", user, "FOR KEY SHARE")) {
+            var requests = worker.submit(() -> {
+                var login = login().andExpect(status().isOk()).andReturn();
+                refresh(cookie(login)).andExpect(status().isOk());
+                return null;
+            });
+            try {
+                requests.get(5, TimeUnit.SECONDS);
+            } finally {
+                held.rollback();
+            }
+        }
+    }
+
+    @Test
+    void pruningUsesItsOwnSchedulerAndCannotOccupyTheRelayScheduler() throws Exception {
+        var scheduled = AuthSessionPruningJob.class.getMethod("prune").getAnnotation(Scheduled.class);
+        assertThat(scheduled.scheduler()).isEqualTo("authPruningScheduler");
+        var pruningStarted = new CountDownLatch(1);
+        var releasePruning = new CountDownLatch(1);
+        var relayRan = new CountDownLatch(1);
+        var held = pruningScheduler.schedule(() -> {
+            pruningStarted.countDown();
+            try {
+                releasePruning.await();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }, Instant.now());
+        try {
+            assertThat(pruningStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            relayScheduler.schedule(relayRan::countDown, Instant.now());
+            assertThat(relayRan.await(5, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            releasePruning.countDown();
+            held.get(5, TimeUnit.SECONDS);
+        }
+    }
 
     @Test
     void rotationsOfOneCookieWaitForTheSameOwnerAndExactlyOneSucceeds() throws Exception {
@@ -141,7 +190,7 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
     }
 
     @Test
-    void refreshWaitingBehindPruningCannotRecreateADeletedSession() throws Exception {
+    void refreshWaitingBehindPruningCannotRotateAnEndedSession() throws Exception {
         Cookie original = issued();
         UUID tokenId = singleId("refresh_tokens");
         jdbc.update("update auth_sessions set expires_at=? where user_id=?",
@@ -160,6 +209,8 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
                 held.rollback();
             }
         }
+        // A sweep can skip the session while the rejected refresh still owns its row lock.
+        pruning.prune();
         assertThat(jdbc.queryForObject("select count(*) from auth_sessions where user_id=?", Integer.class, user))
                 .isZero();
         assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class, user))
@@ -167,7 +218,7 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
     }
 
     @Test
-    void pruningCrossesTheBatchBoundaryAndCascadesOnlySessionsPastRetention() throws Exception {
+    void pruningBoundsTheCombinedRowCountEvenForASessionWithManyTokens() throws Exception {
         issued();
         var cutoff = now.minus(Duration.ofDays(30));
         jdbc.update("""
@@ -180,11 +231,14 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
                 insert into auth_sessions (id, user_id, created_at, expires_at)
                 values (gen_random_uuid(), ?, ?::timestamptz - interval '7 days', ?)
                 """, user, Timestamp.from(cutoff), Timestamp.from(cutoff));
+        UUID largestSession = jdbc.queryForObject("""
+                select id from auth_sessions where user_id=? and revoked_at is not null order by id limit 1
+                """, UUID.class, user);
         jdbc.update("""
                 insert into refresh_tokens (id, user_id, token_hash, expires_at, created_at, session_id)
-                select gen_random_uuid(), user_id, id::text, expires_at, created_at, id
-                from auth_sessions where user_id=? and revoked_at is not null
-                """, user);
+                select id, ?, id::text, ?, ?, ?
+                from (select gen_random_uuid() id from generate_series(1, 701)) fixture
+                """, user, Timestamp.from(cutoff), Timestamp.from(cutoff), largestSession);
         jdbc.update("""
                 insert into refresh_tokens (id, user_id, token_hash, expires_at, created_at)
                 select id, ?, id::text, ?, ? from (select gen_random_uuid() id from generate_series(1, 501)) fixture
@@ -218,16 +272,15 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
                     """.formatted(auditTable, function, user));
             jdbc.execute("""
                     create trigger %s before delete on refresh_tokens for each row
-                    when (old.session_id is null) execute function %s('%s')
+                    execute function %s('%s')
                     """.formatted(auditTable, function, user));
 
             pruning.prune();
 
-            for (String table : List.of("auth_sessions", "refresh_tokens")) {
-                assertThat(jdbc.queryForList("""
-                        select count(*) from %s where source=? group by transaction_id
-                        """.formatted(auditTable), Integer.class, table)).containsExactlyInAnyOrder(500, 1);
-            }
+            assertThat(jdbc.queryForList("""
+                    select count(*) from %s group by transaction_id
+                    """.formatted(auditTable), Integer.class)).isNotEmpty().allMatch(count -> count <= 500);
+            assertThat(jdbc.queryForObject("select count(*) from " + auditTable, Integer.class)).isEqualTo(1703);
         } finally {
             jdbc.execute("drop trigger if exists " + auditTable + " on refresh_tokens");
             jdbc.execute("drop trigger if exists " + auditTable + " on auth_sessions");
@@ -245,10 +298,14 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
     }
 
     private Connection holdRow(String table, UUID id) throws Exception {
+        return holdRow(table, id, "FOR UPDATE");
+    }
+
+    private Connection holdRow(String table, UUID id, String lockMode) throws Exception {
         Connection connection = dataSource.getConnection();
         try {
             connection.setAutoCommit(false);
-            try (var lock = connection.prepareStatement("select id from " + table + " where id = ? for update")) {
+            try (var lock = connection.prepareStatement("select id from " + table + " where id = ? " + lockMode)) {
                 lock.setObject(1, id);
                 try (var row = lock.executeQuery()) {
                     assertThat(row.next()).isTrue();

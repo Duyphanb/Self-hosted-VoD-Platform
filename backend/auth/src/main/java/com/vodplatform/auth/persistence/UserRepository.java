@@ -28,7 +28,7 @@ public interface UserRepository extends JpaRepository<UserEntity, UUID> {
             """)
     Optional<LoginCredentials> findLoginCredentials(String email);
 
-    @Query(value = "SELECT id FROM users WHERE id IN (:userIds) ORDER BY id FOR UPDATE", nativeQuery = true)
+    @Query(value = "SELECT id FROM users WHERE id IN (:userIds) ORDER BY id FOR NO KEY UPDATE", nativeQuery = true)
     List<UUID> lockAuthUsers(Collection<UUID> userIds);
 
     interface LoginCredentials {

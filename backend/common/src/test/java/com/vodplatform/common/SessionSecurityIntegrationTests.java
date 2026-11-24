@@ -145,6 +145,17 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         verify(reader, times(1)).read(sessionId(), false);
     }
 
+    @Test
+    void liveAdminRoleDoesNotElevateABearerTokenWithOnlyTheUserClaim() throws Exception {
+        String userAuthorization = bearer(signedIn());
+        // Keep the JWT epoch valid to isolate the role check from runbook-wide revocation.
+        jdbc.update("insert into user_roles (user_id, role_id) select ?, id from roles where name='ROLE_ADMIN'", user);
+        mvc.perform(get(PROFILE).header("Authorization", userAuthorization)).andExpect(status().isOk());
+        mvc.perform(get(ADMIN).header("Authorization", userAuthorization)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/movies").header("Authorization", userAuthorization))
+                .andExpect(status().isForbidden());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {PROFILE, ADMIN, HLS})
     void bearerReadFailureIs503WithoutSessionLossOrAnAuthenticationChallenge(String path) throws Exception {
