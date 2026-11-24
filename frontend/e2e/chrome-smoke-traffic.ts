@@ -9,6 +9,7 @@ export type Exchange = {
   route: string;
   document: number;
   started: number;
+  sentAt: number;
   completed: number;
   at: number;
 };
@@ -31,11 +32,13 @@ export function watchTraffic(page: Page, origin: string, hlsPrefix: string, prot
     }
     const isRefresh = route === refreshRoute && request.method() === 'POST';
     if (!isHls && !isRefresh && !protectedRoutes.includes(route)) return;
-    exchanges.set(request, { request, route, document, started: ++order, completed: 0, at: 0 });
+    exchanges.set(request, { request, route, document, started: ++order, sentAt: Date.now(), completed: 0, at: 0 });
   });
   page.on('response', response => {
     const exchange = exchanges.get(response.request());
     if (!exchange) return;
+    const { startTime, requestStart } = response.request().timing();
+    exchange.sentAt = startTime + Math.max(0, requestStart);
     exchange.response = response;
     exchange.completed = ++order;
     exchange.at = Date.now();

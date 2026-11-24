@@ -272,6 +272,10 @@ The workflow installs Google Chrome and requires no application credentials. Its
 named checkpoints and allowlisted browser observations. The CI Newman wrapper prints static collection
 item and assertion names on failure and removes its temporary report before returning.
 
+The replay of a late progress 401 is covered here. Two callers joining an in-flight refresh are covered by
+unit tests. A second cancellation during local teardown can interrupt cleanup. A forced kill can leave
+Newman's temporary raw report on the disposable CI runner until the runner is discarded.
+
 ## Boundary
 
 Do not put requirements or architecture source-of-truth here. Link back to `docs/requirements/` and

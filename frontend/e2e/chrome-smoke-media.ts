@@ -1,13 +1,16 @@
 import type { Locator, Page } from '@playwright/test';
 
-type Sample = { media: number; wall: number; frames: number };
+type AudioVideo = HTMLVideoElement & { webkitAudioDecodedByteCount?: number };
+type Sample = { media: number; wall: number; frames: number; audioBytes: number };
 export type PlaybackFault = number | 'media source detached';
 type PlaybackMonitor = {
   seekAllowed: boolean;
   unexpectedSeek: boolean;
   unexpectedPlay: boolean;
+  unexpectedRateChange: boolean;
   startKey: boolean;
   pausedAtKey: boolean;
+  playingAt: number | null;
   samples: Sample[];
 };
 
@@ -22,7 +25,8 @@ export async function installPlaybackMonitor(page: Page, faults: PlaybackFault[]
   await page.exposeFunction('captureChromeSmokePlaybackFault', (fault: PlaybackFault) => faults.push(fault));
   await page.addInitScript(() => {
     const state: PlaybackMonitor = {
-      seekAllowed: false, unexpectedSeek: false, unexpectedPlay: false, startKey: false, pausedAtKey: false, samples: []
+      seekAllowed: false, unexpectedSeek: false, unexpectedPlay: false, unexpectedRateChange: false,
+      startKey: false, pausedAtKey: false, playingAt: null, samples: []
     };
     window.chromeSmokePlayback = state;
     document.addEventListener('keydown', event => {
@@ -39,6 +43,11 @@ export async function installPlaybackMonitor(page: Page, faults: PlaybackFault[]
     document.addEventListener('seeking', event => {
       if (event.target instanceof HTMLVideoElement && !state.seekAllowed) {
         state.unexpectedSeek = true;
+      }
+    }, true);
+    document.addEventListener('ratechange', event => {
+      if (event.target instanceof HTMLVideoElement && !state.seekAllowed) {
+        state.unexpectedRateChange = true;
       }
     }, true);
     document.addEventListener('error', event => {
@@ -58,19 +67,24 @@ export async function installPlaybackMonitor(page: Page, faults: PlaybackFault[]
       attributes: true, attributeFilter: ['src'], attributeOldValue: true, childList: true, subtree: true
     });
     const sample = () => {
-      const video = document.querySelector('video');
+      const video: AudioVideo | null = document.querySelector('video');
       if (!video || !state.startKey || state.seekAllowed) return;
       const quality = video.getVideoPlaybackQuality();
       state.samples.push({ media: video.currentTime, wall: performance.now(),
-        frames: quality.totalVideoFrames - quality.droppedVideoFrames });
+        frames: quality.totalVideoFrames - quality.droppedVideoFrames,
+        audioBytes: video.webkitAudioDecodedByteCount ?? 0 });
     };
-    document.addEventListener('playing', sample, true);
+    document.addEventListener('playing', event => {
+      if (!(event.target instanceof HTMLVideoElement)) return;
+      state.playingAt ??= Date.now();
+      sample();
+    }, true);
     setInterval(sample, 3_000);
   });
 }
 
 export function media(video: Locator) {
-  return video.evaluate((element: HTMLVideoElement & { webkitAudioDecodedByteCount?: number }) => {
+  return video.evaluate((element: AudioVideo) => {
     const quality = element.getVideoPlaybackQuality();
     return {
       seconds: element.currentTime,
@@ -85,6 +99,19 @@ export function media(video: Locator) {
       duration: element.duration
     };
   });
+}
+
+export function audioGrowsThroughout(samples: Pick<Sample, 'media' | 'audioBytes'>[]): boolean {
+  const first = samples[0];
+  let lastGrowth = first;
+  const maxQuietMediaSeconds = 9;
+  for (const sample of samples) {
+    if (sample.media - lastGrowth.media > maxQuietMediaSeconds) return false;
+    if (sample.audioBytes > lastGrowth.audioBytes) {
+      lastGrowth = sample;
+    }
+  }
+  return lastGrowth.audioBytes > first.audioBytes;
 }
 
 export function sampleCadenceIsNormal(samples: Sample[], framesPerSecond: number): boolean {
