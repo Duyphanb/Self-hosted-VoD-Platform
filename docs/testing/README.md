@@ -248,3 +248,29 @@ command equal to `ReferenceHlsEncodeFfmpegTests.referenceArguments`.
 ## Boundary
 
 Do not put requirements or architecture source-of-truth here. Link back to `docs/requirements/` and `docs/architecture/` when needed.
+
+## Chrome upload-to-playback smoke
+
+Issue #125 uses the real backend, Nginx, PostgreSQL, worker and installed Google Chrome.
+From the repository root, install the pinned frontend dependencies and start the test:
+
+```sh
+npm --prefix frontend ci
+python deploy/tests/chrome-playback-smoke.py
+```
+
+On Windows, start Docker Desktop first. Set `TMP` and `TEMP` to a writable directory on F: if needed.
+The driver selects a loopback port and private proxy subnet, generates fixture accounts and media, and
+removes its own Compose resources and image tags. Use the driver to supply the fixture environment to the
+separate `test:e2e:chrome` command. The existing `test:e2e` command keeps the Chromium/Firefox fixtures.
+
+The browser run checks codec support before signing in, follows the real watch route and observes a real
+HLS 401, one successful refresh, and a successful retry of the same resource. Chrome adds transport latency
+to segment loads so the clip does not fully buffer before expiry. It also delays progress traffic briefly
+in the expiry window so the HLS request can initiate recovery. Both routes use the real backend.
+The test removes the latency after recovery. Setup uses a 32 MiB upload limit and a 360-second READY deadline.
+
+Use **Chrome playback smoke** via `workflow_dispatch` after the workflow is present on the default branch.
+The workflow installs Google Chrome and requires no application credentials. Its output is limited to
+named checkpoints and allowlisted browser observations. The CI Newman wrapper prints static collection
+item and assertion names on failure and removes its temporary report before returning.
