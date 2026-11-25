@@ -15,8 +15,9 @@ const segmentLatency = 4_500;
 const refreshLatency = 6_000;
 const lateProgressLatency = 18_000;
 const fixtureFrameRate = 24;
-// Far enough ahead that only a real seek, not playback or an hls.js stall nudge, lands near the target.
-const seekAheadSeconds = 8;
+// Seek back into the buffered range: playback alone never moves backwards, and the save stays far below 90
+// percent whichever segment the expiry hit (the recovered segment and the seek position vary with the start phase).
+const seekBackSeconds = 30;
 const seekedTimeout = 10_000;
 
 function fixtureId(name: string): string {
@@ -251,12 +252,13 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     expect(traffic.safeHlsUrls()).toBe(true);
   });
 
-  const seekTo = await checkpoint('Seek forward with room to save below 90 percent', async () => {
+  const seekTo = await checkpoint('Seek back with room to save below 90 percent', async () => {
     await checkpoint('No playback rate change before the explicit seek', async () => {
       expect(await page.evaluate(() => !window.chromeSmokePlayback.unexpectedRateChange)).toBe(true);
     });
     const { seconds, duration } = await media(video);
-    const target = Math.ceil(seconds) + seekAheadSeconds;
+    const target = Math.floor(seconds) - seekBackSeconds;
+    expect(target).toBeGreaterThan(0);
     // Leave room for the pause/resume step and the save, which must stay below 90 percent.
     expect(target + 6).toBeLessThan(duration * 0.9);
     const landedAt = await video.evaluate((element: HTMLVideoElement, { nextPosition, timeout }) => {
