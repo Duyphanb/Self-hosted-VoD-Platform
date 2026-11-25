@@ -19,6 +19,8 @@ const fixtureFrameRate = 24;
 // percent whichever segment the expiry hit (the recovered segment and the seek position vary with the start phase).
 const seekBackSeconds = 30;
 const seekedTimeout = 10_000;
+// Saves carry whole seconds; the first pause of the pause/resume step is more than two seconds earlier.
+const pauseSaveTolerance = 1.5;
 
 function fixtureId(name: string): string {
   const value = process.env[name] ?? '';
@@ -252,7 +254,7 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     expect(traffic.safeHlsUrls()).toBe(true);
   });
 
-  const seekTo = await checkpoint('Seek back with room to save below 90 percent', async () => {
+  const seek = await checkpoint('Seek back with room to save below 90 percent', async () => {
     await checkpoint('No playback rate change before the explicit seek', async () => {
       expect(await page.evaluate(() => !window.chromeSmokePlayback.unexpectedRateChange)).toBe(true);
     });
@@ -279,7 +281,7 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
       throw new Error('Unexpected seek or rate change before the explicit seek');
     }
     expect(Math.abs(landedAt - target)).toBeLessThan(1);
-    return target;
+    return { target, completedAt: Date.now() };
   });
 
   await checkpoint('Pause and resume native playback', async () => {
@@ -291,27 +293,28 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
   });
 
   const saved = await checkpoint('Persist the paused position below 90 percent', async () => {
-    const minimum = Math.floor((await media(video)).seconds);
-    // Only the save sent by this pause counts: a periodic save from before the seek back can still be in flight,
-    // and its later position would otherwise satisfy the minimum. The timer sends nothing while paused.
-    let pauseRequestedAt = Number.POSITIVE_INFINITY;
-    const save = page.waitForResponse(async response => {
-      const url = new URL(response.url());
-      if (url.origin !== origin || url.pathname !== progressRoute) return false;
-      if (response.request().method() !== 'PUT' || response.status() !== 200) return false;
-      if (response.request().timing().startTime < pauseRequestedAt) return false;
-      const progress = await response.json();
-      return Number.isInteger(progress.currentSeconds) && progress.currentSeconds >= minimum;
-    }, { timeout: 15_000 });
-    pauseRequestedAt = Date.now();
     await video.press('Space');
-    const progress = await (await save).json();
-    const saved = Number(progress.currentSeconds);
+    await expect.poll(async () => (await media(video)).paused).toBe(true);
     const paused = await media(video);
-    expect(paused.paused).toBe(true);
-    expect(saved).toBeGreaterThan(seekTo);
+    // Any save committed after the seek back at the paused position counts: the pause save, or a timer tick in the
+    // same second that made the pause save a duplicate. A pre-seek save still in flight started earlier and carries
+    // a later position; the first pause's save is more than two seconds before the final pause.
+    const committedNearPause = async (): Promise<number | null> => {
+      for (const exchange of traffic.current()) {
+        if (exchange.route !== progressRoute || exchange.request.method() !== 'PUT') continue;
+        if (exchange.response?.status() !== 200 || exchange.sentAt < seek.completedAt) continue;
+        const progress = await exchange.response.json();
+        const position = Number(progress.currentSeconds);
+        if (Number.isInteger(position) && Math.abs(position - paused.seconds) <= pauseSaveTolerance) {
+          return position;
+        }
+      }
+      return null;
+    };
+    await expect.poll(committedNearPause, { timeout: 15_000 }).not.toBeNull();
+    const saved = (await committedNearPause())!;
+    expect(saved).toBeGreaterThan(seek.target);
     expect(saved).toBeLessThan(paused.duration * 0.9);
-    expect(Math.abs(saved - paused.seconds)).toBeLessThanOrEqual(2);
     report({ savedSeconds: saved });
     return saved;
   });
