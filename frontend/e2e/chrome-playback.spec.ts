@@ -15,6 +15,9 @@ const segmentLatency = 4_500;
 const refreshLatency = 6_000;
 const lateProgressLatency = 18_000;
 const fixtureFrameRate = 24;
+// Far enough ahead that only a real seek, not playback or an hls.js stall nudge, lands near the target.
+const seekAheadSeconds = 8;
+const seekedTimeout = 10_000;
 
 function fixtureId(name: string): string {
   const value = process.env[name] ?? '';
@@ -225,6 +228,7 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     report({ mediaSeconds: seconds, wallSeconds: wall, framesStart: start.frames, framesEnd: end.frames,
       mediaError: end.error, audioDecoded: end.audioBytes > start.audioBytes,
       recoveredSegmentStart: interval.start, recoveredSegmentEnd: interval.end, mediaPosition: end.seconds });
+    expect(seconds).toBeGreaterThanOrEqual(60);
     expect(end.rate).toBe(1);
     expect(seconds / wall).toBeGreaterThan(0.9);
     expect(seconds / wall).toBeLessThan(1.05);
@@ -252,17 +256,27 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
       expect(await page.evaluate(() => !window.chromeSmokePlayback.unexpectedRateChange)).toBe(true);
     });
     const { seconds, duration } = await media(video);
-    const target = Math.ceil(seconds) + 2;
-    expect(target + 4).toBeLessThan(duration * 0.9);
-    const allowed = await video.evaluate((element: HTMLVideoElement, nextPosition) => {
-      if (window.chromeSmokePlayback.unexpectedSeek || window.chromeSmokePlayback.unexpectedRateChange) return false;
+    const target = Math.ceil(seconds) + seekAheadSeconds;
+    // Leave room for the pause/resume step and the save, which must stay below 90 percent.
+    expect(target + 6).toBeLessThan(duration * 0.9);
+    const landedAt = await video.evaluate((element: HTMLVideoElement, { nextPosition, timeout }) => {
+      if (window.chromeSmokePlayback.unexpectedSeek || window.chromeSmokePlayback.unexpectedRateChange) return null;
+      // Arm the listener first, so only the seek requested here can resolve it.
+      const seeked = new Promise<number>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('No seeked event after the explicit seek')), timeout);
+        element.addEventListener('seeked', () => {
+          clearTimeout(timer);
+          resolve(element.currentTime);
+        }, { once: true });
+      });
       window.chromeSmokePlayback.seekAllowed = true;
       element.currentTime = nextPosition;
-      return true;
-    }, target);
-    expect(allowed).toBe(true);
-    await expect.poll(async () => Math.abs((await media(video)).seconds - target)).toBeLessThan(2);
-    await expect.poll(async () => (await media(video)).seeking).toBe(false);
+      return seeked;
+    }, { nextPosition: target, timeout: seekedTimeout });
+    if (landedAt === null) {
+      throw new Error('Unexpected seek or rate change before the explicit seek');
+    }
+    expect(Math.abs(landedAt - target)).toBeLessThan(1);
     return target;
   });
 
