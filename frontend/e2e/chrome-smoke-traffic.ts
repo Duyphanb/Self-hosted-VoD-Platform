@@ -68,6 +68,31 @@ export function tokenTimes(token: string) {
   return { issued: Number(claims.iat) * 1000, expires: Number(claims.exp) * 1000 };
 }
 
+export async function segmentInterval(playlist: Response, segment: Exchange) {
+  // The worker validates this single-rendition VOD playlist and its relative segment URIs.
+  let start = 0;
+  let duration = 0;
+  for (const entry of (await playlist.text()).split(/\r?\n/)) {
+    const line = entry.trim();
+    if (!line) continue;
+    if (line.startsWith('#EXTINF:')) {
+      duration = Number(line.slice('#EXTINF:'.length).split(',')[0]);
+      continue;
+    }
+    if (line.startsWith('#')) continue;
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error('Invalid duration in fixture media playlist');
+    }
+    const end = start + duration;
+    if (new URL(line, playlist.url()).href === segment.request.url()) {
+      return { start, end };
+    }
+    start = end;
+    duration = 0;
+  }
+  throw new Error('The denied segment is absent from the fixture media playlist');
+}
+
 export function recovery(exchanges: Exchange[], hlsPrefix: string, progressRoute: string) {
   const hlsDenied = exchanges.find(exchange => exchange.route.startsWith(hlsPrefix)
     && exchange.response?.status() === 401);

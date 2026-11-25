@@ -3,7 +3,7 @@ import {
   audioGrowsThroughout, installPlaybackMonitor, media, sampleCadenceIsNormal, type PlaybackFault
 } from './chrome-smoke-media';
 import {
-  hasBearer, issuedToken, loginRoute, recovery, refreshRoute, tokenTimes, watchTraffic
+  hasBearer, issuedToken, loginRoute, recovery, refreshRoute, segmentInterval, tokenTimes, watchTraffic
 } from './chrome-smoke-traffic';
 
 const codec = 'video/mp4; codecs="avc1.64001E, mp4a.40.2"';
@@ -13,7 +13,7 @@ const saveCadence = 10_000;
 const expiryMargin = 1_000;
 const segmentLatency = 4_500;
 const refreshLatency = 6_000;
-const lateProgressLatency = 15_000;
+const lateProgressLatency = 18_000;
 const fixtureFrameRate = 24;
 
 function fixtureId(name: string): string {
@@ -152,7 +152,7 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     await shapeTraffic(cdp, [segments, [origin + progressRoute, lateProgressLatency],
       [origin + refreshRoute, refreshLatency]]);
   });
-  const refreshedBearer = await checkpoint('HLS 401 then one refresh then 200 on the same resource', async () => {
+  const recovered = await checkpoint('HLS 401 then one refresh then 200 on the same resource', async () => {
     await expect.poll(() => originalExchanges().some(exchange => exchange.route === refreshRoute
       && exchange.response?.status() === 200), { timeout: 28_000 }).toBe(true);
     const firstRefresh = originalExchanges().find(exchange => exchange.route === refreshRoute);
@@ -175,28 +175,56 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
       throw new Error('Recovery did not issue a distinct credential');
     }
     expect(await hasBearer(hlsDenied, originalToken) && await hasBearer(progressDenied, originalToken)).toBe(true);
-    expect(await hasBearer(hlsRetry, fresh) && await hasBearer(progressRetry, fresh)).toBe(true);
+    await checkpoint('New bearer was sent before the late progress 401', async () => {
+      expect(await hasBearer(hlsRetry, fresh)).toBe(true);
+      expect(hlsRetry.started < progressDenied.completed && hlsRetry.sentAt < progressDenied.at).toBe(true);
+    });
+    expect(await hasBearer(progressRetry, fresh)).toBe(true);
     const sequence = [hlsDenied, refresh, hlsRetry, progressDenied, progressRetry]
       .sort((first, second) => first.completed - second.completed);
     for (const event of sequence) {
       report({ route: event.route, status: event.response?.status(), sentAt: event.sentAt, at: event.at });
     }
-    return fresh;
+    return { refreshedBearer: fresh, hlsDenied, hlsRetry };
   });
 
-  await checkpoint('No seek before the explicit user seek', async () => {
-    expect(await page.evaluate(() => !window.chromeSmokePlayback.unexpectedSeek)).toBe(true);
+  const { refreshedBearer, hlsDenied, hlsRetry } = recovered;
+  const requestedAgain = () => originalExchanges().some(exchange =>
+    exchange.route === hlsRetry.route && exchange.started > hlsRetry.started);
+  const interval = await checkpoint('Find the recovered segment in the real media playlist', async () => {
+    const playlist = originalExchanges().find(exchange => exchange.route === hlsPrefix + 'master.m3u8'
+      && exchange.response?.status() === 200)?.response;
+    if (!playlist) {
+      throw new Error('Missing fixture media playlist response');
+    }
+    const range = await segmentInterval(playlist, hlsDenied);
+    expect(start.seconds).toBeLessThan(range.start);
+    expect(originalExchanges().some(exchange => exchange.route === hlsDenied.route
+      && exchange.started < hlsDenied.started && exchange.response?.status() === 200)).toBe(false);
+    return range;
+  });
+
+  await checkpoint('Recovered segment plays through without another request', async () => {
+    const target = Math.max(start.seconds + 60, interval.end + 0.25);
+    await expect.poll(async () => requestedAgain() || (await media(video)).seconds >= target, { timeout: 55_000 })
+      .toBe(true);
+    expect(requestedAgain()).toBe(false);
+    const monitor = await page.evaluate(() => window.chromeSmokePlayback);
+    expect(monitor.unexpectedSeek).toBe(false);
+    const before = monitor.samples.filter(sample => sample.media <= interval.start).at(-1);
+    const within = monitor.samples.find(sample => sample.media > interval.start && sample.media < interval.end);
+    expect(Boolean(before && within && within.frames > before.frames)).toBe(true);
+    expect((await media(video)).frames).toBeGreaterThan(within!.frames);
   });
 
   await checkpoint('At least 60 seconds of media at normal rate before seeking', async () => {
-    await expect.poll(async () => (await media(video)).seconds - start.seconds, { timeout: 40_000 })
-      .toBeGreaterThanOrEqual(60);
     const end = await media(video);
     const seconds = end.seconds - start.seconds;
     const wall = (performance.now() - started) / 1000;
     const monitor = await page.evaluate(() => window.chromeSmokePlayback);
     report({ mediaSeconds: seconds, wallSeconds: wall, framesStart: start.frames, framesEnd: end.frames,
-      mediaError: end.error, audioDecoded: end.audioBytes > start.audioBytes });
+      mediaError: end.error, audioDecoded: end.audioBytes > start.audioBytes,
+      recoveredSegmentStart: interval.start, recoveredSegmentEnd: interval.end, mediaPosition: end.seconds });
     expect(end.rate).toBe(1);
     expect(seconds / wall).toBeGreaterThan(0.9);
     expect(seconds / wall).toBeLessThan(1.05);
@@ -219,19 +247,23 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     expect(traffic.safeHlsUrls()).toBe(true);
   });
 
-  await checkpoint('Seek to 84 seconds', async () => {
+  const seekTo = await checkpoint('Seek forward with room to save below 90 percent', async () => {
     await checkpoint('No playback rate change before the explicit seek', async () => {
       expect(await page.evaluate(() => !window.chromeSmokePlayback.unexpectedRateChange)).toBe(true);
     });
-    const allowed = await video.evaluate((element: HTMLVideoElement) => {
+    const { seconds, duration } = await media(video);
+    const target = Math.ceil(seconds) + 2;
+    expect(target + 4).toBeLessThan(duration * 0.9);
+    const allowed = await video.evaluate((element: HTMLVideoElement, nextPosition) => {
       if (window.chromeSmokePlayback.unexpectedSeek || window.chromeSmokePlayback.unexpectedRateChange) return false;
       window.chromeSmokePlayback.seekAllowed = true;
-      element.currentTime = 84;
+      element.currentTime = nextPosition;
       return true;
-    });
+    }, target);
     expect(allowed).toBe(true);
-    await expect.poll(async () => Math.abs((await media(video)).seconds - 84)).toBeLessThan(2);
+    await expect.poll(async () => Math.abs((await media(video)).seconds - target)).toBeLessThan(2);
     await expect.poll(async () => (await media(video)).seeking).toBe(false);
+    return target;
   });
 
   await checkpoint('Pause and resume native playback', async () => {
@@ -256,7 +288,7 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     const saved = Number(progress.currentSeconds);
     const paused = await media(video);
     expect(paused.paused).toBe(true);
-    expect(saved).toBeGreaterThan(84);
+    expect(saved).toBeGreaterThan(seekTo);
     expect(saved).toBeLessThan(paused.duration * 0.9);
     expect(Math.abs(saved - paused.seconds)).toBeLessThanOrEqual(2);
     report({ savedSeconds: saved });
@@ -266,6 +298,9 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
   await checkpoint('Exactly one refresh through the end of the original document', async () => {
     await page.reload();
     expect(refreshCount()).toBe(1);
+  });
+  await checkpoint('No further request for the recovered segment before reload', async () => {
+    expect(requestedAgain()).toBe(false);
   });
 
   await checkpoint('Cookie bootstrap supplies the new document playback request', async () => {
