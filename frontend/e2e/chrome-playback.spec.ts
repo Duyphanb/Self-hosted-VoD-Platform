@@ -15,9 +15,14 @@ const segmentLatency = 4_500;
 const refreshLatency = 6_000;
 const lateProgressLatency = 18_000;
 const fixtureFrameRate = 24;
-// Far enough ahead that only a real seek, not playback or an hls.js stall nudge, lands near the target.
-const seekAheadSeconds = 8;
+// Seek back into the buffered range: playback alone never moves backwards, and the save stays far below 90
+// percent whichever segment the expiry hit (the recovered segment and the seek position vary with the start phase).
+const seekBackSeconds = 30;
 const seekedTimeout = 10_000;
+// Saves carry whole seconds; the first pause of the pause/resume step is more than two seconds earlier.
+const pauseSaveTolerance = 1.5;
+// The pause/resume step plays about three seconds after the seek; anything near seekBackSeconds is a stall.
+const maxPlayAfterSeekSeconds = 10;
 
 function fixtureId(name: string): string {
   const value = process.env[name] ?? '';
@@ -251,12 +256,13 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     expect(traffic.safeHlsUrls()).toBe(true);
   });
 
-  const seekTo = await checkpoint('Seek forward with room to save below 90 percent', async () => {
+  const seek = await checkpoint('Seek back with room to save below 90 percent', async () => {
     await checkpoint('No playback rate change before the explicit seek', async () => {
       expect(await page.evaluate(() => !window.chromeSmokePlayback.unexpectedRateChange)).toBe(true);
     });
     const { seconds, duration } = await media(video);
-    const target = Math.ceil(seconds) + seekAheadSeconds;
+    const target = Math.floor(seconds) - seekBackSeconds;
+    expect(target).toBeGreaterThan(0);
     // Leave room for the pause/resume step and the save, which must stay below 90 percent.
     expect(target + 6).toBeLessThan(duration * 0.9);
     const landedAt = await video.evaluate((element: HTMLVideoElement, { nextPosition, timeout }) => {
@@ -277,7 +283,7 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
       throw new Error('Unexpected seek or rate change before the explicit seek');
     }
     expect(Math.abs(landedAt - target)).toBeLessThan(1);
-    return target;
+    return { target, completedAt: Date.now() };
   });
 
   await checkpoint('Pause and resume native playback', async () => {
@@ -289,22 +295,31 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
   });
 
   const saved = await checkpoint('Persist the paused position below 90 percent', async () => {
-    const minimum = Math.floor((await media(video)).seconds);
-    const save = page.waitForResponse(async response => {
-      const url = new URL(response.url());
-      if (url.origin !== origin || url.pathname !== progressRoute) return false;
-      if (response.request().method() !== 'PUT' || response.status() !== 200) return false;
-      const progress = await response.json();
-      return Number.isInteger(progress.currentSeconds) && progress.currentSeconds >= minimum;
-    }, { timeout: 15_000 });
     await video.press('Space');
-    const progress = await (await save).json();
-    const saved = Number(progress.currentSeconds);
+    await expect.poll(async () => (await media(video)).paused).toBe(true);
     const paused = await media(video);
-    expect(paused.paused).toBe(true);
-    expect(saved).toBeGreaterThan(seekTo);
+    // The final pause stays close to the rewound position, so a pre-seek save (at least seekBackSeconds later)
+    // can never be mistaken for the save below.
+    expect(paused.seconds - seek.target).toBeLessThan(maxPlayAfterSeekSeconds);
+    // Any save committed after the seek back at the paused position counts: the pause save, or a timer tick in the
+    // same second that made the pause save a duplicate. A pre-seek save still in flight started earlier and carries
+    // a later position; the first pause's save is more than two seconds before the final pause.
+    const committedNearPause = async (): Promise<number | null> => {
+      for (const exchange of traffic.current()) {
+        if (exchange.route !== progressRoute || exchange.request.method() !== 'PUT') continue;
+        if (exchange.response?.status() !== 200 || exchange.sentAt < seek.completedAt) continue;
+        const progress = await exchange.response.json();
+        const position = Number(progress.currentSeconds);
+        if (Number.isInteger(position) && Math.abs(position - paused.seconds) <= pauseSaveTolerance) {
+          return position;
+        }
+      }
+      return null;
+    };
+    await expect.poll(committedNearPause, { timeout: 15_000 }).not.toBeNull();
+    const saved = (await committedNearPause())!;
+    expect(saved).toBeGreaterThan(seek.target);
     expect(saved).toBeLessThan(paused.duration * 0.9);
-    expect(Math.abs(saved - paused.seconds)).toBeLessThanOrEqual(2);
     report({ savedSeconds: saved });
     return saved;
   });
