@@ -21,6 +21,8 @@ const seekBackSeconds = 30;
 const seekedTimeout = 10_000;
 // Saves carry whole seconds; the first pause of the pause/resume step is more than two seconds earlier.
 const pauseSaveTolerance = 1.5;
+// The pause/resume step plays about three seconds after the seek; anything near seekBackSeconds is a stall.
+const maxPlayAfterSeekSeconds = 10;
 
 function fixtureId(name: string): string {
   const value = process.env[name] ?? '';
@@ -296,6 +298,9 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     await video.press('Space');
     await expect.poll(async () => (await media(video)).paused).toBe(true);
     const paused = await media(video);
+    // The final pause stays close to the rewound position, so a pre-seek save (at least seekBackSeconds later)
+    // can never be mistaken for the save below.
+    expect(paused.seconds - seek.target).toBeLessThan(maxPlayAfterSeekSeconds);
     // Any save committed after the seek back at the paused position counts: the pause save, or a timer tick in the
     // same second that made the pause save a duplicate. A pre-seek save still in flight started earlier and carries
     // a later position; the first pause's save is more than two seconds before the final pause.
