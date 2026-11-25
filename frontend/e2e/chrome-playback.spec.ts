@@ -292,13 +292,18 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
 
   const saved = await checkpoint('Persist the paused position below 90 percent', async () => {
     const minimum = Math.floor((await media(video)).seconds);
+    // Only the save sent by this pause counts: a periodic save from before the seek back can still be in flight,
+    // and its later position would otherwise satisfy the minimum. The timer sends nothing while paused.
+    let pauseRequestedAt = Number.POSITIVE_INFINITY;
     const save = page.waitForResponse(async response => {
       const url = new URL(response.url());
       if (url.origin !== origin || url.pathname !== progressRoute) return false;
       if (response.request().method() !== 'PUT' || response.status() !== 200) return false;
+      if (response.request().timing().startTime < pauseRequestedAt) return false;
       const progress = await response.json();
       return Number.isInteger(progress.currentSeconds) && progress.currentSeconds >= minimum;
     }, { timeout: 15_000 });
+    pauseRequestedAt = Date.now();
     await video.press('Space');
     const progress = await (await save).json();
     const saved = Number(progress.currentSeconds);
