@@ -9,7 +9,8 @@
     "lint": "eslint . --max-warnings=0",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "test": "vitest run",
-    "test:e2e": "vite build --config e2e/vite.config.ts && playwright test"
+    "test:e2e": "vite build --config e2e/vite.config.ts && playwright test",
+    "test:e2e:chrome": "playwright test --config playwright.chrome.config.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.103.2",

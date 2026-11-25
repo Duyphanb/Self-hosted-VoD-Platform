@@ -245,6 +245,41 @@ command equal to `ReferenceHlsEncodeFfmpegTests.referenceArguments`.
 - document manual checks that are not automated yet
 - support local and VPS demo readiness
 
+## Chrome upload-to-playback smoke
+
+Issue #125 uses the real backend, Nginx, PostgreSQL, worker and installed Google Chrome.
+From the repository root, install the pinned frontend dependencies and start the test:
+
+```sh
+npm --prefix frontend ci
+python deploy/tests/chrome-playback-smoke.py
+```
+
+On Windows, start Docker Desktop first. Use a writable temporary directory on a drive with sufficient free space.
+The driver selects a loopback port, a private proxy subnet, and a unique project name for every run.
+Use the driver to supply the fixture environment and private output directory to `test:e2e:chrome`.
+The driver removes its Compose resources, image tags and browser directory. The `test:e2e` command runs
+the Chromium/Firefox fixtures.
+
+The browser checks codec support before signing in and verifies decoded audio during playback. Chrome adds
+transport latency to keep segments available after JWT expiry and delays progress response delivery during
+the recovery window. The test checks that one refresh supplies the bearer for both retries, plays through
+the recovered segment's playlist interval, and reloads with a new credential issued by cookie bootstrap.
+Set `VOD_CHROME_TEST_CPU_RATE=4` to slow Chrome scheduling.
+Setup uses a 32 MiB upload limit and a 360-second READY deadline.
+
+Use **Chrome playback smoke** via `workflow_dispatch` after the workflow is present on the default branch.
+The workflow installs Google Chrome and requires no application credentials. Its output is limited to
+named checkpoints and allowlisted browser observations. The CI Newman wrapper prints static collection
+item and assertion names on failure and removes its temporary report before returning.
+
+The smoke requires the new bearer to be in use before the late progress 401. A scheduling slip fails that
+gate. Unit tests cover two callers joining an in-flight refresh. Reload checks use of the distinct bearer
+from bootstrap and leave the refresh POST's cookie, bearer and body shape implicit. Session tests cover token
+storage. A second cancellation during local teardown can interrupt cleanup. A forced kill can leave Newman's
+temporary raw report on the disposable CI runner until the runner is discarded.
+
 ## Boundary
 
-Do not put requirements or architecture source-of-truth here. Link back to `docs/requirements/` and `docs/architecture/` when needed.
+Do not put requirements or architecture source-of-truth here. Link back to `docs/requirements/` and
+`docs/architecture/` when needed.
