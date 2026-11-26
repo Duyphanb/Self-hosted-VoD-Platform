@@ -117,7 +117,7 @@ These service ports are not published to the host. Nginx and the frontend share 
 
 Login and refresh return the access token and profile in JSON and set an HttpOnly, Secure, SameSite=Strict `vod_refresh` cookie. Refresh and logout send no body and require an allowed `Origin`. The SPA keeps access tokens only in memory and restores them once through the cookie after reload. It removes the old token storage on startup. An unsuccessful sign-out remains pending with a retry action, including after reload. Blocked storage and browsers without Web Locks display a single-tab limitation notice.
 
-If your local `.env` predates Issue 6.9, explicitly update it to `CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:5173`, adding any non-default edge origin. Keeping only `http://localhost:5173` makes login from the Compose edge return 403 `ORIGIN_NOT_ALLOWED`; see the [upgrade steps](docs/deployment/README.md#browser-session-upgrade-issue-69). Production lists its public HTTPS origin.
+If your local `.env` predates Issue 6.9, explicitly update it to `CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:5173`, adding any non-default edge origin. Keeping only `http://localhost:5173` makes login from the Compose edge return 403 `ORIGIN_NOT_ALLOWED`; see the [upgrade steps](docs/deployment/README.md#upgrade-from-before-issue-69). Production lists its public HTTPS origin.
 
 ### Frontend development
 
