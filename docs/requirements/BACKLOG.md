@@ -373,7 +373,7 @@ Create JPA entities for movies, genres, people, movie_genres, movie_credits. Imp
 **GitHub:** [#85](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/85), delivered by [PR #149](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/149)
 
 **Description:**  
-Implement movie service with create, update, read, list (paginated), and archive operations. Validate required fields. Leave `search_vector` null; Issue 7.2 rebuilds and backfills it.
+Implement movie service with create, update, read, list (paginated), and archive operations. Validate required fields. Leave `search_vector` null; Issue 7.2 rebuilds and backfills it. (Superseded 2026-11-26: Issue 7.4 drops the never-written column and builds the search tables instead.)
 
 **Acceptance Criteria:**
 - Create movie accepts title, slug, description, release_year, maturity_rating, status
@@ -1029,7 +1029,7 @@ Create the video player component with hls.js (ADR-011 D1-D8, D13). The player a
 
 **Acceptance Criteria:**
 - Player uses hls.js only, pinned to an exact version (1.5.0 or later): checks `Hls.isSupported()` first, never assigns the manifest to `video.src` or uses `canPlayType`, and shows an unsupported-browser state otherwise
-- Player accepts manifest URL and start position props; it loads paused at the resume position through hls.js `startPosition` and never calls `play()` on its own; a rejected `play()` stays paused and is not an error
+- Player accepts manifest URL and start position props; it loads paused at the resume position through hls.js `startPosition` and never calls `play()` on its own; a rejected `play()` stays paused and is not an error (planned exception, owner decision 2026-11-26: an explicit "Tập tiếp theo" click starts the next episode once, Issue 8.12)
 - Every HLS request reads the current access token and sends it in the `Authorization` header; a 401 runs the shared `ApiClient` authentication recovery once (retry with a newer current token, or join the single-flight refresh) and retries that request once; the load-policy retry and the fatal handler share that one budget; only a 401 on the retry, or a refresh rejected with 401, ends the session; the player is destroyed when the signed-in identity changes, and an old identity's callback never ends a newer session
 - `ApiClient` exposes that recovery and the authentication snapshot for the player; the player reuses Issue 6.9's refresh-failure classification (a refresh that fails by a network error, a timeout or a 5xx keeps the session; only a 401 ends it), with tests on the HLS path; no token is ever put in a URL and `sendBeacon` is not used
 - Player sends progress every 10 seconds while playing, and on pause, seek, `ended` (with `finished: true`), page hide, `pagehide` and unmount; whole seconds; no save before the first play; a save is skipped only when its whole payload (position and `finished`) equals the last successful save, so the `ended` save is always sent; each save carries the `videoAssetId`; at most one save is in flight, later triggers replace one pending snapshot; unload saves use `fetch` with `keepalive` and the latest snapshot; a failed save never interrupts playback; saving stops after 404 or 409, and 409 `VIDEO_ASSET_NOT_CURRENT` also makes the page fetch the playback info again
@@ -1220,7 +1220,7 @@ The admin groups titles into an optional franchise and manages episodes. A DRAFT
 **GitHub:** [#261](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/261)
 
 **Description:**  
-A versioned Java text normalizer (exact and accent-folded keys, Vietnamese đ/Đ included, Japanese kana kept) replaces the `unaccent` extension, which the Compose Flyway role cannot create. Search-owned name and document tables stay in step with every catalog write; the admin manages aliases. Provider-imported text is not indexed.
+A versioned Java text normalizer (exact and accent-folded keys, Vietnamese đ/Đ included, Japanese kana kept) replaces the `unaccent` extension, which the Compose Flyway role cannot create. Search-owned name and document tables stay in step with every catalog write; the admin manages aliases. TMDB-derived values and provider descriptions are never indexed; AniList name aliases are, once imported.
 
 **Acceptance Criteria:**
 - Migration: `title_aliases`, `title_search_names`, `title_search_documents`; the never-written `search_vector` and its index dropped; no extension required
@@ -1240,8 +1240,8 @@ A versioned Java text normalizer (exact and accent-folded keys, Vietnamese đ/Đ
 Implement `GET /api/v1/search` on titles per ADR-015: ranked tiers, one card per PUBLISHED title (a title with nothing playable yet stays, labelled like the catalog list), a deterministic total order and stable paging. Filters use only the admin's own data until the metadata ADR allows imported values.
 
 **Acceptance Criteria:**
-- `q` trimmed, at most 100 code points, 400 when blank or too long; `genre`, `year` and `type` filters; visibility applied through joins before rank and count
-- Relevance fixture created through the admin API: Vietnamese with and without diacritics, Japanese exact and partial, romaji aliases, several parts of one franchise, special characters; a typo set decides whether a `pg_trgm` fallback ships, and then only when nothing matches exactly
+- Endpoint requires a valid access token; `q` trimmed, at most 100 code points, 400 when blank or too long; `genre`, `year` and `type` filters; visibility applied through joins before rank and count
+- Relevance fixture created through the admin API: Vietnamese with and without diacritics, Japanese exact and partial, romaji aliases, several parts of one franchise, special characters; a typo set decides whether a `pg_trgm` fallback ships, and then only when the strict tiers find no visible title under the same filters
 - Hidden titles and franchise names never appear in items, counts or `matchedName`; tied scores keep the total order across pages
 - `EXPLAIN (ANALYZE, BUFFERS)` recorded on the fixture; query strings absent from the Nginx logs
 
@@ -1254,10 +1254,10 @@ Implement `GET /api/v1/search` on titles per ADR-015: ranked tiers, one card per
 **GitHub:** [#264](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/264)
 
 **Description:**  
-Typed suggestions (`GET /api/v1/search/suggestions`) and the search page with a suggestion combobox, in the new design system and Vietnamese strings.
+Title suggestions (`GET /api/v1/search/suggestions`) and the search page with a suggestion combobox, in the new design system and Vietnamese strings.
 
 **Acceptance Criteria:**
-- At most 5 typed suggestions, derived only from PUBLISHED titles; a person or genre linked only to a DRAFT title is never suggested
+- Endpoint requires a valid access token; at most 5 suggestions, each a visible title (with the alias or franchise name that matched), from the name tiers only; no person or genre suggestions and no fuzzy matches
 - No request while an IME composes; 250-350 ms debounce; stale responses dropped
 - Combobox keyboard support with `aria-activedescendant`; loading, empty, error and approximate-results states
 
@@ -1285,7 +1285,7 @@ An idempotent seed script through the admin API creates titles with episodes, al
 - [ ] ADR-013 and ADR-015 merged, and the requirements record (#258) merged
 - [ ] Titles and episodes live: a populated database upgraded with the bijection check, old watch links redirect, the Chrome smoke passes on the new routes
 - [ ] Franchise and episode administration works with visibility tests at three levels
-- [ ] Search on titles: accent-insensitive, aliases, typed suggestions, hidden titles never leaked, total order across pages
+- [ ] Search on titles: accent-insensitive, aliases, title suggestions, hidden titles never leaked, total order across pages
 - [ ] Search page and suggestions work with loading, empty and error states
 - [ ] Seeded 500-title timings recorded (#129)
 - [ ] UI overhaul phase 1 (#200) and the dev proxy (#121) delivered
@@ -1304,6 +1304,8 @@ An idempotent seed script through the admin API creates titles with episodes, al
 
 ### Issue 8.1: Backend Watchlist Service and API
 
+**Level (ADR-013, planned):** per title. "Movie" in the criteria below means the title, and `{movieId}` becomes the title ID in the path ADR-013 sets.
+
 **Description:**  
 Implement watchlist service with add, remove, list operations per API-CONTRACT.yaml (Watchlist tag): `PUT /api/v1/me/watchlist/{movieId}` (add), `DELETE /api/v1/me/watchlist/{movieId}` (remove), `GET /api/v1/me/watchlist` (list). Require authentication. Enforce ownership.
 
@@ -1317,11 +1319,13 @@ Implement watchlist service with add, remove, list operations per API-CONTRACT.y
 - Unit tests cover service logic
 - Integration tests cover ownership enforcement
 
-**Dependencies:** Sprint 6 complete (can run in parallel with Sprint 7)
+**Dependencies:** Issue 7.2 (the title level; no longer in parallel with Sprint 7)
 
 ---
 
 ### Issue 8.2: Backend Watch History Service and API
+
+**Level (ADR-013, planned):** history rows per episode, listed with their title; visibility follows the episode and its title.
 
 **Description:**  
 Implement the watch history read API per API-CONTRACT.yaml (History tag): `GET /api/v1/me/history` returns paginated watch history. The rows are written by the progress transaction of Issue 6.3 (ADR-011 D12); this issue adds no second writer. Require authentication. Enforce ownership.
@@ -1336,11 +1340,13 @@ Implement the watch history read API per API-CONTRACT.yaml (History tag): `GET /
 - Unit tests cover service logic
 - Integration tests cover ownership enforcement
 
-**Dependencies:** Issue 6.3 (progress tracking triggers history)
+**Dependencies:** Issue 6.3 (progress tracking triggers history), Issue 7.2
 
 ---
 
 ### Issue 8.3: Backend Rating Service and API
+
+**Level (ADR-013, planned):** per title. "Movie" in the criteria below means the title.
 
 **Description:**  
 Implement rating service with create/update operation per API-CONTRACT.yaml (Rating tag): `PUT /api/v1/movies/{movieId}/rating` creates or updates user's rating. Require authentication. Enforce ownership.
@@ -1356,11 +1362,13 @@ Implement rating service with create/update operation per API-CONTRACT.yaml (Rat
 - Integration tests cover ownership enforcement
 - Note: GET endpoint for retrieving user's own rating is NOT in API-CONTRACT; MovieDetail.userRating provides this
 
-**Dependencies:** Sprint 6 complete
+**Dependencies:** Issue 7.2
 
 ---
 
 ### Issue 8.4: Backend Aggregate Rating in Movie APIs
+
+**Level (ADR-013, planned):** aggregate rating per title, in the title APIs.
 
 **Description:**  
 Update movie detail and list APIs to include aggregate rating (average, count). Optionally cache in Redis for performance.
@@ -1377,6 +1385,8 @@ Update movie detail and list APIs to include aggregate rating (average, count). 
 ---
 
 ### Issue 8.5: Frontend Watchlist UI
+
+**Level (ADR-013, planned):** titles, as Issue 8.1.
 
 **Description:**  
 Create watchlist page showing user's saved movies. Add "Add to Watchlist" / "Remove from Watchlist" button on movie detail page.
@@ -1395,6 +1405,8 @@ Create watchlist page showing user's saved movies. Add "Add to Watchlist" / "Rem
 
 ### Issue 8.6: Frontend Watch History UI
 
+**Level (ADR-013, planned):** episodes with their title, as Issue 8.2.
+
 **Description:**  
 Create watch history page showing user's recently watched movies. Display last watched timestamp.
 
@@ -1410,6 +1422,8 @@ Create watch history page showing user's recently watched movies. Display last w
 ---
 
 ### Issue 8.7: Frontend Rating UI
+
+**Level (ADR-013, planned):** titles, as Issue 8.3.
 
 **Description:**  
 Add rating component on movie detail page. User can submit or update their rating. Display aggregate rating (stars, count).
@@ -1450,7 +1464,7 @@ Admin upload of WebVTT and SRT (converted to WebVTT by a Java parser), stored pr
 
 **Acceptance Criteria:**
 - Admin-only before the multipart parse; 413 at the edge; malformed, non-UTF-8, oversized or over-long files rejected with storage untouched; markup reduced to an allowlist
-- Hidden, DRAFT, ARCHIVED or non-active asset returns 404; signed-out 401; `no-store` and `nosniff` on every response
+- Tracks are served only for the asset a viewer may play: until Issue 9.6 ships, the visible episode's current READY asset; afterwards, the activated asset. Hidden, DRAFT, ARCHIVED or any other asset returns 404 in both stages; signed-out 401; `no-store` and `nosniff` on every response
 
 **Dependencies:** Issue 7.2, ADR-019 merged
 
@@ -1508,7 +1522,7 @@ Franchise page with the part strip, title page with the episode grid and part sw
 ### Issue 8.14: "Vì bạn đã xem X" Home Row
 
 **Description:**  
-One personal Home row from one seed (a 4-5 rating, else the latest completion): the next part of the seed's franchise first when it applies, then the seed's similar titles. With no history, Home shows only "Mới thêm".
+One personal Home row from one seed (a 4-5 rating, else the latest completion). When the viewer has finished the seed title's last visible episode, the row starts with the next visible, playable part of its franchise; the seed's similar titles follow. With no eligible seed there is no personal row; the other eligible Home rows (Continue Watching, pinned collections, "Mới thêm") stay.
 
 **Acceptance Criteria:**
 - Two users isolated; ratings 1-2 never recommended; a row below 3 items is hidden unless it holds a next part; Admin Preview creates no seed; `Cache-Control: no-store`
@@ -1624,6 +1638,8 @@ A post-encode stage with its own timeout, inside the encode's disk reservation, 
 
 ### Issue 9.1: Backend Video Asset List API for Admin
 
+**Level (ADR-013, planned):** assets per episode, filterable by episode and title, with the `active` and `candidate` states of Issue 9.6; "movie" and "movie-wide" below mean the episode.
+
 **Description:**  
 Implement `GET /api/v1/admin/video-assets` endpoint that returns all video assets with status, metadata, failure reason. Require `ROLE_ADMIN`. Support filtering by status and movie ID.
 
@@ -1644,6 +1660,8 @@ Implement `GET /api/v1/admin/video-assets` endpoint that returns all video asset
 
 ### Issue 9.2: Backend Encoding Retry Service
 
+**Level (ADR-013, planned):** retry the newest asset of its episode, serialized on the episode row in the ADR-013 lock order; "movie" below means the episode.
+
 **Description:**  
 Retry only the newest `(created_at,id)` asset of its movie when FAILED. Serialize per movie with the same movie-row lock order as upload commit, conditionally claim FAILED -> QUEUED, clear failure, insert next attempt/published_at NULL and commit before eager publish/relay.
 
@@ -1660,6 +1678,8 @@ Retry only the newest `(created_at,id)` asset of its movie when FAILED. Serializ
 
 ### Issue 9.3: Backend Encoding Retry API
 
+**Level (ADR-013, planned):** episode level, as Issue 9.2.
+
 **Description:**  
 Implement `POST /api/v1/admin/video-assets/{videoAssetId}/retry` per API-CONTRACT. Require ROLE_ADMIN and call the newest-FAILED retry service.
 
@@ -1675,6 +1695,8 @@ Implement `POST /api/v1/admin/video-assets/{videoAssetId}/retry` per API-CONTRAC
 ---
 
 ### Issue 9.4: Frontend Admin Encoding Dashboard
+
+**Level (ADR-013, planned):** episode level with title context, as Issue 9.1.
 
 **Description:**  
 Create admin dashboard page showing video assets with status. Display movie title, upload date, status, duration, failure reason. Support filtering by status.
@@ -1694,6 +1716,8 @@ Create admin dashboard page showing video assets with status. Display movie titl
 
 ### Issue 9.5: Frontend Admin Retry UI
 
+**Level (ADR-013, planned):** episode level, as Issue 9.2.
+
 **Description:**  
 Add retry button to encoding dashboard for failed assets. Clicking retry calls retry API and updates dashboard.
 
@@ -1712,10 +1736,10 @@ Add retry button to encoding dashboard for failed assets. Clicking retry calls r
 ### Issue 9.6: Activation and Admin Preview Route
 
 **Description:**  
-READY means encoded; viewers get only the asset the admin activated. At activation the admin chooses "same cut" (resume, markers and subtitles kept) or "different cut" (resume from 0, history kept); assets that exist at migration stay live. Ships as one release boundary with the separate admin-only preview route (audited, `no-store`, through live admin authorization), a minimal preview player, the activation dialog, progress writes that serialize with activation, and the viewer reload rule for a different cut.
+READY means encoded; viewers get only the asset the admin activated. At activation the admin chooses "same cut" (resume, markers and subtitles kept) or "different cut" (resume from 0, history kept). The migration activates only today's playback winner of each episode, so what viewers play does not change; other READY assets become candidates. Admin Preview accepts any READY asset of the episode, active or candidate, also under a DRAFT title, through its separate route only. Ships as one release boundary with the separate admin-only preview route (audited, `no-store`, through live admin authorization), a minimal preview player, the activation dialog, progress writes that serialize with activation, and the viewer reload rule for a different cut.
 
 **Acceptance Criteria:**
-- A replacement stays invisible to viewers until activated; race tests for a first save and a stale save against activation
+- A replacement stays invisible to viewers until activated; progress inserts and updates take the episode lock that activation takes and carry the activation generation; race tests for a first save and a stale A→B→A save against activation
 - Preview writes no progress or history rows or requests, including on page exit; viewers and demoted admins get 404 or 403 with `no-store` on every preview path
 - Purge never selects an unactivated candidate
 
@@ -1801,7 +1825,9 @@ A capture manifest (database dump, package IDs, sizes and checksums, including s
 SHA-256 and size recorded at upload, a source-file state, hash attestation of the off-VM copy (never revealing the server hash), a dry-run release list, the release API with an operation fence, a reconciler and an audit trail. Deletion stays disabled server-side until the runbook and the restore drill pass.
 
 **Acceptance Criteria:**
-- With deletion disabled every release call is refused; ineligible states refused; a crash between delete and commit reconciles
+- With deletion disabled every release call is refused
+- Each release rechecks at execution time the exact source identity and SHA-256, that the asset is activated, that its current HLS package is in a verified backup set, and the owner's confirmation for that exact object set; missing or changed coverage refuses the release
+- Ineligible states refused (in flight, newest FAILED, not activated, hash mismatch); a crash between delete and commit reconciles
 
 **Dependencies:** Issue 9.6, Issue 9.12
 
@@ -1967,7 +1993,7 @@ An admin-only list of worldwide trending titles (AniList and TMDB charts) that t
 ### Issue MU.6: Resumable Upload Sessions
 
 **Description:**  
-A restricted tus 1.0 profile on object-storage multipart: sessions with a #190 reservation at creation, an episode lock, a declared SHA-256 checked by the worker, a sweeper and an Nginx location with a fixed chunk ceiling. The whole-file limit lives only in backend configuration and stays 2048 MiB until the Pre-production gate raises it.
+A restricted tus 1.0 profile on object-storage multipart: sessions with a #190 reservation at creation, an episode lock, a declared SHA-256 checked by the worker, a sweeper and an Nginx location with a fixed chunk ceiling. The whole-file limit lives only in backend configuration. The deployed limit stays 2048 MiB; #180 runs the decimal 2 GB baseline and a separate, test-only 8 GiB resumable qualification on isolated resources, and only after that row passes does the Pre-production gate raise the deployed limit.
 
 **Acceptance Criteria:**
 - Resume from a partially committed chunk, a lost completion response and an orphan multipart upload; no automatic replay of an ambiguous upload; 64-bit sizes end to end
@@ -1982,7 +2008,7 @@ A restricted tus 1.0 profile on object-storage multipart: sessions with a #190 r
 The admin upload page uses a tus client with a declared digest and resumes after a reload or a network loss, at the current size limit.
 
 **Acceptance Criteria:**
-- Real-Chrome resume after reload and network loss; the exit guard kept; the one-shot route stays until the Pre-production gate retires it
+- Real-Chrome resume after reload and network loss; the exit guard kept; closes at the 2048 MiB limit; the one-shot route stays until the Pre-production gate retires it
 
 **Dependencies:** Issue MU.6, UI overhaul phase 1 (#200)
 
@@ -2206,11 +2232,11 @@ Spikes for styled ASS (JASSUB), PGS (libpgs-js) and Document picture-in-picture:
 
 The measurement owners stay as they are: #124 (encode calibration, gate G1/G2 with a test-only 1080p candidate profile), #233 (mixed load, gate G4/G6 and the image-lane test), #180 (upload: the 2 GB baseline and the 8 GiB resumable row), #137 with #190 (disk layout and storage fit, gate G5), and the owner's visual review of #124 outputs (gate G3). Items created when their gate is near:
 
-- **1080p default for new encodes:** after G1-G6 pass; no upscaling, existing 720p assets unchanged
-- **Release of source files enabled:** after the restore drill passes, with an owner confirmation per release (Issue 9.13 ships it disabled)
+- **1080p default for new encodes:** after G1-G6 pass (G1/G2 #124, G3 the owner's visual review, G4/G6 #233, G5 #137 with #190) and 1080p plays in the real browser; needs Issue 9.9; no upscaling, existing 720p assets unchanged
+- **Release of source files enabled:** after the runbook and the restore drill pass; every release still rechecks the archive SHA-256, activation, the verified backup coverage of the current package and the owner's confirmation for the exact object set (Issue 9.13 ships it disabled)
 - **Volume backups, rotation, the free restore drill and the disaster-recovery document** (child of #136)
-- **Upload limit promotion and retirement of the one-shot route:** after #180's 8 GiB row passes
-- **Image lane switched on:** after #233 shows at most 5 % encode slowdown
+- **Upload limit promotion and retirement of the one-shot route:** after #180's test-only 8 GiB row passes; if it fails, the 2048 MiB limit and the one-shot route stay
+- **Image lane switched on:** after #233's lane qualification passes: #232 instrumentation, sustained and overlapping load, restart recovery, at most 5 % encode slowdown and the full playback thresholds; the sequential single-slot path stays the fallback
 - **Remux adoption:** only if Issue 9.14 shows a gain on the target VM
 - HTTPS preparation (#250) and the deployment children of #136
 

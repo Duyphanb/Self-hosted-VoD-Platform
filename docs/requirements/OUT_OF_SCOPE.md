@@ -2,7 +2,7 @@
 
 This document prevents scope creep. Features listed here must not be implemented unless a later task explicitly moves them into scope.
 
-On 2026-11-25 and 2026-11-26 the owner moved several items into scope (#258). Each section lists them under "Moved into scope" with the design that will govern them. Until that design merges, the frozen ADRs and the "Allowed focus" lists still describe the current runtime. Items marked "conditional" start only when their trigger is met; the trigger is evidence, a dependency or a third party, never an "after MVP" label.
+On 2026-11-25 and 2026-11-26 the owner moved several items into scope (#258). Each section lists them under "Moved into scope" with the design that will govern them; until that design merges, the frozen ADRs govern. The "Allowed focus" lists keep the scope approved before 2026-11-25; `BACKLOG.md` and `TRACEABILITY.md`, not this document, say what is delivered. Items marked "conditional" start only when their trigger is met; the trigger is evidence, a dependency or a third party, never an "after MVP" label.
 
 ## Architecture And Platform
 
@@ -18,6 +18,7 @@ Out of scope:
 - more than one active video encode: several encode workers, encode concurrency above one, or overlapping worker replicas. A separately budgeted admin-image job, when it is enabled after measurement, is not a second video encoder (ADR-020, planned under #199)
 - paid hosting, a paid storage service, or a CDN for video (Cloudflare's free CDN terms exclude video; a private Cloudflare One route or a direct HTTPS origin is compared in #250)
 - search-engine indexing (SEO), at any stage
+- a large simultaneous-viewer target: the platform serves a handful of private viewers (#233 measures the reference load)
 
 Reason: the project direction is a modular monolith plus worker running through Docker Compose on one VM. Public exposure is a separate owner decision after HTTPS, backup and resource evidence (#136, #250).
 
@@ -52,7 +53,7 @@ Moved into scope (owner, 2026-11-25/26):
 - **timed markers:** intro, ending and chapter markers confirmed by the admin, shown as skip buttons and chapters
 - **"Tập tiếp theo" (next episode):** an explicit button that starts the next episode once; never on reload or a shared link
 
-Allowed focus (current runtime):
+Allowed focus:
 
 - one reliable HLS output path
 - one fixed output profile that fits a 1280x720 box (720x1280 for portrait) without upscaling ([ADR-010 D27](../architecture/adr/ADR-010.md#sprint-5-worker-media-decisions-d25-d28))
@@ -64,14 +65,14 @@ Out of scope:
 
 - presigned direct upload to object storage
 - virus scanning
-- uploads above the current 2048 MiB limit before #190 disk admission and the #180 target-VM qualification
+- raising the deployed upload limit above 2048 MiB before #190 disk admission and the test-only 8 GiB qualification of #180 on the target VM
 
 Moved into scope (owner, 2026-11-26):
 
 - **resumable, chunked browser upload** with a free-disk pre-check, at the current size limit first (ADR-017, planned)
-- **a larger, configurable size limit (conditional):** 8 GiB is the target once #180 qualifies it on the target VM; no hard-coded long-term cap
+- **a larger, configurable size limit (conditional):** 8 GiB is the target once #180's test-only row qualifies it on the target VM; if it fails, 2048 MiB stays; no hard-coded long-term cap
 
-Allowed focus (current runtime):
+Allowed focus:
 
 - backend receives `MultipartFile`
 - validates type and size
@@ -84,17 +85,17 @@ Out of scope:
 
 - Elasticsearch or OpenSearch, until a relevance fixture shows that PostgreSQL cannot meet quality or latency
 - personalized search ranking
-- indexing text imported from TMDB, unless TMDB confirms that its terms allow it
+- indexing text imported from TMDB, or any provider description, unless TMDB confirms that its terms allow it (AniList name aliases are indexed)
 
 Moved into scope (owner, 2026-11-03 and 2026-11-26):
 
 - **accent-insensitive search with admin-managed aliases**, through a versioned Java text normalizer rather than the `unaccent` extension (ADR-015, planned under #128; #261)
-- **a `pg_trgm` typo fallback (conditional):** only if the Issue 7.5 relevance fixture shows a benefit, and then only when nothing matches exactly (#263)
+- **a `pg_trgm` typo fallback (conditional):** only if the Issue 7.5 relevance fixture shows a benefit, and then only when the strict tiers find no visible title under the same filters (#263)
 
 Allowed focus:
 
 - PostgreSQL full-text search over real title metadata
-- typed search suggestions, at most five
+- title suggestions, at most five
 
 ## Metadata And Providers
 
@@ -122,7 +123,7 @@ Out of scope:
 - learned or collaborative recommendation engines, and numeric "% match" scores
 - a trending row computed from this site's own viewers (a handful of private viewers is no meaningful population, and it would expose other accounts' history); provider trending charts are a different item, below
 - sharing lists
-- a "Top Rated" row, brand hubs, a franchise type of collection, and third-party logos
+- a "Top Rated" row, brand hubs, a franchise type of collection, and third-party brand logos used as decoration (attribution that a provider's terms require, such as TMDB's, stays)
 - mobile app
 - offline download
 - subscription plans
@@ -130,7 +131,7 @@ Out of scope:
 Moved into scope (owner, 2026-11-24 to 2026-11-26):
 
 - **series, seasons, OVAs and films** with episodes and an optional franchise (ADR-013, planned under #244)
-- **rule-based recommendations without scores:** "Tương tự" (similar titles) on the title page, the next part of a franchise, and one Home row "Vì bạn đã xem X"; with no history, Home shows only "Mới thêm"; reasons are shown as text (ADR-015, planned)
+- **rule-based recommendations without scores:** "Tương tự" (similar titles) on the title page, the next part of a franchise, and one Home row "Vì bạn đã xem X"; with no history there is no personal row and Home shows "Mới thêm" beside any other eligible row; reasons are shown as text (ADR-015, planned)
 - **collections:** editorial and smart collections built from the owner's own data, a Collections page and up to three pinned Home rows (ADR-021, planned)
 - **studio and creator pages (conditional):** once enough titles carry that data
 - **personal named lists (conditional):** only if the owner asks for them after using the watchlist
@@ -157,7 +158,7 @@ Out of scope:
 Moved into scope (owner, 2026-11-25/26):
 
 - **activation of encoded assets with Admin Preview:** a separate admin-only preview route, audited, `no-store`, writing no viewer progress or history (ADR-013, ADR-019, planned)
-- **release of source files (conditional):** only after activation, a verified SHA-256 of the off-VM archive copy and a passed restore drill, with an explicit owner confirmation per release (ADR-016, planned)
+- **release of source files (conditional):** only after activation, a verified SHA-256 of the off-VM archive copy, the current HLS package in a verified backup set and a passed restore drill, with an explicit owner confirmation for the exact files released (ADR-016, planned)
 - **backups:** a database dump, small files and one verified archive copy are mandatory; block-volume backups with rotation inside the free limit; restore tests; a disaster-recovery document; an admin download of one title's HLS package. No step may cost money or delete the source volume without the owner's consent (ADR-016, planned; #136)
 
 Allowed focus:

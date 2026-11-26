@@ -29,7 +29,7 @@ See `BACKLOG.md` for detailed sprint backlog with issues, acceptance criteria, d
 | 5 | Worker | Queue consumer, FFprobe, FFmpeg HLS, status transitions, failure handling baseline |
 | 6 | Streaming | Playback API, HLS delivery, player integration, progress save/resume |
 | 7 | Content model and search | Titles and episodes with optional franchises (ADR-013), search on titles with accent folding and aliases (ADR-015), UI overhaul phase 1 |
-| 8 | Library, player core and viewer UI | Watchlist, history, rating and profile on titles; own player controls and subtitles; viewer pages; first recommendation rows and editorial collections; media, image, player and collection designs with disk admission and the media sandbox |
+| 8 | Library, player core and viewer UI | Watchlist and rating per title, history per episode, profile; own player controls and subtitles; viewer pages; first recommendation rows and editorial collections; media, image, player and collection designs with disk admission and the media sandbox |
 | 9 | Admin operations and media | Encoding dashboard and retry per episode, activation with Admin Preview, markers, multi-audio, backup receipts and source-file tracking, admin images, smart collections |
 | Metadata and Upload | Metadata and upload | TMDB and AniList import with review, resumable upload at the current size limit, admin trending list |
 | 10 | Polish | Error handling, docs, Swagger/OpenAPI, Postman, VPS preparation, player polish |

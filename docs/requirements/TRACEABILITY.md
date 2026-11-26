@@ -43,7 +43,7 @@ Updated 2026-11-26 for the owner's scope decisions ([#258](https://github.com/Du
 | F-033 | Metadata import | US-007 | backend, frontend | Planned (ADR-014): provenance, revision and withdrawal tests with a fake clock (Issue MU.1), zero outbound calls for non-admins and provider-failure tests (Issues MU.2-MU.5, #245, #246) |
 | F-034 | Resumable upload | US-008 | backend, frontend, infra | Planned (ADR-017): resume, lost-response and orphan tests (Issue MU.6), real-Chrome resume (Issue MU.7), 2 GB and 8 GiB target-VM rows (#180) |
 | F-035 | Backup and recovery | US-018 | backend, infra | Planned (ADR-016): capture-consistency and receipt tests (Issue 9.12), release-disabled and reconcile tests (Issue 9.13), restore drill and disaster-recovery document (Pre-production gate, #136) |
-| F-036 | Media ingest selection and the 1080p default | US-009 | worker | Planned (ADR-016): generated stream fixtures and memory peak (Issue 8.18), sandbox negatives (Issue 8.17), target-VM gate G1-G6 (#124, #233) |
+| F-036 | Media ingest selection and the 1080p default | US-009 | worker | Planned (ADR-016): generated stream fixtures and memory peak (Issue 8.18), sandbox negatives (Issue 8.17), target-VM gate G1-G6 (G1/G2 #124, G3 the owner's visual review, G4/G6 #233, G5 #137 with #190) and 1080p browser playback |
 
 ## NFR Traceability
 

@@ -140,7 +140,7 @@ Acceptance criteria:
 
 - Search supports title names and aliases, description, genre, actor, and director, with one result per title.
 - PostgreSQL full-text search is used, accent-insensitive for Vietnamese (including đ/Đ), with Japanese text and romaji aliases (ADR-015, planned).
-- Typed search suggestions, at most five, are available for the frontend.
+- Title suggestions, at most five, are available for the frontend.
 - Search uses real persisted title metadata and never reveals unpublished titles or the names linked only to them.
 - Empty query and no-results behavior are defined.
 
