@@ -1111,7 +1111,7 @@ paths:
         status filters combine. An invalid filter or page parameter returns 400
         VALIDATION_ERROR.
         Planned (ADR-013): titleId and episodeId filters replace movieId, items
-        carry episode and title context, and from S5 each item adds active and
+        carry episode and title context, and from S5 each item adds active, retired and
         candidate. S5 also adds GET .../{videoAssetId}/preview and
         POST .../{videoAssetId}/activation (ADR-013 D7, D9).
       parameters:

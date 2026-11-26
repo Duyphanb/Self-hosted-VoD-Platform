@@ -429,7 +429,7 @@ erDiagram
 **S5, activation.**
 
 - `episodes` gains `active_video_asset_id uuid` null and `activation_generation bigint NOT NULL DEFAULT 0`, with the foreign key (`id`, `active_video_asset_id`) -> `video_assets` (`episode_id`, `id`), which needs the new unique constraint `ux_video_assets_episode_id_id` on `video_assets` (`episode_id`, `id`).
-- `video_assets` gains `timeline_id uuid` null (null until the asset's first activation, then fixed) and `retired_at timestamptz` null (the asset's HLS objects may be gone; it can never be activated or previewed; the purge procedure sets it before deleting objects).
+- `video_assets` gains `timeline_id uuid` null (null until the asset is first activated; every activation sets it: `SAME` copies the active asset's timeline, `NEW` creates one) and `retired_at timestamptz` null (the asset's HLS objects may be gone; it can never be activated or previewed; the purge procedure sets it before deleting objects).
 - `playback_progress` gains `timeline_id uuid NOT NULL`, backfilled with the timeline of the episode's seeded active asset.
 - Seeding: each episode's current asset (the READY asset with greatest `created_at`, `id`) becomes active with a new timeline and generation 1; every other READY asset is retired, because an earlier manual purge left no record; a preflight stops when a progress row's episode has no READY asset.
 - The worker role keeps its grants on `encoding_jobs` and `video_assets` and writes none of these columns.

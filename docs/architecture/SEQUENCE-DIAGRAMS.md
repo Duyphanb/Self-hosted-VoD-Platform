@@ -276,11 +276,11 @@ sequenceDiagram
     Admin->>AdminSPA: Activate as SAME or NEW
     AdminSPA->>Backend: POST /api/v1/admin/video-assets/{id}/activation with timeline and expected generation
     Backend->>PostgreSQL: BEGIN, lock the episode FOR NO KEY UPDATE
-    alt generation changed, asset not READY, active or retired, or timeline relation wrong
+    alt generation changed, asset not READY, active or retired, or SAME without an active asset
         Backend->>PostgreSQL: ROLLBACK
         Backend-->>AdminSPA: 409 ACTIVATION_CONFLICT or VIDEO_ASSET_NOT_ACTIVATABLE
     else accepted
-        Backend->>PostgreSQL: Fix the asset timeline (SAME: the active one, NEW: a new one)
+        Backend->>PostgreSQL: Set the asset timeline (SAME: the active one, NEW: a new one), also on a re-activation
         opt SAME
             Backend->>PostgreSQL: Copy the carried timed data to the new asset, validated against its duration
         end
