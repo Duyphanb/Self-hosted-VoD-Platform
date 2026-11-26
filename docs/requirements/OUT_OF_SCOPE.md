@@ -136,7 +136,7 @@ Moved into scope (owner, 2026-11-24 to 2026-11-26):
 - **collections:** editorial and smart collections built from the owner's own data, a Collections page and up to three pinned Home rows (ADR-021, planned)
 - **studio and creator pages (conditional):** once enough titles carry that data
 - **personal named lists (conditional):** only if the owner asks for them after using the watchlist
-- **worldwide trending:** first an admin-only list of trending titles missing from the library (provider charts, fetched on demand, nothing stored); a viewer row of playable titles only (conditional) after the provider terms allow it and two weeks show at least four playable matches (ADR-014, planned)
+- **worldwide trending:** first an admin-only list of trending titles missing from the library (provider charts, fetched on demand, nothing stored); a viewer row of playable titles only (conditional) after the provider terms allow it and two weeks show at least four playable matches, hidden whenever fewer than four playable titles remain (ADR-014, planned)
 
 Allowed focus:
 

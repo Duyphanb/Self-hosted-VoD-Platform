@@ -1193,7 +1193,7 @@ Introduce episodes and re-key media, progress and history from the movie to the 
 **Acceptance Criteria:**
 - One migration transaction adds `episodes` (one backfilled PUBLISHED episode per title), `titles.content_type` and `part_label`, and re-keys `video_assets`, `playback_progress` and `watch_history`; the in-flight index is per episode
 - Episode playback, progress and upload endpoints; the Nginx upload location, multipart filter and `ADMIN_ENDPOINTS` cover the episode upload route
-- SPA: `/watch/:episodeId`, the title route, a redirect from `/movies/:id/watch`, Continue Watching with one card per title: the latest interaction on a visible episode is chosen first; a finished one advances only to the immediately following episode when it is visible, playable and unfinished; tests cover an older resumable episode and a hidden or unready successor
+- SPA: `/watch/:episodeId`, the title route, a redirect from `/movies/:id/watch`, Continue Watching with one card per title: the latest interaction on a visible episode is chosen first; a finished one advances only to the immediately following episode when it is visible, playable and unfinished; if the selected unfinished episode loses its playable asset, the card is dropped and no older episode resurfaces; a next-episode card starts from that episode's own saved position; tests cover each of these cases, an older resumable episode and a hidden or unready successor
 - Old writers are fenced during the migration; through Nginx, an upload started from the previous SPA build completes or gets a clean, retryable error with no partial state (the same evidence when a bridge is used)
 - Populated upgrade smoke with an `EXCEPT` bijection on every carried column; a job queued before the migration finishes; PostgreSQL race tests for concurrent uploads; the real-Chrome smoke passes on the new routes
 - Rollback boundary documented: restore the pre-migration dump before any new write, roll forward after that
@@ -1212,7 +1212,7 @@ The admin groups titles into an optional franchise and manages episodes. A DRAFT
 **Acceptance Criteria:**
 - `franchises` table and admin CRUD; `titles.franchise_id`/`franchise_order`; episode CRUD, ordering and per-episode publish; admin UI for parts and episodes
 - Visibility tests at three levels; counts exclude hidden items before paging; concurrent reorder tests; fixed statement count per page
-- Franchise names join the search tables: a rename rewrites one row and a hidden franchise's name row is never eligible (index-level tests here); the endpoint tests (a published franchise's name finds its visible parts in search and suggestions, a hidden one never matches) are added by whichever of this issue and Issues 7.5/7.6 merges last
+- Franchise names join the search tables: a rename rewrites one row and a hidden franchise's name row is never eligible (index-level tests here); for each endpoint, the published and hidden franchise tests belong to the later of that endpoint's issue (7.5 for search, 7.6 for suggestions) and this one
 - Publishing a second episode of one title returns 409 until Issue 8.12 ships the episode grid and the next-episode card
 
 **Dependencies:** Issue 7.2, Issue 7.4
@@ -1261,7 +1261,7 @@ Implement `GET /api/v1/search` on titles per ADR-015: ranked tiers, one card per
 Title suggestions (`GET /api/v1/search/suggestions`) and the search page with a suggestion combobox, in the new design system and Vietnamese strings.
 
 **Acceptance Criteria:**
-- Endpoint requires a valid access token; at most 5 suggestions, each a visible title (with the alias or franchise name that matched), from the name tiers only; no person or genre suggestions and no fuzzy matches
+- Endpoint requires a valid access token; at most 5 suggestions, each a visible title with the alias that matched (and the franchise name once Issue 7.3 has merged), from the name tiers only; no person or genre suggestions and no fuzzy matches
 - No request while an IME composes; 250-350 ms debounce; stale responses dropped
 - Combobox keyboard support with `aria-activedescendant`; loading, empty, error and approximate-results states
 
@@ -1518,7 +1518,7 @@ Franchise page with the part strip, title page with the episode grid and part sw
 "Tương tự" on the title page, from shared genres and people of the admin's own data (TMDB-imported genres or people only after ADR-014 records that use as allowed); reasons shown as text, no score.
 
 **Acceptance Criteria:**
-- The title itself, its visible franchise, unplayable and hidden titles excluded; deterministic order, one per franchise; fixed statement count
+- A candidate shares at least one genre with the title (a person-only match is rejected by a fixture); the title itself, its visible franchise, unplayable and hidden titles excluded; deterministic order, one per franchise; fixed statement count
 
 **Dependencies:** Issue 7.2, Issue 7.4
 
@@ -1527,12 +1527,12 @@ Franchise page with the part strip, title page with the episode grid and part sw
 ### Issue 8.14: "Vì bạn đã xem X" Home Row
 
 **Description:**  
-One personal Home row from one seed: a visible title the viewer rated 4-5, else, when the viewer has not rated it 1-3, the visible title with the latest completed episode. When the seed belongs to a visible franchise and the viewer has finished the seed title's last visible episode, the row starts with the next visible, playable part in franchise order that the viewer has not started; the seed's similar titles follow. Titles the viewer has started or rated never appear in the row. With no eligible seed there is no personal row; the other eligible Home rows (Continue Watching, pinned collections, "Mới thêm") stay.
+One personal Home row from one seed: a visible title the viewer rated 4-5, else, when the viewer has not rated it 1-3, the visible title with the latest completed episode. When the seed belongs to a visible franchise and the viewer has finished the seed title's last visible episode, the row starts with the next visible, playable part in franchise order that the viewer has not started; the seed's similar titles follow, by the same rule as Issue 8.13. Titles the viewer has started or rated never appear in the row. With no eligible seed there is no personal row; the other eligible Home rows (Continue Watching, pinned collections, "Mới thêm") stay.
 
 **Acceptance Criteria:**
 - Two users isolated; ratings 1-2 never recommended; a row below 3 items is hidden unless it holds a next part; Admin Preview creates no seed; `Cache-Control: no-store`
 
-**Dependencies:** Issue 7.3, Issue 8.3
+**Dependencies:** Issue 7.3, Issue 8.3, Issue 8.13
 
 ---
 
@@ -1781,13 +1781,13 @@ Skip buttons for confirmed intro and ending markers and a chapter menu; no autom
 ### Issue 9.9: Multi-Audio Packages
 
 **Description:**  
-Every usable audio track (up to four) packaged with the video in a second layout, the master playlist rendered from database rows, typed HLS routes and an admin track API. Readers, validation and preview parity ship first; writes follow behind a switch that is enabled for viewers only after Issue 9.10. Output dimensions are recorded at READY.
+Every usable audio track (up to four) packaged with the video in a second layout, the master playlist rendered from database rows, typed HLS routes and an admin track API. Readers, validation and preview parity ship first and on their own; production V2 writes wait for Issue 9.6, because before activation a newer READY asset becomes current automatically; the viewer switch is enabled only after Issue 9.10. Output dimensions are recorded at READY.
 
 **Acceptance Criteria:**
 - Playlist escaping and route negatives; crash and failure cleanup; real Chrome plays, switches tracks and seeks; existing single-audio assets unchanged
 - While the viewer switch is off, the activation endpoint refuses a multi-audio asset server-side; a test tries it and the viewers' existing asset stays active
 
-**Dependencies:** Issue 8.18, Issue 7.2, Issue 8.16
+**Dependencies:** Issue 8.18, Issue 7.2, Issue 8.16; Issue 9.6 for the production write stage
 
 ---
 
@@ -2246,7 +2246,7 @@ The measurement owners stay as they are: #124 (encode calibration, gate G1/G2 wi
 - **Upload limit promotion and retirement of the one-shot route:** Issue MU.7 closes at 2048 MiB, #180 runs the separate test-only 8 GiB qualification, and only when both are done does this item raise the deployed limit and retire the one-shot route; if the 8 GiB row fails, the 2048 MiB limit and the one-shot route stay
 - **Image lane switched on:** after #233's lane qualification passes: #232 instrumentation, sustained and overlapping load, restart recovery, at most 5 % encode slowdown and the full playback thresholds; the sequential single-slot path stays the fallback
 - **Remux adoption:** only if Issue 9.14 shows a gain on the target VM
-- HTTPS preparation (#250) and the deployment children of #136
+- HTTPS preparation (#250), the deployment children of #136, and the security gates already in this milestone (for example #51, #54, #72, #138, #139 and #141-#143) before any demo; public access remains a separate owner decision
 
 Conditional items with no issue until their trigger:
 
@@ -2259,7 +2259,8 @@ Conditional items with no issue until their trigger:
 | Styled ASS or PGS rendering in production | Issue 10.11 recommends adoption; the adopting pull request ships the notices, the LGPL source location and the replace or relink route (ADR-019, #143) |
 | Studio and creator pages | enough titles carry that data |
 | Personal named lists | the owner asks after using the watchlist |
-| A viewer row of trending titles | provider terms allow it and two weeks show at least four playable matches |
+| A viewer row of trending titles | provider terms allow it and two weeks show at least four playable matches; once enabled, the row hides whenever fewer than four playable titles remain |
+| An `ffprobe` inventory of the real library | the owner has a film library; tests keep generated lavfi fixtures |
 | Automatic TMDB refresh | the owner asks |
 | AniList staff, characters and studios | a follow-up issue after #246 |
 
@@ -2345,11 +2346,11 @@ After Sprint 10 and the Metadata and Upload milestone, and as the Pre-production
 
 1. Execute comprehensive Postman/Newman tests
 2. Create manual E2E test checklist and execute
-3. Deploy to Oracle Cloud VPS
-4. Configure HTTPS with Let's Encrypt
-5. Document backup, restore, rollback procedures
-6. Create runbook for operations
-7. Verify demo stability over HTTPS
+3. Set up the Oracle A1 VM as an isolated qualification environment (no public access) for the Pre-production gate measurements and the R2 restore drill
+4. Test backup, restore and rollback and write the operations runbook and the disaster-recovery document
+5. Close the security gates of the Pre-production gate (for example #51, #54, #72, #138, #139 and #141-#143) and configure HTTPS with Let's Encrypt (#250)
+6. Deploy the demo over HTTPS and verify its stability; public access stays a separate owner decision, and the site is never indexed by search engines
+7. Keep the deployment children of #136 current
 8. Enter Phase 6 - Portfolio finalization (README polish, demo video, architecture diagram)
 
 ---
