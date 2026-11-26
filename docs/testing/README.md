@@ -268,16 +268,19 @@ the recovered segment's playlist interval, and reloads with a new credential iss
 Set `VOD_CHROME_TEST_CPU_RATE=4` to slow Chrome scheduling.
 Setup uses a 32 MiB upload limit and a 360-second READY deadline.
 
-Use **Chrome playback smoke** via `workflow_dispatch` after the workflow is present on the default branch.
+**Chrome playback smoke** runs on pull requests and pushes to `main`, and can also run manually via
+`workflow_dispatch`. The check is optional while [#255](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/255)
+tracks duration and results for at least five consecutive runs ahead of the owner's required-check decision.
 The workflow installs Google Chrome and requires no application credentials. Its output is limited to
 named checkpoints and allowlisted browser observations. The CI Newman wrapper prints static collection
 item and assertion names on failure and removes its temporary report before returning.
 
-The smoke requires the new bearer to be in use before the late progress 401. A scheduling slip fails that
-gate. Unit tests cover two callers joining an in-flight refresh. Reload checks use of the distinct bearer
-from bootstrap and leave the refresh POST's cookie, bearer and body shape implicit. Session tests cover token
-storage. A second cancellation during local teardown can interrupt cleanup. A forced kill can leave Newman's
-temporary raw report on the disposable CI runner until the runner is discarded.
+The smoke requires the new bearer to be in use before the late progress 401. The gate fails if runner
+scheduling prevents that ordering from being observed. Unit tests cover two callers joining an in-flight
+refresh. Reload checks use of the distinct bearer from bootstrap and leave the refresh POST's cookie,
+bearer and body shape implicit. Session tests cover token storage. A second cancellation during local teardown
+can interrupt cleanup. A forced kill can leave Newman's temporary raw report on the disposable CI runner
+until the runner is discarded.
 
 ## Boundary
 
