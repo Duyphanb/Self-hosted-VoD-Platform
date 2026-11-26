@@ -85,7 +85,8 @@ Out of scope:
 
 - Elasticsearch or OpenSearch, until a relevance fixture shows that PostgreSQL cannot meet quality or latency
 - personalized search ranking
-- indexing text imported from TMDB, or any provider description, unless TMDB confirms that its terms allow it (AniList name aliases are indexed)
+- indexing provider descriptions (TMDB or AniList)
+- indexing TMDB-derived values, unless TMDB's permission is recorded in ADR-014 first (AniList name aliases are indexed)
 
 Moved into scope (owner, 2026-11-03 and 2026-11-26):
 
@@ -131,7 +132,7 @@ Out of scope:
 Moved into scope (owner, 2026-11-24 to 2026-11-26):
 
 - **series, seasons, OVAs and films** with episodes and an optional franchise (ADR-013, planned under #244)
-- **rule-based recommendations without scores:** "Tương tự" (similar titles) on the title page, the next part of a franchise, and one Home row "Vì bạn đã xem X"; with no history there is no personal row and Home shows "Mới thêm" beside any other eligible row; reasons are shown as text (ADR-015, planned)
+- **rule-based recommendations without scores:** "Tương tự" (similar titles) on the title page, the next part of a franchise, and one Home row "Vì bạn đã xem X"; with no eligible seed there is no personal row and Home shows "Mới thêm" beside any other eligible row; reasons are shown as text (ADR-015, planned)
 - **collections:** editorial and smart collections built from the owner's own data, a Collections page and up to three pinned Home rows (ADR-021, planned)
 - **studio and creator pages (conditional):** once enough titles carry that data
 - **personal named lists (conditional):** only if the owner asks for them after using the watchlist
@@ -158,7 +159,7 @@ Out of scope:
 Moved into scope (owner, 2026-11-25/26):
 
 - **activation of encoded assets with Admin Preview:** a separate admin-only preview route, audited, `no-store`, writing no viewer progress or history (ADR-013, ADR-019, planned)
-- **release of source files (conditional):** only after activation, a verified SHA-256 of the off-VM archive copy, the current HLS package in a verified backup set and a passed restore drill, with an explicit owner confirmation for the exact files released (ADR-016, planned)
+- **release of source files (conditional):** only after activation, a verified SHA-256 of the off-VM archive copy, the current HLS package in a verified backup set and a passed R2 volume-restore drill (#136), with an explicit owner confirmation for the exact files released (ADR-016, planned)
 - **backups:** a database dump, small files and one verified archive copy are mandatory; block-volume backups with rotation inside the free limit; restore tests; a disaster-recovery document; an admin download of one title's HLS package. No step may cost money or delete the source volume without the owner's consent (ADR-016, planned; #136)
 
 Allowed focus:
