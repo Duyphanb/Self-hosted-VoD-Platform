@@ -2,7 +2,7 @@
 
 ## Status
 
-Updated 2026-11-14 for the Sprint 6 streaming design ([ADR-011](../architecture/adr/ADR-011.md)) and 2026-11-13 for the Sprint 5 closeout; the upload and worker design follows [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md), Sprint 4 (F-008 and F-009) in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md), and Sprint 5 (F-010 to F-012) in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; Sprint 5 supplies encoding evidence but no playback or VPS evidence.
+Updated 2026-11-26 for the Sprint 6 closeout, 2026-11-14 for the Sprint 6 streaming design ([ADR-011](../architecture/adr/ADR-011.md)) and 2026-11-13 for the Sprint 5 closeout; the upload and worker design follows [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md), Sprint 4 (F-008 and F-009) in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md), Sprint 5 (F-010 to F-012) in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md), and Sprint 6 (F-013 to F-015, with the playback part of F-012) in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; no row has VPS evidence yet.
 
 ## Feature Traceability
 
@@ -19,10 +19,10 @@ Updated 2026-11-14 for the Sprint 6 streaming design ([ADR-011](../architecture/
 | F-009 | Queue publishing | US-008 | backend, RabbitMQ | Queue publisher unit test; API-to-queue integration evidence. Verified: [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md) |
 | F-010 | Encoding worker | US-009 | worker, RabbitMQ, MinIO | Worker command construction tests; job status transition tests; failed-job test. Verified: [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md) |
 | F-011 | FFprobe metadata extraction | US-009 | worker | FFprobe parser unit tests; #123 generated-fixture probe tests with the worker image binary. Verified: [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md) |
-| F-012 | FFmpeg HLS transcoding | US-009, US-010 | worker, MinIO | HLS output smoke test; generated playlist and segments verification; #123 generated fixtures through the worker image binary with output validation. Encoding to `vod-hls` verified in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md); playback (US-010) remains Sprint 6 |
-| F-013 | HLS playback | US-010 | backend, frontend, nginx | Playback API tests and Postman test; HLS proxy tests (MIME, `no-store`, current-only 404, query-token 401); player unit tests (token refresh, error mapping, hls.js-only path); one manual row per verified browser (current Chrome or Edge, and Firefox); browser playback smoke test (#125) |
-| F-014 | Playback progress and resume | US-011 | backend, frontend, PostgreSQL | Progress API tests on PostgreSQL (forward-only upsert, clamp, 90% completion, history write, ownership); player save-trigger test; resume manual E2E evidence |
-| F-015 | Continue watching | US-011 | backend, frontend | Continue-watching API tests (unfinished only, PUBLISHED only, order, limit); UI list test |
+| F-012 | FFmpeg HLS transcoding | US-009, US-010 | worker, MinIO | HLS output smoke test; generated playlist and segments verification; #123 generated fixtures through the worker image binary with output validation. Encoding to `vod-hls` verified in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md); browser playback of the encoded output (US-010) verified in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md) |
+| F-013 | HLS playback | US-010 | backend, frontend, nginx | Playback API tests and Postman test; HLS proxy tests (MIME, `no-store`, current-only 404, query-token 401); player unit tests (token refresh, error mapping, hls.js-only path); one manual row per verified browser (current Chrome or Edge, and Firefox); browser playback smoke test (#125). Verified: [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md) (Chrome playback smoke on `main`, manual rows on #242); a Sprint 6 Newman collection is still missing (#254) |
+| F-014 | Playback progress and resume | US-011 | backend, frontend, PostgreSQL | Progress API tests on PostgreSQL (forward-only upsert, clamp, 90% completion, history write, ownership); player save-trigger test; resume manual E2E evidence. Verified: [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md) (save and reload resume also in the Chrome playback smoke); Newman coverage missing (#254) |
+| F-015 | Continue watching | US-011 | backend, frontend | Continue-watching API tests (unfinished only, PUBLISHED only, order, limit); UI list test. Verified: [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md) |
 | F-016 | Search and suggestions | US-012 | backend, frontend, PostgreSQL | Search service tests; FTS seed data tests; search UI tests |
 | F-017 | Watchlist | US-013 | backend, frontend | Watchlist API tests; duplicate prevention test; UI mutation test |
 | F-018 | Watch history | US-014 | backend, frontend | Watch history service tests; ownership authorization test |
@@ -40,8 +40,8 @@ Updated 2026-11-14 for the Sprint 6 streaming design ([ADR-011](../architecture/
 | NFR-002 | F-021, F-022 | VPS resource observation during demo smoke test |
 | NFR-003 | F-008 | `.env.example` size/MIME allowlist configuration and backend rejection outside those limits; declared MIME/signature family, equal MiB ceilings including multipart overhead, route-limit JSON errors and a synthetic non-VPS 2 GB runner rehearsal (Issues 4.4/4.6/4.7); genuine 2 GB VPS timings/temp/memory/disk and concurrent-upload headroom (#180, before public deployment) |
 | NFR-004 | F-010 | One non-overlapping worker, prefetch/concurrency 1, startup recovery, owner product caps checked in 5.4 (ADR-010 D26), deadlines measured in #124, and a long-job/second-queued-job test (5.1/5.3/5.7) |
-| NFR-005 | F-012, F-013 | Browser playback smoke test (#125) and one manual 60-second playback row per verified browser: current desktop Chrome or Edge, and Firefox, with versions recorded (ADR-011 D5) |
-| NFR-006 | F-014, F-015 | PostgreSQL progress test: an accepted update is committed before the response and a read right after it returns it (ADR-011 D9) |
+| NFR-005 | F-012, F-013 | Browser playback smoke test (#125) and one manual 60-second playback row per verified browser: current desktop Chrome or Edge, and Firefox, with versions recorded (ADR-011 D5). Verified in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md): Chrome 158 smoke on `main` (97 s of playback across a token expiry) and manual rows for Edge 158, Chromium 155, Chrome 156 and Firefox 159 (scripted) on the #242 branch stack; no A1/VPS playback yet (#124, #233) |
+| NFR-006 | F-014, F-015 | PostgreSQL progress test: an accepted update is committed before the response and a read right after it returns it (ADR-011 D9). Verified in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md) (`ProgressApiIntegrationTests`; the Chrome smoke resumes at the saved second after a reload) |
 | NFR-007 | F-001, F-002, F-004, F-020 | Auth and authorization tests |
 | NFR-008 | All runtime features | Secret scan/manual review; `.env.example` review |
 | NFR-009 | F-008, F-012 | MinIO storage integration evidence |
@@ -55,7 +55,7 @@ Updated 2026-11-14 for the Sprint 6 streaming design ([ADR-011](../architecture/
 
 ## Sprint 4 design-to-test plan
 
-The Sprint 4 (4.x) parts of these rows are verified in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md); the parts owned by Sprint 5, 6 and 9, Phase 5, #54, #74, #123, #124 and #180 remain **planned**, not passed tests. #125 requires actual upload -> transcode -> HLS browser playback.
+The Sprint 4 (4.x) parts of these rows are verified in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md); the parts owned by Sprint 5, 6 and 9, Phase 5, #54, #74, #123, #124 and #180 remain **planned**, not passed tests. The upload -> transcode -> HLS browser playback that #125 required is verified in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md).
 
 | Decisions / feature | Planned evidence and owner |
 |---|---|
@@ -69,7 +69,7 @@ The Sprint 4 (4.x) parts of these rows are verified in the [Sprint 4 closeout](.
 
 ## Sprint 6 design-to-test plan
 
-These rows are **planned** evidence for [ADR-011](../architecture/adr/ADR-011.md), not passed tests. #125 requires actual upload -> transcode -> HLS browser playback.
+These rows were the planned evidence for [ADR-011](../architecture/adr/ADR-011.md). They are verified in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md), which maps each Sprint 6 issue to its tests, the CI run, the Chrome playback smoke on `main` and the manual browser rows. Two parts remain open: the Chrome smoke is not yet a pull-request check (#255), and Sprint 9 (9.1) owns the admin projection part of D15-D18.
 
 | Decisions / feature | Planned evidence and owner |
 |---|---|
