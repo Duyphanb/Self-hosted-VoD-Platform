@@ -1193,7 +1193,8 @@ Introduce episodes and re-key media, progress and history from the movie to the 
 **Acceptance Criteria:**
 - One migration transaction adds `episodes` (one backfilled PUBLISHED episode per title), `titles.content_type` and `part_label`, and re-keys `video_assets`, `playback_progress` and `watch_history`; the in-flight index is per episode
 - Episode playback, progress and upload endpoints; the Nginx upload location, multipart filter and `ADMIN_ENDPOINTS` cover the episode upload route
-- SPA: `/watch/:episodeId`, the title route, a redirect from `/movies/:id/watch`, Continue Watching with one card per title (resume, or the next episode after a finished one)
+- SPA: `/watch/:episodeId`, the title route, a redirect from `/movies/:id/watch`, Continue Watching with one card per title: the latest interaction on a visible episode is chosen first; a finished one advances only to the immediately following episode when it is visible, playable and unfinished; tests cover an older resumable episode and a hidden or unready successor
+- Old writers are fenced during the migration; through Nginx, an upload started from the previous SPA build completes or gets a clean, retryable error with no partial state (the same evidence when a bridge is used)
 - Populated upgrade smoke with an `EXCEPT` bijection on every carried column; a job queued before the migration finishes; PostgreSQL race tests for concurrent uploads; the real-Chrome smoke passes on the new routes
 - Rollback boundary documented: restore the pre-migration dump before any new write, roll forward after that
 
@@ -1211,7 +1212,7 @@ The admin groups titles into an optional franchise and manages episodes. A DRAFT
 **Acceptance Criteria:**
 - `franchises` table and admin CRUD; `titles.franchise_id`/`franchise_order`; episode CRUD, ordering and per-episode publish; admin UI for parts and episodes
 - Visibility tests at three levels; counts exclude hidden items before paging; concurrent reorder tests; fixed statement count per page
-- Franchise names join search: a published franchise's name finds its visible parts in search and suggestions, a hidden franchise's name never matches, a rename rewrites one row
+- Franchise names join the search tables: a rename rewrites one row and a hidden franchise's name row is never eligible (index-level tests here); the endpoint tests (a published franchise's name finds its visible parts in search and suggestions, a hidden one never matches) are added by whichever of this issue and Issues 7.5/7.6 merges last
 - Publishing a second episode of one title returns 409 until Issue 8.12 ships the episode grid and the next-episode card
 
 **Dependencies:** Issue 7.2, Issue 7.4
@@ -1240,11 +1241,11 @@ A versioned Java text normalizer (exact and accent-folded keys, Vietnamese đ/Đ
 **GitHub:** [#263](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/263)
 
 **Description:**  
-Implement `GET /api/v1/search` on titles per ADR-015: ranked tiers, one card per PUBLISHED title (a title with nothing playable yet stays, labelled like the catalog list), a deterministic total order and stable paging. Filters use only the admin's own data until the metadata ADR allows imported values.
+Implement `GET /api/v1/search` on titles per ADR-015: ranked tiers, one card per PUBLISHED title (a title with nothing playable yet stays, labelled like the catalog list), a deterministic total order and stable paging. Filters use only the admin's own data; TMDB-imported genres, cast or year join a filter only after ADR-014 records that TMDB's terms allow that use.
 
 **Acceptance Criteria:**
 - Endpoint requires a valid access token; `q` trimmed, at most 100 code points, 400 when blank or too long; `genre`, `year` and `type` filters; visibility applied through joins before rank and count
-- Relevance fixture created through the admin API: Vietnamese with and without diacritics, Japanese exact and partial, romaji aliases, several parts of one franchise, special characters; a typo set decides whether a `pg_trgm` fallback ships, and then only when the strict tiers find no visible title under the same filters
+- Relevance fixture created through the admin API: Vietnamese with and without diacritics, Japanese exact and partial, romaji aliases, special characters; a typo set decides whether a `pg_trgm` fallback ships, and then only when the strict tiers find no visible title under the same filters
 - Hidden titles never appear in items, counts or `matchedName`; tied scores keep the total order across pages; the franchise-name tier and its published and hidden cases arrive with Issue 7.3, so this issue ships independently after Issue 7.2
 - `EXPLAIN (ANALYZE, BUFFERS)` recorded on the fixture; query strings absent from the Nginx logs
 
@@ -1514,7 +1515,7 @@ Franchise page with the part strip, title page with the episode grid and part sw
 ### Issue 8.13: Similar Titles
 
 **Description:**  
-"Tương tự" on the title page, from shared genres and people of the admin's own data; reasons shown as text, no score.
+"Tương tự" on the title page, from shared genres and people of the admin's own data (TMDB-imported genres or people only after ADR-014 records that use as allowed); reasons shown as text, no score.
 
 **Acceptance Criteria:**
 - The title itself, its visible franchise, unplayable and hidden titles excluded; deterministic order, one per franchise; fixed statement count
@@ -1708,7 +1709,7 @@ Create admin dashboard page showing video assets with status. Display movie titl
 
 **Acceptance Criteria:**
 - Dashboard fetches video assets from admin API
-- Table displays movie title, status, metadata, the safe failure message, and the queued/started/finished times
+- Table displays the title and the episode label, status, metadata, the safe failure message, and the queued/started/finished times; a two-episode case confirms the retry action targets the intended asset
 - Filter dropdown for status (All, Uploaded, Queued, Processing, Ready, Failed)
 - Loading, empty, error states handled
 - Pagination supported
@@ -1784,6 +1785,7 @@ Every usable audio track (up to four) packaged with the video in a second layout
 
 **Acceptance Criteria:**
 - Playlist escaping and route negatives; crash and failure cleanup; real Chrome plays, switches tracks and seeks; existing single-audio assets unchanged
+- While the viewer switch is off, the activation endpoint refuses a multi-audio asset server-side; a test tries it and the viewers' existing asset stays active
 
 **Dependencies:** Issue 8.18, Issue 7.2, Issue 8.16
 
@@ -1816,7 +1818,7 @@ The worker extracts embedded SRT, mov_text and WebVTT subtitles (ASS kept, with 
 ### Issue 9.12: Backup Manifest, Receipts and Coverage
 
 **Description:**  
-A capture manifest (database dump, package IDs, sizes and checksums, including subtitles, fonts, PGS files, frames and thumbnails) taken while writers are drained; verification of the off-VM copy of the dump and small files; automatic restore checks of the dump; an admin banner when the newest valid receipt is older than 8 days; an admin download of one title's HLS package with checksums.
+A capture manifest (database dump, package IDs, sizes and checksums, including subtitles, fonts, PGS files, frames and thumbnails) taken while writers are drained; verification of the off-VM copy of the dump and small files; automatic restore checks of the dump; an admin banner when the newest valid receipt is older than 8 days or the last run failed; an admin download of one title's HLS package with checksums.
 
 **Acceptance Criteria:**
 - A capture during an encode, a finalizing upload and an activation still matches the dump; tampered receipts rejected; the download verified by the PC script
@@ -1935,7 +1937,7 @@ Bounded internal metrics, including the encode real-time factor and image-job du
 ### Issue MU.1: Metadata Catalog Foundation
 
 **Description:**  
-External IDs per title, episode and person; provider texts and field provenance stored apart from the admin's own fields; a title revision; the description becomes optional; a withdrawal job, fail-closed reads of expired provider text and a "refresh due" list for TMDB's six-month limit.
+External IDs per title, episode and person; provider texts and field provenance stored apart from the admin's own fields; a title revision; the description becomes optional; a withdrawal job, fail-closed reads of expired provider text and a "refresh due" list of the titles whose TMDB data expires within 30 days: refreshed values that did not change get a new deadline, changed values wait for the admin's review, and values never refreshed are removed before the six-month limit.
 
 **Acceptance Criteria:**
 - A manual edit removes provenance; stale revisions return 409; with the withdrawal job stopped past a deadline no provider text is served while the catalogue still works
@@ -2096,7 +2098,7 @@ Add React error boundaries to catch rendering errors. Implement global error han
 - Error boundary wraps app or major routes
 - Fallback UI displays on rendering errors
 - Global API error handler shows toast/alert for network failures
-- 401 errors trigger logout and redirect to login
+- 401 errors follow the shared recovery policy of ADR-012 (one refresh and retry; sign-out only when the session has ended)
 - 403 errors show forbidden message
 - Error messages are user-friendly, not raw stack traces
 
@@ -2240,7 +2242,7 @@ The measurement owners stay as they are: #124 (encode calibration, gate G1/G2 wi
 
 - **1080p default for new encodes:** after G1-G6 pass (G1/G2 #124, G3 the owner's visual review, G4/G6 #233, G5 #137 with #190) and 1080p plays in the real browser; needs Issue 9.9; no upscaling, existing 720p assets unchanged
 - **Release of source files enabled:** the admin release button with its dry-run list and a warning whenever only one archive copy exists, and the owner's authorization to turn on the server-side switch, after the runbook exists and the R2 volume-restore drill (#136; single-audio and multi-audio playback with a track switch, on a backup taken with writers drained) has passed; every release still rechecks the archive SHA-256, activation, the verified backup coverage of the current package and the owner's confirmation for the exact object set (Issue 9.13 ships it disabled)
-- **Volume backups, rotation, the free restore drill and the disaster-recovery document** (child of #136)
+- **Volume backups and the disaster-recovery document** (child of #136): automatic rotation within the free limit that deletes an older backup only after the new one is AVAILABLE; immediate failure notification and the admin banner; the free R2 drill on a 50 GB data volume before the volume grows; no step that costs money or deletes the source volume without the owner's consent
 - **Upload limit promotion and retirement of the one-shot route:** Issue MU.7 closes at 2048 MiB, #180 runs the separate test-only 8 GiB qualification, and only when both are done does this item raise the deployed limit and retire the one-shot route; if the 8 GiB row fails, the 2048 MiB limit and the one-shot route stay
 - **Image lane switched on:** after #233's lane qualification passes: #232 instrumentation, sustained and overlapping load, restart recovery, at most 5 % encode slowdown and the full playback thresholds; the sequential single-slot path stays the fallback
 - **Remux adoption:** only if Issue 9.14 shows a gain on the target VM
@@ -2308,7 +2310,7 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 5. MinIO buckets are private; HLS delivered through authenticated backend proxy.
 6. Worker concurrency is 1 for MVP stability.
 7. Redis is used for cache only and holds no playback progress (ADR-011 D9); PostgreSQL is source of truth.
-8. Frontend tokens stored in localStorage or chosen secure mechanism; strategy decided in Sprint 2.
+8. Authentication follows ADR-012, delivered in Sprint 6: an in-memory access token, an HttpOnly refresh cookie and server-side sessions with bounded revocation; no token in `localStorage`.
 9. GitHub Issues will be created based on this backlog; issue numbers referenced in commits.
 10. Test media is generated at test time with FFmpeg lavfi (#123); no third-party sample media is committed. Demo media stays local to the owner.
 
