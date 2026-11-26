@@ -265,7 +265,7 @@ sequenceDiagram
 
     Admin->>AdminSPA: Open the preview of a READY asset
     AdminSPA->>Backend: GET /api/v1/admin/video-assets/{id}/preview
-    Backend->>PostgreSQL: Read session and database role directly, then the asset (READY, any content status)
+    Backend->>PostgreSQL: Read session and database role directly, then the asset (READY, not retired, any content status)
     Backend-->>AdminSPA: PreviewInfo with /hls/admin/... manifest, active, candidate, timelines, generation
     Note over Backend: One INFO audit event per preview-info call
     AdminSPA->>Backend: GET /hls/admin/video-assets/{id}/master.m3u8 and segments, with Authorization
@@ -276,7 +276,7 @@ sequenceDiagram
     Admin->>AdminSPA: Activate as SAME or NEW
     AdminSPA->>Backend: POST /api/v1/admin/video-assets/{id}/activation with timeline and expected generation
     Backend->>PostgreSQL: BEGIN, lock the episode FOR NO KEY UPDATE
-    alt generation changed, asset not READY or already active, or timeline relation wrong
+    alt generation changed, asset not READY, active or retired, or timeline relation wrong
         Backend->>PostgreSQL: ROLLBACK
         Backend-->>AdminSPA: 409 ACTIVATION_CONFLICT or VIDEO_ASSET_NOT_ACTIVATABLE
     else accepted

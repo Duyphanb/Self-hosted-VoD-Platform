@@ -78,7 +78,7 @@ Backend enforcement:
 
 Admin endpoints are enforced by URL authorization rules (`/api/v1/admin/**`, `POST /api/v1/movies`, and `PUT`/`DELETE /api/v1/movies/{movieId}`; user sub-resources such as `/api/v1/movies/{movieId}/progress` are not admin endpoints) before request validation runs, with method-level `@PreAuthorize` as a second layer. A `ROLE_USER` request to an admin endpoint returns 403 even when its body is invalid or the target does not exist. A multipart body sent to any operation other than `POST /api/v1/admin/movies/{movieId}/video`, including other methods on that path, is rejected with 400 `MALFORMED_REQUEST` before authentication; the upload operation authorizes from headers before its multipart body is parsed.
 
-Planned ([ADR-013](adr/ADR-013.md), #244): with S2 the catalog writes move under `/api/v1/admin/titles`, so the URL rules become `/api/v1/admin/**` alone, and the multipart exception moves to `POST /api/v1/admin/episodes/{episodeId}/video`. With S5, `/hls/admin/**` joins the admin URL rules ([Admin Preview routes](#planned-admin-preview-routes-adr-013)).
+Planned ([ADR-013](adr/ADR-013.md), #244): with S2 the catalog writes move under `/api/v1/admin/titles`, so the URL rules become `/api/v1/admin/**` alone, and the multipart exception moves to `POST /api/v1/admin/episodes/{episodeId}/video`. During S2's one-release upload bridge, the old `POST /api/v1/admin/movies/{movieId}/video` keeps the same exception, limits and header-first authorization; the bridge then goes away. With S5, `/hls/admin/**` joins the admin URL rules ([Admin Preview routes](#planned-admin-preview-routes-adr-013)).
 
 Frontend route guards are UX only. Backend authorization is the security boundary.
 
@@ -140,10 +140,10 @@ Owner decision of 2026-11-25: Admin Preview is an exception for checking an enco
 
 | Route | Caller | Checked on every request | Responses |
 |---|---|---|---|
-| `GET /api/v1/admin/video-assets/{videoAssetId}/preview` | `ROLE_ADMIN`, session and database role read directly | asset exists and is READY, whatever the episode and title status | 200 `PreviewInfo`; 401; 403; 404 `VIDEO_ASSET_NOT_FOUND`; 503 `AUTH_STATE_UNAVAILABLE` |
+| `GET /api/v1/admin/video-assets/{videoAssetId}/preview` | `ROLE_ADMIN`, session and database role read directly | asset exists, is READY and is not retired (its objects may be purged), whatever the episode and title status | 200 `PreviewInfo`; 401; 403; 404 `VIDEO_ASSET_NOT_FOUND`; 503 `AUTH_STATE_UNAVAILABLE` |
 | `GET /hls/admin/video-assets/{videoAssetId}/master.m3u8` | same | as above, plus the stored master key pattern | 200 whole playlist; 401; 403; 404 `VIDEO_ASSET_NOT_FOUND`; 503 `HLS_STORAGE_UNAVAILABLE` or `AUTH_STATE_UNAVAILABLE` |
 | `GET /hls/admin/video-assets/{videoAssetId}/segments/{segmentName}` | same | as above, plus the segment name pattern before storage is read | as the playlist |
-| `POST /api/v1/admin/video-assets/{videoAssetId}/activation` | same | episode lock, expected generation, READY and not active, timeline relation | 200; 400; 401; 403; 404; 409 `ACTIVATION_CONFLICT`, `VIDEO_ASSET_NOT_ACTIVATABLE` or `ACTIVATION_CARRY_INVALID`; 503 |
+| `POST /api/v1/admin/video-assets/{videoAssetId}/activation` | same | episode lock, expected generation, READY, not active and not retired, timeline relation | 200; 400; 401; 403; 404; 409 `ACTIVATION_CONFLICT`, `VIDEO_ASSET_NOT_ACTIVATABLE` or `ACTIVATION_CARRY_INVALID`; 503 |
 
 - `/hls/admin/**` joins `ADMIN_ENDPOINTS`, so the admin authentication path reads the session and the database role on every request ([ADR-012](adr/ADR-012.md)); a demoted or signed-out admin is refused on the next request. A `ROLE_USER` caller gets 403 before any asset lookup.
 - Every `/hls/admin/*` response, denials included, carries `Cache-Control: no-store`; `HlsRouteFilter` sets it before security runs and logs 401, 403 and 404 denials with the request ID and asset ID, never the token. The bearer token is accepted only in the `Authorization` header, as on the viewer routes. Nginx's `/hls/` location already forwards these paths.
