@@ -11,7 +11,7 @@ Out of scope:
 - microservices split
 - Kubernetes
 - Kafka
-- Elasticsearch
+- Elasticsearch (the single rule is in the Search section)
 - managed AWS production stack such as ECS, RDS, ALB, or full S3-first architecture
 - service mesh
 - multi-region deployment
@@ -86,7 +86,7 @@ Out of scope:
 - Elasticsearch or OpenSearch, until a relevance fixture shows that PostgreSQL cannot meet quality or latency
 - personalized search ranking
 - indexing provider descriptions (TMDB or AniList)
-- indexing TMDB-derived values, unless TMDB's permission is recorded in ADR-014 first (AniList name aliases are indexed)
+- indexing TMDB-derived values, unless TMDB's permission is recorded in ADR-014 first (eligible AniList name aliases are indexed)
 
 Moved into scope (owner, 2026-11-03 and 2026-11-26):
 
@@ -100,7 +100,7 @@ Allowed focus:
 
 ## Metadata And Providers
 
-In scope (owner, 2026-11-24 and 2026-11-26): admin-only TMDB import (#245) and AniList import one title at a time (#246), each reviewed before apply (ADR-014, planned). The admin's own description always wins; provider text is used only when the admin has none, and admin-edited content is never overwritten automatically. TMDB data is refreshed by the admin or removed before its six-month limit.
+In scope (owner, 2026-11-24 and 2026-11-26): admin-only TMDB import (#245) and AniList import one title at a time (#246), each reviewed before apply (ADR-014, planned). The display title and slug stay the admin's own, and provider names become provenance-tracked aliases. The admin's own description always wins; provider text is used only when the admin has none, and admin-edited content is never overwritten automatically. TMDB data is refreshed by the admin or removed before its six-month limit.
 
 Out of scope:
 
@@ -159,7 +159,7 @@ Out of scope:
 Moved into scope (owner, 2026-11-25/26):
 
 - **activation of encoded assets with Admin Preview:** a separate admin-only preview route, audited, `no-store`, writing no viewer progress or history (ADR-013, ADR-019, planned)
-- **release of source files (conditional):** only after activation, a verified SHA-256 of the off-VM archive copy, the current HLS package in a verified backup set and a passed R2 volume-restore drill (#136), with an explicit owner confirmation for the exact files released (ADR-016, planned)
+- **release of source files (conditional):** originals are archived long-term on the owner's PC or NAS, not on the VM; a file on the VM is released only after activation, a verified SHA-256 of the off-VM archive copy, the current HLS package in a verified backup set and a passed R2 volume-restore drill (#136), with an explicit owner confirmation for the exact files released (ADR-016, planned)
 - **backups:** a database dump, small files and one verified archive copy are mandatory; block-volume backups with rotation inside the free limit; restore tests; a disaster-recovery document; an admin download of one title's HLS package. No step may cost money or delete the source volume without the owner's consent (ADR-016, planned; #136)
 
 Allowed focus:

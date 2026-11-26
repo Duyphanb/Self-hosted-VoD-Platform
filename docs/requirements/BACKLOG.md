@@ -1211,6 +1211,7 @@ The admin groups titles into an optional franchise and manages episodes. A DRAFT
 **Acceptance Criteria:**
 - `franchises` table and admin CRUD; `titles.franchise_id`/`franchise_order`; episode CRUD, ordering and per-episode publish; admin UI for parts and episodes
 - Visibility tests at three levels; counts exclude hidden items before paging; concurrent reorder tests; fixed statement count per page
+- Franchise names join search: a published franchise's name finds its visible parts in search and suggestions, a hidden franchise's name never matches, a rename rewrites one row
 - Publishing a second episode of one title returns 409 until Issue 8.12 ships the episode grid and the next-episode card
 
 **Dependencies:** Issue 7.2, Issue 7.4
@@ -1222,7 +1223,7 @@ The admin groups titles into an optional franchise and manages episodes. A DRAFT
 **GitHub:** [#261](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/261)
 
 **Description:**  
-A versioned Java text normalizer (exact and accent-folded keys, Vietnamese đ/Đ included, Japanese kana kept) replaces the `unaccent` extension, which the Compose Flyway role cannot create. Search-owned name and document tables stay in step with every catalog write; the admin manages aliases. TMDB-derived values and provider descriptions are never indexed; AniList name aliases are, once imported.
+A versioned Java text normalizer (exact and accent-folded keys, Vietnamese đ/Đ included, Japanese kana kept) replaces the `unaccent` extension, which the Compose Flyway role cannot create. Search-owned name and document tables stay in step with every catalog write; the admin manages aliases. Provider descriptions are never indexed; eligible AniList name aliases are, once imported; other TMDB-derived values stay out of the index unless TMDB's permission is recorded in ADR-014.
 
 **Acceptance Criteria:**
 - Migration: `title_aliases`, `title_search_names`, `title_search_documents`; the never-written `search_vector` and its index dropped; no extension required
@@ -1244,7 +1245,7 @@ Implement `GET /api/v1/search` on titles per ADR-015: ranked tiers, one card per
 **Acceptance Criteria:**
 - Endpoint requires a valid access token; `q` trimmed, at most 100 code points, 400 when blank or too long; `genre`, `year` and `type` filters; visibility applied through joins before rank and count
 - Relevance fixture created through the admin API: Vietnamese with and without diacritics, Japanese exact and partial, romaji aliases, several parts of one franchise, special characters; a typo set decides whether a `pg_trgm` fallback ships, and then only when the strict tiers find no visible title under the same filters
-- Hidden titles and the names of hidden franchises never appear in items, counts or `matchedName`, while a published franchise's name still finds its visible parts (tested both ways); tied scores keep the total order across pages
+- Hidden titles never appear in items, counts or `matchedName`; tied scores keep the total order across pages; the franchise-name tier and its published and hidden cases arrive with Issue 7.3, so this issue ships independently after Issue 7.2
 - `EXPLAIN (ANALYZE, BUFFERS)` recorded on the fixture; query strings absent from the Nginx logs
 
 **Dependencies:** Issue 7.4, Issue 7.2
@@ -1276,7 +1277,7 @@ An idempotent seed script through the admin API creates titles with episodes, al
 
 **Acceptance Criteria:**
 - The seed recreates a catalogue on an empty stack; no demo data in Flyway
-- A 500-title run completes; cold and warm p50/p95 HTTP timings of list, search and suggestions recorded with the commit and machine, against the existing one-second target of NFR-010
+- A 500-title run completes; cold and warm p50/p95 HTTP timings of list, search and suggestions recorded with the commit and machine; list and search are checked against their existing targets in `NFR.md`; suggestion timings are recorded as evidence only (there is no suggestion target)
 
 **Dependencies:** Issue 7.5 for the search row, Issue 7.6 for the suggestion row (the seed script can start earlier)
 
@@ -1411,12 +1412,12 @@ Create watchlist page showing user's saved movies. Add "Add to Watchlist" / "Rem
 **Level (ADR-013, planned):** episodes with their title, as Issue 8.2.
 
 **Description:**  
-Create watch history page showing user's recently watched movies. Display last watched timestamp.
+Create the watch history page showing the user's recently watched episodes with their title. Display the last watched timestamp.
 
 **Acceptance Criteria:**
 - Watch history page fetches and displays user's history
-- Movies ordered by last watched descending
-- Movie cards link to detail or watch page
+- Episodes ordered by last watched descending
+- Each card names the title and the episode and links to the title page or to the episode's watch page
 - Loading, empty, error states handled
 - Pagination if list is long
 
@@ -1643,24 +1644,20 @@ A post-encode stage with its own timeout, inside the encode's disk reservation, 
 
 **GitHub:** [#168](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/168)
 
-**Level (ADR-013, planned):** assets per episode, filterable by episode and title, with the `active` and `candidate` states of Issue 9.6; "movie" and "movie-wide" below mean the episode.
+**Level (ADR-013, planned):** assets per episode, with title context. Rewritten 2026-11-26 for the episode level; the path and field names follow the contract as ADR-013 amends it.
 
-**Description:**  
-Implement `GET /api/v1/admin/video-assets` endpoint that returns all video assets with status, metadata, failure reason. Require `ROLE_ADMIN`. Support filtering by status and movie ID.
+**Description:**
+Implement `GET /api/v1/admin/video-assets`: all video assets with status, metadata and failure reason, filterable by status, episode and title. Require `ROLE_ADMIN`.
 
 **Acceptance Criteria:**
 - Endpoint requires `ROLE_ADMIN`
-- Returns video assets with movie title, status, metadata, failure reason
-- Supports filtering by status (e.g., `?status=FAILED`)
-- Supports filtering by movie ID
-- Current/newest/superseded are derived per ADR-010; historical READY is not a playback promise and purged historical keys may dangle. Implement the contract's movieId filter here, not in Sprint 4
-- Returns the ADR-011 D17 projection per the VideoAssetAdmin schema: `failureCode`, the fixed safe `failureReason` message (ADR-011 D18; an unknown stored value maps to `INTERNAL_ERROR`), `queuedAt`/`startedAt`/`finishedAt` of the latest attempt, and `retryEligible` and `superseded` computed for each row from the movie-wide state; never infer movie-wide current/newest from a paginated subset
-- Total order `createdAt` descending, then `id` descending; the `movieId` and `status` filters combine; an invalid filter or page parameter returns 400 `VALIDATION_ERROR`
-- Pagination supported
-- Integration tests cover admin authorization
-- At the episode level (ADR-013): filters by episode and by title replace the `movieId` filter; current, newest, superseded, `active`, `candidate` and `retryEligible` are computed per episode; two episodes of one title have independent states
+- Each row carries its episode and title context, status, metadata and the ADR-011 D17 projection: `failureCode`, the fixed safe `failureReason` (ADR-011 D18; an unknown stored value maps to `INTERNAL_ERROR`), `queuedAt`/`startedAt`/`finishedAt` of the latest attempt, `retryEligible` and `superseded`
+- Filters by status, episode and title combine; an invalid filter or page parameter returns 400 `VALIDATION_ERROR`; total order `createdAt` descending, then `id` descending; pagination supported
+- Every state is computed per episode from the whole episode, never from a paginated subset; two episodes of one title have independent states
+- Before Issue 9.6 ships, current, newest and superseded follow the ADR-010 rule (current = newest READY); after it, rows also carry `active`, `candidate` and `retired` from the activation model, and current means the activated asset. Historical READY is not a playback promise and purged historical keys may dangle
+- Integration tests cover admin authorization and both stages
 
-**Dependencies:** Sprint 8 complete
+**Dependencies:** Sprint 8 complete; the activation fields after Issue 9.6
 
 ---
 
@@ -1677,7 +1674,8 @@ Retry only the newest `(created_at,id)` asset of its movie when FAILED. Serializ
 - Asset transition and next job insert are atomic; attempt increases per asset, source raw retained, expected-state predicates on every write
 - After commit publish the same version-1 envelope with confirms/returns; publish failure remains accepted QUEUED for relay, never deletes raw
 - PostgreSQL tests: double retry yields one 202/one 409, retry versus new upload preserves one-in-flight, rollback publishes nothing, late worker/status writes cannot regress state
-- At the episode level (ADR-013): a retry on one episode neither blocks nor is blocked by an upload or retry on another episode of the same title; a retried asset becomes a candidate and is not live until activated (Issue 9.6)
+- At the episode level (ADR-013): a retry on one episode neither blocks nor is blocked by an upload or retry on another episode of the same title
+- Before Issue 9.6 ships, a retried asset that reaches READY becomes current by the ADR-010 rule; after it, the asset becomes a candidate and is not live until activated
 
 **Dependencies:** Issue 9.1
 
@@ -1743,13 +1741,13 @@ Add retry button to encoding dashboard for failed assets. Clicking retry calls r
 ### Issue 9.6: Activation and Admin Preview Route
 
 **Description:**  
-READY means encoded; viewers get only the asset the admin activated. At activation the admin chooses "same cut" (resume, markers and subtitles kept) or "different cut" (resume from 0, history kept). The migration activates only today's playback winner of each episode, so what viewers play does not change. Older READY rows stay history: their objects may already be purged, so they can never be activated. Candidates are READY assets encoded after the migration that were never activated; ADR-013 defines the distinction. A different-cut activation resets resume to 0 and keeps history and `finished`. Admin Preview accepts any READY asset of the episode, active or candidate, also under a DRAFT title, through its separate route only. Ships as one release boundary with the separate admin-only preview route (audited, `no-store`, through live admin authorization), a minimal preview player, the activation dialog, progress writes that serialize with activation, and the viewer reload rule for a different cut.
+READY means encoded; viewers get only the asset the admin activated. At activation the admin chooses "same cut" (resume, markers and subtitles kept) or "different cut" (resume from 0, history kept). The migration activates only today's playback winner of each episode, so what viewers play does not change. Every other READY row is retired: its objects may already be purged, so it can never be activated or previewed. Candidates are never-activated READY assets that are not retired; ADR-013 defines the states. A different-cut activation resets resume to 0 and keeps history and `finished`. Admin Preview accepts any READY asset of the episode that is not retired (active, candidate, or a replaced asset that can still be re-activated), also under a DRAFT title, through its separate route only. Ships as one release boundary with the separate admin-only preview route (audited, `no-store`, through live admin authorization), a minimal preview player, the activation dialog, progress writes that serialize with activation, and the viewer reload rule for a different cut.
 
 **Acceptance Criteria:**
 - A replacement stays invisible to viewers until activated; progress inserts and updates take the episode lock that activation takes and carry the activation generation; race tests for a first save and a stale A→B→A save against activation
 - Preview writes no progress or history rows or requests, including on page exit; viewers and demoted admins get 404 or 403 with `no-store` on every preview path
 - Purge never selects an unactivated candidate
-- Upgrade test: a historical READY row whose objects were purged stays history and cannot be activated
+- Upgrade test: a historical READY row whose objects were purged is retired and can be neither activated nor previewed
 
 **Dependencies:** Issue 7.2
 
@@ -1830,7 +1828,7 @@ A capture manifest (database dump, package IDs, sizes and checksums, including s
 ### Issue 9.13: Source-File Tracking with Release Disabled
 
 **Description:**  
-SHA-256 and size recorded at upload, a source-file state, hash attestation of the off-VM copy (never revealing the server hash), a dry-run release list, the release API with an operation fence, a reconciler and an audit trail. Deletion stays disabled server-side until the runbook exists and the R2 volume-restore drill of #136 (restoring a volume backup and playing media from it) has passed; the automatic dump check of Issue 9.12 does not count as that drill.
+SHA-256 and size recorded at upload, a source-file state, hash attestation of the off-VM copy (never revealing the server hash), a dry-run release list, the release API with an operation fence, a reconciler and an audit trail. Originals are archived long-term on the owner's PC or NAS, not on the VM. Deletion stays disabled server-side until the runbook exists and the R2 volume-restore drill of #136 has passed: a volume backup taken with writers drained (Issue 9.12, #190) is restored into an isolated stack, where sign-in, playback of a single-audio and a multi-audio package and a track switch succeed. The automatic dump check of Issue 9.12 does not count as that drill.
 
 **Acceptance Criteria:**
 - With deletion disabled every release call is refused
@@ -1932,7 +1930,7 @@ Bounded internal metrics, including the encode real-time factor and image-job du
 **Related Stories:** US-007, US-008
 **Related NFRs:** NFR-003, NFR-007, NFR-008
 
-**Design authority:** ADR-014 (metadata, planned under [#245](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) and ADR-017 (resumable upload, planned). The admin's own description always wins; provider text is used only when the admin has none and never overwrites admin-edited content. This milestone runs after Sprint 9; Sprint 10 can overlap it. GitHub issues are created at its start.
+**Design authority:** ADR-014 (metadata, planned under [#245](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) and ADR-017 (resumable upload, planned). The display title and slug stay the admin's own; the admin's own description always wins, provider text is used only when the admin has none and never overwrites admin-edited content; provider names are stored as aliases with their provenance, indexed only under the search rules of Issue 7.4. This milestone runs after Sprint 9; Sprint 10 can overlap it. GitHub issues are created at its start.
 
 ### Issue MU.1: Metadata Catalog Foundation
 
@@ -2207,7 +2205,7 @@ Keyframe-based thumbnail sprites produced in the post-encode stage and shown on 
 **GitHub:** [#248](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/248)
 
 **Description:**  
-Spikes for styled ASS (JASSUB), PGS (libpgs-js) and Document picture-in-picture: performance, sync after seek and resize, teardown and licence notices. The owner accepted the LGPL and FreeType notice obligations if the spike passes; the repository stays MIT.
+Spikes for styled ASS (JASSUB), PGS (libpgs-js) and Document picture-in-picture: performance, sync after seek and resize, teardown and licences. If the spike passes, the owner accepted the LGPL and FreeType obligations: the notices, the location of the corresponding LGPL source and a documented way to replace or relink the LGPL code; the repository stays MIT.
 
 **Acceptance Criteria:**
 - Per #248; a recommendation per renderer; production rendering gets its own issue only if adopted
@@ -2241,9 +2239,9 @@ Spikes for styled ASS (JASSUB), PGS (libpgs-js) and Document picture-in-picture:
 The measurement owners stay as they are: #124 (encode calibration, gate G1/G2 with a test-only 1080p candidate profile), #233 (mixed load, gate G4/G6 and the image-lane test), #180 (upload: the 2 GB baseline and the 8 GiB resumable row), #137 with #190 (disk layout and storage fit, gate G5), and the owner's visual review of #124 outputs (gate G3). Items created when their gate is near:
 
 - **1080p default for new encodes:** after G1-G6 pass (G1/G2 #124, G3 the owner's visual review, G4/G6 #233, G5 #137 with #190) and 1080p plays in the real browser; needs Issue 9.9; no upscaling, existing 720p assets unchanged
-- **Release of source files enabled:** the admin release button with its dry-run list, and the owner's authorization to turn on the server-side switch, after the runbook exists and the R2 volume-restore drill (#136) has passed; every release still rechecks the archive SHA-256, activation, the verified backup coverage of the current package and the owner's confirmation for the exact object set (Issue 9.13 ships it disabled)
+- **Release of source files enabled:** the admin release button with its dry-run list and a warning whenever only one archive copy exists, and the owner's authorization to turn on the server-side switch, after the runbook exists and the R2 volume-restore drill (#136; single-audio and multi-audio playback with a track switch, on a backup taken with writers drained) has passed; every release still rechecks the archive SHA-256, activation, the verified backup coverage of the current package and the owner's confirmation for the exact object set (Issue 9.13 ships it disabled)
 - **Volume backups, rotation, the free restore drill and the disaster-recovery document** (child of #136)
-- **Upload limit promotion and retirement of the one-shot route:** after #180's test-only 8 GiB row passes; if it fails, the 2048 MiB limit and the one-shot route stay
+- **Upload limit promotion and retirement of the one-shot route:** Issue MU.7 closes at 2048 MiB, #180 runs the separate test-only 8 GiB qualification, and only when both are done does this item raise the deployed limit and retire the one-shot route; if the 8 GiB row fails, the 2048 MiB limit and the one-shot route stay
 - **Image lane switched on:** after #233's lane qualification passes: #232 instrumentation, sustained and overlapping load, restart recovery, at most 5 % encode slowdown and the full playback thresholds; the sequential single-slot path stays the fallback
 - **Remux adoption:** only if Issue 9.14 shows a gain on the target VM
 - HTTPS preparation (#250) and the deployment children of #136
@@ -2256,7 +2254,7 @@ Conditional items with no issue until their trigger:
 | VC-1 sources | the Debian fix for the open FFmpeg CVE, plus the media sandbox |
 | HDR-to-SDR conversion | HDR sources exist |
 | An extra 720p rendition with adaptive switching | #233 shows viewers need it |
-| Styled ASS or PGS rendering in production | Issue 10.11 recommends adoption |
+| Styled ASS or PGS rendering in production | Issue 10.11 recommends adoption; the adopting pull request ships the notices, the LGPL source location and the replace or relink route (ADR-019, #143) |
 | Studio and creator pages | enough titles carry that data |
 | Personal named lists | the owner asks after using the watchlist |
 | A viewer row of trending titles | provider terms allow it and two weeks show at least four playable matches |
