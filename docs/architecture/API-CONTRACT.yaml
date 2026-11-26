@@ -14,6 +14,20 @@ info:
     Sprint 6 playback, HLS, progress and admin asset projection rules follow
     ADR-011 (2026-11-14); the bearer token is accepted only in the
     Authorization header, never in a URL.
+    Planned, not yet implemented (ADR-013, #244): the content model of
+    franchises, titles and episodes. Each implementation slice changes the
+    paths and schemas it serves in its own pull request, so the operations
+    below stay as they are until then. Slice S2 moves /api/v1/movies to
+    /api/v1/titles (catalog writes under /api/v1/admin/titles), playback,
+    progress and upload to /api/v1/episodes/{episodeId}/... and
+    /api/v1/admin/episodes/{episodeId}/video, rating and watchlist to titles,
+    and Continue Watching to one RESUME or NEXT_EPISODE item per title.
+    Slice S3 adds franchises and episode administration. Slice S5 adds asset
+    activation, timelineId and activationGeneration in PlaybackInfo and
+    ProgressRequest, and the admin-only Admin Preview routes
+    /api/v1/admin/video-assets/{videoAssetId}/preview and
+    /hls/admin/video-assets/{videoAssetId}/... . ADR-013 D11 lists every
+    planned path, schema and error code; info.version stays 1.0.0-frozen.
 servers:
   - url: http://localhost
     description: Local Nginx edge
@@ -231,6 +245,8 @@ paths:
         Returns PUBLISHED movies only, for every role including ROLE_ADMIN.
         Admins list other statuses through GET /api/v1/admin/movies.
         Invalid query values return 400 VALIDATION_ERROR.
+        Planned (ADR-013 S2): becomes GET /api/v1/titles with TitleSummary
+        items.
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/Size"
@@ -309,6 +325,10 @@ paths:
         ROLE_ADMIN can read a movie in any status. For every other caller a movie
         that is not PUBLISHED returns the same 404 MOVIE_NOT_FOUND response as a
         missing movie. A movieId that is not a UUID returns 400 VALIDATION_ERROR.
+        Planned (ADR-013 S2): becomes GET /api/v1/titles/{titleId}, published-only
+        for every role; admins read any status through
+        GET /api/v1/admin/titles/{titleId}, and the PUT and DELETE operations
+        move there too.
       responses:
         "200":
           description: Movie detail
@@ -633,6 +653,9 @@ paths:
         Never automatically resubmit. A deliberate re-upload returns 409 while
         in-flight, or creates a newer asset with extra storage cost if the first
         finished. A direct newest-asset view follows in #168; no new endpoint here.
+        Planned (ADR-013 S2): becomes POST /api/v1/admin/episodes/{episodeId}/video
+        with this behaviour, one in-flight asset per episode. From S5 a READY
+        asset is a candidate until an admin activates it.
       requestBody:
         required: true
         content:
@@ -709,6 +732,9 @@ paths:
         failed replacement. With no current asset return 409 VIDEO_NOT_READY.
         resumeSeconds follows ADR-011 D11. A movieId that is not a UUID returns
         400 VALIDATION_ERROR.
+        Planned (ADR-013): S2 moves this to GET /api/v1/episodes/{episodeId}/playback.
+        From S5 the current asset is the one an admin activated, and the
+        response adds timelineId and activationGeneration.
       responses:
         "200":
           description: Playback info
@@ -750,6 +776,10 @@ paths:
         Every not-found case, including a videoAssetId that is not a UUID,
         returns 404 VIDEO_ASSET_NOT_FOUND; the application's own validation never
         answers 400 here. Error responses also carry Cache-Control no-store.
+        Planned (ADR-013): from S2 visibility and the current asset are checked
+        per episode; from S5 only the asset an admin activated is served here.
+        Admins preview other READY assets on the separate admin-only route
+        /hls/admin/video-assets/{videoAssetId}/..., never through this one.
       responses:
         "200":
           description: HLS playlist
@@ -858,6 +888,10 @@ paths:
         (ADR-011 D10). The newest write by server time wins; the response is the
         stored state, which can be a newer concurrent write. An accepted write
         also records watch history.
+        Planned (ADR-013): S2 moves this to /api/v1/episodes/{episodeId}/progress
+        (GET and PUT). From S5 the request also carries activationGeneration;
+        a value that is not the episode's current generation answers 409
+        VIDEO_ASSET_NOT_CURRENT, and a position saved on another cut reads as 0.
       requestBody:
         required: true
         content:
@@ -1049,6 +1083,8 @@ paths:
         apply before ordering by lastPlayedAt descending, then movie id, and the
         limit of the 50 most recent (ADR-011 D11). Each item carries the
         normalized progress. An array, not a page.
+        Planned (ADR-013 S2): one RESUME or NEXT_EPISODE item per title, with
+        title, episode and progress (ADR-013 D8).
       responses:
         "200":
           description: Continue-watching list
@@ -1074,6 +1110,10 @@ paths:
         Ordered by createdAt descending, then id descending. The movieId and
         status filters combine. An invalid filter or page parameter returns 400
         VALIDATION_ERROR.
+        Planned (ADR-013): titleId and episodeId filters replace movieId, items
+        carry episode and title context, and from S5 each item adds active and
+        candidate. S5 also adds GET .../{videoAssetId}/preview and
+        POST .../{videoAssetId}/activation (ADR-013 D7, D9).
       parameters:
         - name: movieId
           in: query

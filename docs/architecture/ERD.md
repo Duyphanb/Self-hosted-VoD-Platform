@@ -377,3 +377,61 @@ The `search_vector` is rebuilt by application code on any metadata change that a
 - Worker deletes failed/lost-finish/startup-orphan attempt prefixes best effort after the applicable state transaction; temp cleanup runs per job and before listener startup.
 - Retain current raw/HLS, newest FAILED raw, all in-flight objects and media on archive. Superseded terminal media is manually purged with DB rows retained as history; keys in those rows may dangle.
 - Delete only exact owned raw keys or DB-derived validated attempt prefixes ending in `/`, never bucket roots/current/non-terminal assets. [ADR-010](adr/ADR-010.md#hls-objects-and-cleanup-d22-d23) is the frozen rule; the [deployment runbook](../deployment/README.md#media-purge-and-orphan-audit) defines candidate review, dry-run and orphan audit.
+
+## Planned (ADR-013): content model
+
+Planned schema of [ADR-013](adr/ADR-013.md) (#244). Nothing in this section exists yet: the tables above describe the current schema, and the committed snapshot changes only with the migration of each slice. Each slice adds one Flyway migration after V6 and regenerates the snapshot in the same pull request.
+
+```mermaid
+erDiagram
+    franchises o|--o{ titles : groups
+    titles ||--o{ title_genres : categorized
+    titles ||--o{ title_credits : credited
+    titles ||--o{ episodes : contains
+    episodes ||--o{ video_assets : has
+    episodes |o--o| video_assets : activates
+    video_assets ||--o{ encoding_jobs : processed_by
+    episodes ||--o{ playback_progress : tracked_for
+    episodes ||--o{ watch_history : watched_as
+    titles ||--o{ watchlist_items : saved_as
+    titles ||--o{ ratings : rated_as
+```
+
+**S1, rename only.** `movies` becomes `titles`, `movie_genres` becomes `title_genres` and `movie_credits` becomes `title_credits`. The `movie_id` columns of those tables, `ratings` and `watchlist_items` become `title_id`, and their constraints and indexes follow (`ux_movies_slug` to `ux_titles_slug`, `ix_movies_*` to `ix_titles_*`, `ux_ratings_user_movie` to `ux_ratings_user_title`, `ux_watchlist_items_user_movie` to `ux_watchlist_items_user_title`, `ix_ratings_movie_id` to `ix_ratings_title_id`, `ix_movie_credits_*` to `ix_title_credits_*`). `video_assets`, `playback_progress` and `watch_history` keep `movie_id` until S2. No data changes.
+
+**S2, episodes.**
+
+- `titles` gains `content_type varchar(20) NOT NULL` with a check on `MOVIE`, `TV_SEASON`, `OVA`, `ONA` and `SPECIAL` (backfilled `MOVIE`, no default afterwards) and `part_label varchar(100)` null.
+- New `episodes`:
+
+  | Column | Type | Constraints | Notes |
+  |---|---|---|---|
+  | `id` | uuid | PK | New random UUID, also for the backfilled episode of every existing title |
+  | `title_id` | uuid | FK -> `titles.id` restrict delete, not null | Never changes after creation |
+  | `ordinal` | int | not null, check `ordinal > 0` | Order inside the title |
+  | `display_label` | varchar(50) | null | Shown label, for example `12`, `12.5`, `SP1` |
+  | `name` | varchar(255) | null | Episode name |
+  | `synopsis` | text | null | Episode synopsis |
+  | `status` | varchar(20) | not null, check | `DRAFT`, `PUBLISHED`, `ARCHIVED`; always `PUBLISHED` for the episode of a `MOVIE` title |
+  | `created_at`, `updated_at` | timestamptz | not null | Timestamps |
+
+  Constraint `ux_episodes_title_ordinal UNIQUE (title_id, ordinal) DEFERRABLE INITIALLY IMMEDIATE`. The backfill creates one `PUBLISHED` episode at ordinal 1 per title.
+- `video_assets` gains `episode_id uuid NOT NULL` (FK -> `episodes.id` restrict delete, backfilled through each title's episode) and drops `movie_id` with `ix_video_assets_movie_id` and `ux_video_assets_movie_in_flight`. New indexes: unique partial `ux_video_assets_episode_in_flight` on `episode_id` where `status IN ('UPLOADED', 'QUEUED', 'PROCESSING')` (409 `VIDEO_UPLOAD_IN_PROGRESS` matches this name), and `ix_video_assets_episode_ready` on (`episode_id`, `created_at` DESC, `id` DESC) where `status = 'READY'`. The raw key of new uploads is `{titleId}/{videoAssetId}.{ext}`, the same shape as today's keys.
+- `playback_progress` gains `episode_id` (FK -> `episodes.id` restrict delete, backfilled), its primary key becomes (`user_id`, `episode_id`), `movie_id` is dropped, and `ix_playback_progress_user_last_played` covers (`user_id`, `last_played_at` DESC, `episode_id` DESC).
+- `watch_history` gains `episode_id` (FK -> `episodes.id` restrict delete, backfilled), `ux_watch_history_user_episode` on (`user_id`, `episode_id`) replaces `ux_watch_history_user_movie`, `movie_id` is dropped, and row IDs are kept.
+- User foreign keys keep `ON DELETE CASCADE`.
+
+**S3, franchises.**
+
+- New `franchises`: `id` uuid PK, `name` varchar(255) not null, `slug` varchar(255) unique not null (ADR-009 slug rule), `description` text null, `poster_object_key` varchar(512) null, `status` (`DRAFT`, `PUBLISHED`, `ARCHIVED`), `created_at`, `updated_at`.
+- `titles` gains `franchise_id uuid` (FK -> `franchises.id` restrict delete) and `franchise_order int` (check `> 0`), both null or both set, with `ux_titles_franchise_order UNIQUE (franchise_id, franchise_order) DEFERRABLE INITIALLY IMMEDIATE`.
+
+**S5, activation.**
+
+- `episodes` gains `active_video_asset_id uuid` null and `activation_generation bigint NOT NULL DEFAULT 0`, with the foreign key (`id`, `active_video_asset_id`) -> `video_assets` (`episode_id`, `id`), which needs the new unique constraint `ux_video_assets_episode_id_id` on `video_assets` (`episode_id`, `id`).
+- `video_assets` gains `timeline_id uuid` null: null until the asset's first activation, then fixed. Every READY asset gets its own timeline at migration.
+- `playback_progress` gains `timeline_id uuid NOT NULL`, backfilled with the timeline of the episode's seeded active asset.
+- Seeding: each episode's current asset (the READY asset with greatest `created_at`, `id`) becomes active with generation 1; a preflight stops when a progress row's episode has no READY asset.
+- The worker role keeps its grants on `encoding_jobs` and `video_assets` and writes none of these columns.
+
+**Later, owned by other decisions.** `titles.description` becomes nullable with the metadata foundation of ADR-014 (planned); `title_relations` waits for a consumer; search, metadata, subtitle, marker and image tables belong to their own ADRs and reference these tables.

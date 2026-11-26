@@ -33,6 +33,7 @@ Choose the contract sections relevant to the task; this list is not a required r
 | [ADR-010](adr/ADR-010.md) | Upload transport, video asset lifecycle, encoding handoff and cleanup |
 | [ADR-011](adr/ADR-011.md) | Authenticated HLS playback, player behaviour and playback progress |
 | [ADR-012](adr/ADR-012.md) | Browser session: HttpOnly refresh cookie, in-memory access token, sessions and bounded revocation |
+| [ADR-013](adr/ADR-013.md) | Content model: franchises, titles, episodes and asset activation (planned slices S1-S5) |
 
 ## Purpose
 
