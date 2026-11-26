@@ -920,6 +920,8 @@ Verified against `main` at `f83f576` on 2026-11-13, plus the job lifecycle logs 
 
 ### Issue 6.1: Backend Playback API
 
+**GitHub:** [#219](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/219), delivered by [PR #226](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/226)
+
 **Description:**  
 Implement `GET /api/v1/movies/{movieId}/playback` per API-CONTRACT: authenticate, apply visibility 404 first, then select current READY asset by greatest `(created_at,id)` and return manifest, duration and current user's per-movie resume position.
 
@@ -939,6 +941,8 @@ Implement `GET /api/v1/movies/{movieId}/playback` per API-CONTRACT: authenticate
 ---
 
 ### Issue 6.2: Backend HLS Proxy Endpoint
+
+**GitHub:** [#220](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/220), delivered by [PR #227](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/227)
 
 **Description:**  
 Implement authenticated HLS proxy endpoints per API-CONTRACT.yaml (Stream tag): `GET /hls/video-assets/{videoAssetId}/master.m3u8` (playlist) and `GET /hls/video-assets/{videoAssetId}/segments/{segmentName}` (segments). Validate JWT, check video access, read HLS objects from MinIO, stream to client. Nginx forwards `/hls/*` to backend. Response rules follow ADR-011 D3-D4.
@@ -962,6 +966,8 @@ Implement authenticated HLS proxy endpoints per API-CONTRACT.yaml (Stream tag): 
 ---
 
 ### Issue 6.3: Backend Progress Save and Read API
+
+**GitHub:** [#221](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/221), delivered by [PR #229](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/229)
 
 **Description:**  
 Implement the progress endpoints per API-CONTRACT.yaml (Progress tag): `PUT /api/v1/movies/{movieId}/progress` saves the current playback position and `GET /api/v1/movies/{movieId}/progress` returns it. Each accepted update is committed to PostgreSQL before the response; there is no Redis buffer (ADR-011 D9-D12). Require authentication.
@@ -991,6 +997,8 @@ Withdrawn by ADR-011 D9 (owner decision, 2026-11-14): progress is written direct
 
 ### Issue 6.5: Backend Continue Watching API
 
+**GitHub:** [#222](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/222), delivered by [PR #235](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/235)
+
 **Description:**  
 Implement continue watching endpoint per API-CONTRACT.yaml (History + Progress tags): `GET /api/v1/me/continue-watching` returns movies user started but hasn't finished, ordered by last_played_at descending. Require authentication.
 
@@ -1009,6 +1017,8 @@ Implement continue watching endpoint per API-CONTRACT.yaml (History + Progress t
 ---
 
 ### Issue 6.6: Frontend Video Player Component
+
+**GitHub:** [#223](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/223), delivered by [PR #241](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/241), with the manual rows on [PR #242](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/242)
 
 **Description:**  
 Create the video player component with hls.js (ADR-011 D1-D8, D13). The player accepts the HLS manifest URL and resume position, authenticates every HLS request, sends progress updates, and handles loading, buffering and error states.
@@ -1031,6 +1041,8 @@ Create the video player component with hls.js (ADR-011 D1-D8, D13). The player a
 
 ### Issue 6.7: Frontend Watch Page
 
+**GitHub:** [#224](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/224), delivered by [PR #242](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/242)
+
 **Description:**  
 Create watch page that fetches playback info and displays video player. Show movie title, description, and player. Handle not-ready video status.
 
@@ -1051,6 +1063,8 @@ Create watch page that fetches playback info and displays video player. Show mov
 
 ### Issue 6.8: Frontend Continue Watching Page
 
+**GitHub:** [#225](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/225), delivered by [PR #243](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/243)
+
 **Description:**  
 Create continue watching page that displays movies user started but hasn't finished. Link to watch page for each movie.
 
@@ -1066,6 +1080,8 @@ Create continue watching page that displays movies user started but hasn't finis
 ---
 
 ### Issue 6.9: Browser Session Cookie and In-Memory Access Token
+
+**GitHub:** [#230](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/230), delivered by [PR #237](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/237) and [PR #240](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/240)
 
 **Description:**
 Implement ADR-012 D1-D3, D7 and the 6.9 part of D9: move the refresh token from JSON bodies and `localStorage` into the HttpOnly `vod_refresh` cookie scoped to `/api/v1/auth`, keep the access token in memory only, protect the auth endpoints with `SameSite=Strict`, an exact `Origin` check and `Sec-Fetch-Site`, and move the SPA's refresh-failure classification here from Issue 6.6. Backend, frontend, API contract, smoke scripts and Postman collections change in one pull request, because the auth contract change is breaking. Must land before Issue 6.6.
@@ -1091,6 +1107,8 @@ Implement ADR-012 D1-D3, D7 and the 6.9 part of D9: move the refresh token from 
 
 ### Issue 6.10: Server-Side Sessions and Bounded Revocation
 
+**GitHub:** [#231](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/231), delivered by [PR #251](https://github.com/Duyphanb/Self-hosted-VoD-Platform/pull/251)
+
 **Description:**
 Implement ADR-012 D4-D6, D8 and the 6.10 part of D9: an `auth_sessions` table with an absolute lifetime, refresh tokens bound to a session, replay revoking the whole session, `users.auth_epoch`, access tokens with `sid` and `ver`, a 5-second JWT clock skew, a per-request session check with a 30-second cache aged from load start, direct database checks for refresh and admin operations, 503 `AUTH_STATE_UNAVAILABLE` when the state cannot be read, a 10-session cap per user and daily pruning. May land after Issue 6.6; must land before public deployment and before the final #125 run.
 
@@ -1112,20 +1130,22 @@ Implement ADR-012 D4-D6, D8 and the 6.10 part of D9: an `auth_sessions` table wi
 
 ### Sprint 6 Definition of Done
 
-- [ ] Authenticated users can fetch playback info for ready videos
-- [ ] Backend HLS proxy streams playlists and segments with JWT validation
-- [ ] Frontend video player plays HLS content in browser
-- [ ] Player starts at resume position if available
-- [ ] Player sends progress updates every 5-10 seconds
-- [ ] Backend commits each accepted progress update to PostgreSQL before responding (ADR-011 D9)
-- [ ] Continue watching API returns user's unfinished movies
-- [ ] Frontend watch page displays player and handles not-ready videos
-- [ ] Frontend continue watching page shows resumable movies
-- [ ] Unit and integration tests cover playback and progress APIs
-- [ ] End-to-end manual test: watch video, close, resume from same position
-- [ ] Postman collection includes playback and progress endpoints
-- [ ] Player handles loading, buffering, and error states
-- [ ] The refresh token lives only in the HttpOnly cookie and the access token only in memory; logout, account disabling and role changes take effect within 30 seconds (ADR-012)
+- [x] Authenticated users can fetch playback info for ready videos
+- [x] Backend HLS proxy streams playlists and segments with JWT validation
+- [x] Frontend video player plays HLS content in browser
+- [x] Player starts at resume position if available
+- [x] Player sends progress updates every 5-10 seconds
+- [x] Backend commits each accepted progress update to PostgreSQL before responding (ADR-011 D9)
+- [x] Continue watching API returns user's unfinished movies
+- [x] Frontend watch page displays player and handles not-ready videos
+- [x] Frontend continue watching page shows resumable movies
+- [x] Unit and integration tests cover playback and progress APIs
+- [x] End-to-end manual test: watch video, close, resume from same position
+- [ ] Postman collection includes playback and progress endpoints (not met at the closeout; tracked in [#254](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/254))
+- [x] Player handles loading, buffering, and error states
+- [x] The refresh token lives only in the HttpOnly cookie and the access token only in memory; logout, account disabling and role changes take effect within 30 seconds (ADR-012)
+
+Verified against `main` at `5c2c863` on 2026-11-26, except the manual close-and-resume item, whose hand-run rows ran on branch stacks (the Chrome smoke automates that path on `main`); see the [Sprint 6 closeout evidence](../testing/SPRINT-6-CLOSEOUT.md) for the mapping of each item to its issue, tests, CI run, the Chrome playback smoke and the manual browser rows, and for the limits. Thirteen items are met. The Postman item is not: no Newman collection covers playback, progress or continue watching yet (#254), in the meantime the CI stack smoke calls playback and HLS through Nginx, the Chrome smoke saves progress and resumes after a reload, and the PostgreSQL integration tests cover progress and Continue Watching. The manual browser rows predate the #251 session model and the Firefox row was scripted, not run by hand (accepted by the owner as a deviation from ADR-011 D5), the Chrome smoke is not yet a pull-request check (#255), and A1/VPS playback evidence remains with #124, #180 and #233.
 
 ---
 
@@ -1710,8 +1730,8 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 - **R-007 (Queue failures):** 4.5 commits job-row outbox before publish and relays pending publication; 5.3/5.7 conditionally claim/finish and recover startup orphans with deadlines; Sprint 9 retries only newest FAILED. Never time out QUEUED by age.
 - **R-008 (Auth/RBAC):** Sprint 2 completed before catalog and upload features; authorization tests required.
 - **R-012 (Tests lag):** Definition of Done includes tests for every sprint; traceability matrix tracks coverage.
-- **R-014 (HLS delivery and player authentication):** ADR-011 pins the proxy headers, the hls.js-only player and token refresh during playback; Sprint 6 verifies them with proxy tests, player unit tests and manual rows per verified browser.
-- **R-015 (Progress durability):** ADR-011 writes each accepted progress update directly to PostgreSQL with a forward-only upsert; PostgreSQL integration tests cover reload, concurrency and completion.
+- **R-014 (HLS delivery and player authentication):** ADR-011 pins the proxy headers, the hls.js-only player and token refresh during playback; Sprint 6 verified them with proxy tests, player unit tests, hand-run rows for Chrome or Edge, a scripted Firefox row (accepted by the owner in place of the hand-run row of ADR-011 D5) and the #125 Chrome smoke (see the Sprint 6 closeout).
+- **R-015 (Progress durability):** ADR-011 writes each accepted progress update directly to PostgreSQL with a forward-only upsert; PostgreSQL integration tests cover a read right after a save, concurrency and completion; the Chrome playback smoke (#125) covers a player reload that resumes near the last save.
 
 ---
 
@@ -1781,6 +1801,7 @@ After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening
 | 2026-11-19 | 1.5 | Browser session design (ADR-012, #72): Issues 6.9 and 6.10 added to Sprint 6, Issue 6.6 depends on Issue 6.9, a Sprint 6 DoD line for the session model |
 | 2026-11-22 | 1.6 | Issue 6.6 follows the ADR-011 addendum of 2026-11-22: the D2 budget per hls.js load and terminal HLS load errors in hls.js 1.7.4 (#223) |
 | 2026-10-26 | 1.2 | Contract-first API documentation (Issue #120, owner decision 2026-10-18): the Global Definition of Done requires `API-CONTRACT.yaml` updated or confirmed with responses validated in tests instead of OpenAPI annotations, and Issue 10.2 serves the frozen contract in Swagger UI instead of generating a code-first document |
+| 2026-11-26 | 1.7 | Sprint 6 closeout (#256): `**GitHub:**` lines under Issues 6.1-6.3 and 6.5-6.10, and the Sprint 6 DoD ticked except the Postman item (#254), with a verified note
 
 ---
 
