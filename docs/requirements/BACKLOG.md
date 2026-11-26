@@ -1730,7 +1730,7 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 - **R-007 (Queue failures):** 4.5 commits job-row outbox before publish and relays pending publication; 5.3/5.7 conditionally claim/finish and recover startup orphans with deadlines; Sprint 9 retries only newest FAILED. Never time out QUEUED by age.
 - **R-008 (Auth/RBAC):** Sprint 2 completed before catalog and upload features; authorization tests required.
 - **R-012 (Tests lag):** Definition of Done includes tests for every sprint; traceability matrix tracks coverage.
-- **R-014 (HLS delivery and player authentication):** ADR-011 pins the proxy headers, the hls.js-only player and token refresh during playback; Sprint 6 verifies them with proxy tests, player unit tests and manual rows per verified browser.
+- **R-014 (HLS delivery and player authentication):** ADR-011 pins the proxy headers, the hls.js-only player and token refresh during playback; Sprint 6 verified them with proxy tests, player unit tests, hand-run rows for Chrome or Edge, a scripted Firefox row and the #125 Chrome smoke; a hand-run Firefox row (ADR-011 D5) is still open (see the Sprint 6 closeout).
 - **R-015 (Progress durability):** ADR-011 writes each accepted progress update directly to PostgreSQL with a forward-only upsert; PostgreSQL integration tests cover a read right after a save, concurrency and completion; the Chrome playback smoke (#125) covers a player reload that resumes near the last save.
 
 ---
