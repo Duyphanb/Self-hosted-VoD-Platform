@@ -269,8 +269,10 @@ Set `VOD_CHROME_TEST_CPU_RATE=4` to slow Chrome scheduling.
 Setup uses a 32 MiB upload limit and a 360-second READY deadline.
 
 **Chrome playback smoke** runs on pull requests and pushes to `main`, and can also run manually via
-`workflow_dispatch`. The check is optional while [#255](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/255)
-tracks duration and results for at least five consecutive runs ahead of the owner's required-check decision.
+`workflow_dispatch`. Its job, `chrome-playback`, is a required check on `main`: the owner decided this on
+[#255](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/255) after five consecutive passing
+pull-request runs (median job time about six minutes). A run that fails at the late-response gate because
+runner scheduling slipped (see below) may be re-run; link the failed run on the pull request.
 The workflow installs Google Chrome and requires no application credentials. Its output is limited to
 named checkpoints and allowlisted browser observations. The CI Newman wrapper prints static collection
 item and assertion names on failure and removes its temporary report before returning.
