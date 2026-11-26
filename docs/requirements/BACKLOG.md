@@ -1145,7 +1145,7 @@ Implement ADR-012 D4-D6, D8 and the 6.10 part of D9: an `auth_sessions` table wi
 - [x] Player handles loading, buffering, and error states
 - [x] The refresh token lives only in the HttpOnly cookie and the access token only in memory; logout, account disabling and role changes take effect within 30 seconds (ADR-012)
 
-Verified against `main` at `5c2c863` on 2026-11-26; see the [Sprint 6 closeout evidence](../testing/SPRINT-6-CLOSEOUT.md) for the mapping of each item to its issue, tests, CI run, the Chrome playback smoke and the manual browser rows, and for the limits. Thirteen items are met. The Postman item is not: no Newman collection covers playback, progress or continue watching yet (#254), in the meantime the CI stack smoke calls playback and HLS through Nginx, the Chrome smoke saves progress and resumes after a reload, and the PostgreSQL integration tests cover progress and Continue Watching. The manual browser rows predate the #251 session model and the Firefox row was scripted, not run by hand (ADR-011 D5), the Chrome smoke is not yet a pull-request check (#255), and A1/VPS playback evidence remains with #124, #180 and #233.
+Verified against `main` at `5c2c863` on 2026-11-26, except the manual close-and-resume item, whose hand-run rows ran on branch stacks (the Chrome smoke automates that path on `main`); see the [Sprint 6 closeout evidence](../testing/SPRINT-6-CLOSEOUT.md) for the mapping of each item to its issue, tests, CI run, the Chrome playback smoke and the manual browser rows, and for the limits. Thirteen items are met. The Postman item is not: no Newman collection covers playback, progress or continue watching yet (#254), in the meantime the CI stack smoke calls playback and HLS through Nginx, the Chrome smoke saves progress and resumes after a reload, and the PostgreSQL integration tests cover progress and Continue Watching. The manual browser rows predate the #251 session model and the Firefox row was scripted, not run by hand (ADR-011 D5), the Chrome smoke is not yet a pull-request check (#255), and A1/VPS playback evidence remains with #124, #180 and #233.
 
 ---
 
@@ -1731,7 +1731,7 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 - **R-008 (Auth/RBAC):** Sprint 2 completed before catalog and upload features; authorization tests required.
 - **R-012 (Tests lag):** Definition of Done includes tests for every sprint; traceability matrix tracks coverage.
 - **R-014 (HLS delivery and player authentication):** ADR-011 pins the proxy headers, the hls.js-only player and token refresh during playback; Sprint 6 verifies them with proxy tests, player unit tests and manual rows per verified browser.
-- **R-015 (Progress durability):** ADR-011 writes each accepted progress update directly to PostgreSQL with a forward-only upsert; PostgreSQL integration tests cover reload, concurrency and completion.
+- **R-015 (Progress durability):** ADR-011 writes each accepted progress update directly to PostgreSQL with a forward-only upsert; PostgreSQL integration tests cover a read right after a save, concurrency and completion; the Chrome playback smoke (#125) covers a player reload that resumes near the last save.
 
 ---
 
