@@ -23,8 +23,8 @@ info:
     /api/v1/admin/episodes/{episodeId}/video, rating and watchlist to titles,
     and Continue Watching to one RESUME or NEXT_EPISODE item per title.
     Slice S3 adds franchises and episode administration. Slice S5 adds asset
-    activation, timelineId and activationGeneration in PlaybackInfo and
-    ProgressRequest, and the admin-only Admin Preview routes
+    activation, timelineId and activationGeneration in PlaybackInfo,
+    activationGeneration in ProgressRequest, and the admin-only Admin Preview routes
     /api/v1/admin/video-assets/{videoAssetId}/preview and
     /hls/admin/video-assets/{videoAssetId}/... . ADR-013 D11 lists every
     planned path, schema and error code; info.version stays 1.0.0-frozen.
