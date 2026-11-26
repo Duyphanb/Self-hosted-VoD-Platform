@@ -134,14 +134,14 @@ Acceptance criteria:
 
 ### US-012 - Search Catalog
 
-As a user, I want to search movies so that I can quickly find relevant content.
+As a user, I want to search films and series so that I can quickly find relevant content.
 
 Acceptance criteria:
 
-- Search supports title, description, genre, actor, and director.
-- PostgreSQL full-text search is used for MVP.
-- Search suggestions are available for the frontend.
-- Search uses real persisted movie metadata.
+- Search supports title names and aliases, description, genre, actor, and director, with one result per title.
+- PostgreSQL full-text search is used, accent-insensitive for Vietnamese (including đ/Đ), with Japanese text and romaji aliases (ADR-015, planned).
+- Typed search suggestions, at most five, are available for the frontend.
+- Search uses real persisted title metadata and never reveals unpublished titles or the names linked only to them.
 - Empty query and no-results behavior are defined.
 
 ### US-013 - Manage Watchlist

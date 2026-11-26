@@ -17,23 +17,27 @@ This document provides the detailed sprint backlog for implementing the self-hos
 ## Sprint Dependency Flow
 
 ```text
-Sprint 1 (Foundation) 
+Sprint 1 (Foundation)
   ↓
-Sprint 2 (Auth) 
+Sprint 2 (Auth)
   ↓
-Sprint 3 (Catalog) 
+Sprint 3 (Catalog)
   ↓
-Sprint 4 (Upload) 
+Sprint 4 (Upload)
   ↓
-Sprint 5 (Worker) 
+Sprint 5 (Worker)
   ↓
-Sprint 6 (Streaming) 
+Sprint 6 (Streaming)
   ↓
-Sprint 7 (Search) + Sprint 8 (Library) [parallel]
+Sprint 7 (Content Model and Search)
   ↓
-Sprint 9 (Admin Ops) 
+Sprint 8 (Library, Player Core and Viewer UI)
   ↓
-Sprint 10 (Polish)
+Sprint 9 (Admin Operations and Media)
+  ↓
+Metadata and Upload + Sprint 10 (Polish) [may overlap]
+  ↓
+Pre-production gate (target-VM evidence and switches; local work never waits for it)
 ```
 
 ## Sprint 1 - Foundation
@@ -1149,141 +1153,154 @@ Verified against `main` at `5c2c863` on 2026-11-26, except the manual close-and-
 
 ---
 
-## Sprint 7 - Search
+## Sprint 7 - Content Model and Search
 
-**Goal:** Implement PostgreSQL full-text search over movie metadata, search API, and search UI.
+**Goal:** Move the catalogue to the approved content model (optional franchise → title → episode → video asset; a feature film is a title with one episode), build search on titles, and start the UI overhaul with the design system and admin pages.
 
-**Related Stories:** US-012  
-**Related NFRs:** NFR-010, NFR-016
+**Related Stories:** US-005, US-006, US-007, US-012
+**Related NFRs:** NFR-010, NFR-013, NFR-016
 
-### Issue 7.1: Backend Search Service - Full-Text Search
+**Design authority:** ADR-013 (content model, planned under [#244](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/244)) and ADR-015 (search and discovery, planned under [#128](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/128)), both written for the owner's decisions of 2026-11-25/26 ([#258](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/258)). Until they merge, the frozen ADRs and API contract govern; the issues below summarize the plan and the ADRs govern when they differ.
+
+Also in this sprint, outside the numbered items: the decision record [#258](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/258), the UI brief and UI overhaul phase 1 ([#200](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/200)), the frontend dev proxy ([#121](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/121)), the code health audit ([#239](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/239)), the Sprint 6 Newman collection ([#254](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/254)) and the Chrome playback smoke on pull requests ([#255](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/255)).
+
+### Issue 7.1: Rename Movies to Titles Without Behaviour Change
+
+**GitHub:** [#259](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/259)
 
 **Description:**  
-Implement search service that uses PostgreSQL FTS on `movies.search_vector`. Search matches title, description, genre, actor, director. Support pagination.
+A new Flyway migration renames the movie catalogue tables and their `movie_id` columns to titles, with no route, request or response change, so every later slice works on the final names.
 
 **Acceptance Criteria:**
-- Search uses `search_vector` GIN index
-- Query matches title, description, genre names, actor names, director names
-- Returns paginated results
-- Results ranked by relevance (ts_rank)
-- Empty query returns validation error or recent movies
-- Unit tests cover query construction
+- `movies`, `movie_genres`, `movie_credits` and the `movie_id` columns of those tables, `ratings` and `watchlist_items` become `titles`, `title_genres`, `title_credits` and `title_id`, with their constraint and index names; no committed migration is edited
+- `video_assets`, `playback_progress` and `watch_history` keep their columns for Issue 7.2
+- Entities, native SQL, constraint constants, fixtures, the schema snapshot and the purge SQL use the new names; backend, Vitest, Newman and the worker stack smoke pass unchanged
+- A populated V6 database upgrades cleanly, including runtime-role grants; the slug and in-flight upload 409s still map on PostgreSQL
 
-**Dependencies:** Sprint 6 complete
+**Dependencies:** ADR-013 merged (#244)
 
 ---
 
-### Issue 7.2: Backend Search Vector Update Logic
+### Issue 7.2: Episode Cutover in One Deployable Step
+
+**GitHub:** [#260](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/260)
 
 **Description:**  
-Implement logic to rebuild `search_vector` when movie metadata, genres, or credits change. Use application code to update vector (defer triggers to avoid hidden logic).
+Introduce episodes and re-key media, progress and history from the movie to the episode. Backend, Nginx and SPA routes change in one deployable step, or behind a tested bridge that keeps both route families working until the SPA switch lands.
 
 **Acceptance Criteria:**
-- Movie create/update triggers search vector rebuild
-- Genre assignment triggers search vector rebuild
-- Credit assignment triggers search vector rebuild
-- Genre or person rename rebuilds the vectors of the movies that reference it
-- Existing movies with a null search vector are backfilled
-- Search vector includes normalized text from title, description, genres, people
-- Unit tests cover vector update logic
+- One migration transaction adds `episodes` (one backfilled PUBLISHED episode per title), `titles.content_type` and `part_label`, and re-keys `video_assets`, `playback_progress` and `watch_history`; the in-flight index is per episode
+- Episode playback, progress and upload endpoints; the Nginx upload location, multipart filter and `ADMIN_ENDPOINTS` cover the episode upload route
+- SPA: `/watch/:episodeId`, the title route, a redirect from `/movies/:id/watch`, Continue Watching with one card per title (resume, or the next episode after a finished one)
+- Populated upgrade smoke with an `EXCEPT` bijection on every carried column; a job queued before the migration finishes; PostgreSQL race tests for concurrent uploads; the real-Chrome smoke passes on the new routes
+- Rollback boundary documented: restore the pre-migration dump before any new write, roll forward after that
 
 **Dependencies:** Issue 7.1
 
 ---
 
-### Issue 7.3: Backend Search API
+### Issue 7.3: Franchises and Series Administration
+
+**GitHub:** [#262](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/262)
 
 **Description:**  
-Implement search endpoint per API-CONTRACT.yaml (Search tag): `GET /api/v1/search?q={query}`. Require authentication. Return paginated search results with movie metadata.
+The admin groups titles into an optional franchise and manages episodes. A DRAFT or ARCHIVED franchise hides only its own page, strip, references and search name; its PUBLISHED titles stay watchable.
 
 **Acceptance Criteria:**
-- Endpoint path is `/api/v1/search` (not `/api/v1/movies/search`) per API-CONTRACT
-- Endpoint requires valid JWT
-- Accepts required query string parameter `q` (minLength: 1)
-- Returns paginated results per SearchResponse schema
-- Uses the catalog visibility check (ADR-009): results contain only PUBLISHED movies for every role, with 200 and an empty result when nothing matches; integration tests cover DRAFT and ARCHIVED movies for ROLE_USER and ROLE_ADMIN
-- Empty query returns validation error per schema requirement
-- No-results returns empty list with 200 OK
-- Integration tests cover search scenarios
+- `franchises` table and admin CRUD; `titles.franchise_id`/`franchise_order`; episode CRUD, ordering and per-episode publish; admin UI for parts and episodes
+- Visibility tests at three levels; counts exclude hidden items before paging; concurrent reorder tests; fixed statement count per page
+- Publishing a second episode of one title returns 409 until Issue 8.12 ships the episode grid and the next-episode card
 
-**Dependencies:** Issue 7.1
+**Dependencies:** Issue 7.2, Issue 7.4
 
 ---
 
-### Issue 7.4: Backend Search Suggestions API
+### Issue 7.4: Search Foundation: Normalizer, Search Tables, Indexer and Aliases
+
+**GitHub:** [#261](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/261)
 
 **Description:**  
-Implement search suggestions endpoint per API-CONTRACT.yaml (Search tag): `GET /api/v1/search/suggestions?q={query}` returns quick suggestions (e.g., top 5 movie titles matching query). Require authentication.
+A versioned Java text normalizer (exact and accent-folded keys, Vietnamese đ/Đ included, Japanese kana kept) replaces the `unaccent` extension, which the Compose Flyway role cannot create. Search-owned name and document tables stay in step with every catalog write; the admin manages aliases. Provider-imported text is not indexed.
 
 **Acceptance Criteria:**
-- Endpoint path is `/api/v1/search/suggestions` (not `/api/v1/movies/search/suggestions`) per API-CONTRACT
-- Endpoint requires valid JWT
-- Accepts required query string parameter `q` (minLength: 1)
-- Returns suggestions per SearchSuggestionResponse schema (array of strings)
-- Uses the catalog visibility check (ADR-009): results contain only PUBLISHED movies for every role, with 200 and an empty result when nothing matches; integration tests cover DRAFT and ARCHIVED movies for ROLE_USER and ROLE_ADMIN
-- Fast query (limit results for performance)
-- Unit tests cover suggestion logic
+- Migration: `title_aliases`, `title_search_names`, `title_search_documents`; the never-written `search_vector` and its index dropped; no extension required
+- Every catalog write path rebuilds the affected rows in its transaction; one advisory lock per write attempt; a startup reconciler fills missing or old-version rows
+- `GET`/`PUT /api/v1/admin/titles/{titleId}/aliases` (at most 20 aliases)
+- Normalizer unit tests (diacritics, đ/Đ, Turkish I, NFD vs precomposed, half-width kana, ガ vs カ, sequel markers); PostgreSQL race tests end equal to a full rebuild
 
-**Dependencies:** Issue 7.1
+**Dependencies:** ADR-015 merged (#128), Issue 7.1
 
 ---
 
-### Issue 7.5: Frontend Search UI
+### Issue 7.5: Backend Search API
+
+**GitHub:** [#263](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/263)
 
 **Description:**  
-Create search page with search input, search button, and results list. Display movie cards with search results. Handle loading, empty, error states.
+Implement `GET /api/v1/search` on titles per ADR-015: ranked tiers, one card per PUBLISHED title (a title with nothing playable yet stays, labelled like the catalog list), a deterministic total order and stable paging. Filters use only the admin's own data until the metadata ADR allows imported values.
 
 **Acceptance Criteria:**
-- Search input with submit button or auto-search on input change
-- Fetches search results from API
-- Displays movie cards with search results
-- Loading spinner during search
-- Empty state message when no results
-- Error message on search failure
-- Results link to movie detail page
+- `q` trimmed, at most 100 code points, 400 when blank or too long; `genre`, `year` and `type` filters; visibility applied through joins before rank and count
+- Relevance fixture created through the admin API: Vietnamese with and without diacritics, Japanese exact and partial, romaji aliases, several parts of one franchise, special characters; a typo set decides whether a `pg_trgm` fallback ships, and then only when nothing matches exactly
+- Hidden titles and franchise names never appear in items, counts or `matchedName`; tied scores keep the total order across pages
+- `EXPLAIN (ANALYZE, BUFFERS)` recorded on the fixture; query strings absent from the Nginx logs
 
-**Dependencies:** Issue 7.3
+**Dependencies:** Issue 7.4, Issue 7.2
 
 ---
 
-### Issue 7.6: Frontend Search Suggestions Component
+### Issue 7.6: Search Suggestions and Search Page
+
+**GitHub:** [#264](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/264)
 
 **Description:**  
-Add search suggestions dropdown that appears as user types. Fetch suggestions from API. Click suggestion to navigate to movie detail or perform search.
+Typed suggestions (`GET /api/v1/search/suggestions`) and the search page with a suggestion combobox, in the new design system and Vietnamese strings.
 
 **Acceptance Criteria:**
-- Suggestions dropdown appears below search input
-- Fetches suggestions as user types (debounced)
-- Displays top suggestions
-- Click suggestion navigates to movie detail or fills search input
-- Dropdown closes on selection or blur
-- Loading and error states handled
+- At most 5 typed suggestions, derived only from PUBLISHED titles; a person or genre linked only to a DRAFT title is never suggested
+- No request while an IME composes; 250-350 ms debounce; stale responses dropped
+- Combobox keyboard support with `aria-activedescendant`; loading, empty, error and approximate-results states
 
-**Dependencies:** Issue 7.4, Issue 7.5
+**Dependencies:** Issue 7.5, UI overhaul phase 1 (#200)
+
+---
+
+### Issue 7.7: Seed Script and Search Timings
+
+**GitHub:** [#129](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/129)
+
+**Description:**  
+An idempotent seed script through the admin API creates titles with episodes, aliases, and Vietnamese and Japanese names, including a 500-title option; list, search and suggestion timings are recorded for NFR-010.
+
+**Acceptance Criteria:**
+- The seed recreates a catalogue on an empty stack; no demo data in Flyway
+- A 500-title run completes; p50/p95 timings recorded with the commit and machine
+
+**Dependencies:** Issue 7.5 (the script can start earlier)
 
 ---
 
 ### Sprint 7 Definition of Done
 
-- [ ] Backend search API uses PostgreSQL FTS on movie metadata
-- [ ] Search matches title, description, genres, actors, directors
-- [ ] Search results are paginated and ranked by relevance
-- [ ] Search vector is updated when metadata changes
-- [ ] Search suggestions API returns quick results
-- [ ] Frontend search page displays results with loading/error/empty states
-- [ ] Frontend search suggestions dropdown works with debouncing
-- [ ] Unit and integration tests cover search service and API
-- [ ] Postman collection includes search endpoints
-- [ ] Manual test: search returns expected movies from seeded data
+- [ ] ADR-013 and ADR-015 merged, and the requirements record (#258) merged
+- [ ] Titles and episodes live: a populated database upgraded with the bijection check, old watch links redirect, the Chrome smoke passes on the new routes
+- [ ] Franchise and episode administration works with visibility tests at three levels
+- [ ] Search on titles: accent-insensitive, aliases, typed suggestions, hidden titles never leaked, total order across pages
+- [ ] Search page and suggestions work with loading, empty and error states
+- [ ] Seeded 500-title timings recorded (#129)
+- [ ] UI overhaul phase 1 (#200) and the dev proxy (#121) delivered
+- [ ] Unit, PostgreSQL integration and browser tests cover the above; Postman includes the new endpoints
 
 ---
 
-## Sprint 8 - User Library Features
+## Sprint 8 - Library, Player Core and Viewer UI
 
-**Goal:** Implement watchlist, watch history, and rating features with APIs and UI.
+**Goal:** Implement watchlist, watch history and rating on titles; the own player control bar and subtitles; the viewer pages; the first recommendation rows and editorial collections; and the media, image, player and collection designs with the disk admission and media sandbox their consumers need.
 
-**Related Stories:** US-013, US-014, US-015  
-**Related NFRs:** NFR-007, NFR-016
+**Related Stories:** US-005, US-006, US-010, US-012, US-013, US-014, US-015
+**Related NFRs:** NFR-004, NFR-005, NFR-007, NFR-016
+
+**Design authority:** ADR-013 for the title and episode level of Issues 8.1-8.7 (watchlist and rating per title, history per episode; their paths follow the contract as ADR-013 amends it); ADR-016 and ADR-017 (media, backup and upload), ADR-020 (images, [#199](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/199)), ADR-021 (collections) and ADR-018/ADR-019 (player controls, subtitles, markers), all planned and written in this sprint before the items that need them. GitHub issues for Issues 8.8-8.20 are created at the sprint start.
 
 ### Issue 8.1: Backend Watchlist Service and API
 
@@ -1409,6 +1426,171 @@ Add rating component on movie detail page. User can submit or update their ratin
 
 ---
 
+### Issue 8.8: Player Controls Foundation
+
+**GitHub:** [#249](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/249) (core part; moved from Sprint 10, owner decision 2026-11-26)
+
+**Description:**  
+An own React control bar on the current hls.js player: play and pause, ±10 s, volume, time, fullscreen, focus-scoped hotkeys with click-to-focus, auto-hide, status announcements and the accessible menu-button pattern the subtitle and audio menus reuse. A temporary build-time switch returns to native controls until the keyboard and screen-reader checks pass.
+
+**Acceptance Criteria:**
+- Hotkeys ignore text inputs, IME composition and modifiers; auto-hide never hides a focused control; one `Hls` instance; request counts of the ADR-011 2026-11-22 addendum unchanged
+- Chrome run on the real stack: 60 s playback, keyboard seek and fullscreen; axe scan; manual keyboard-only and screen-reader rows in Chrome or Edge and Firefox
+
+**Dependencies:** ADR-018 merged, Chrome smoke on pull requests (#255)
+
+---
+
+### Issue 8.9: Subtitle Tracks Backend
+
+**GitHub:** [#247](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/247) (backend part)
+
+**Description:**  
+Admin upload of WebVTT and SRT (converted to WebVTT by a Java parser), stored privately per asset, served through an authenticated viewer route and listed in PlaybackInfo.
+
+**Acceptance Criteria:**
+- Admin-only before the multipart parse; 413 at the edge; malformed, non-UTF-8, oversized or over-long files rejected with storage untouched; markup reduced to an allowlist
+- Hidden, DRAFT, ARCHIVED or non-active asset returns 404; signed-out 401; `no-store` and `nosniff` on every response
+
+**Dependencies:** Issue 7.2, ADR-019 merged
+
+---
+
+### Issue 8.10: Subtitle Menu and Renderer
+
+**Description:**  
+Subtitle menu on the Issue 8.8 bar; tracks fetched with the bounded authenticated body reader, a hidden text track and an overlay above the bar. Each viewer's subtitle and audio language is remembered on the device; with no preference, Vietnamese subtitles turn on when the audio is not Vietnamese; forced tracks always show.
+
+**Acceptance Criteria:**
+- Sync after seek, pause, speed and reload in Chrome and Firefox; a subtitle 404 keeps the video playing; 401 recovery; no request after sign-out
+
+**Dependencies:** Issue 8.8, Issue 8.9, Issue 8.19 (body reader)
+
+---
+
+### Issue 8.11: UI Overhaul Phase 2: Viewer Pages
+
+**Description:**  
+Home, browse ("Phim lẻ", "Phim bộ", "Anime"), the title header and the Continue Watching page in the new design system and Vietnamese strings; cinematic density on Home and title pages, compact on browse and library.
+
+**Acceptance Criteria:**
+- Screens and states at 1280, 1440 and 1920 px; layout-shift and first-viewport image budgets; keyboard rows and axe; no fake data (no match scores or view counts)
+
+**Dependencies:** UI overhaul phase 1 (#200), Issue 7.2
+
+---
+
+### Issue 8.12: Franchise, Part and Episode Pages
+
+**Description:**  
+Franchise page with the part strip, title page with the episode grid and part switcher (beside the player on wide screens, below on narrow ones), previous and next episode, Continue Watching per title, and the "Tập tiếp theo" button that starts the next episode once (never on reload or a shared link). Lifts the Issue 7.3 multi-episode publish guard.
+
+**Acceptance Criteria:**
+- Two-episode tests: finished last episode with a next one; hidden or unready next episode
+- "Tập tiếp theo" starts once; reload, back and forward, Retry and a deep link stay paused
+
+**Dependencies:** Issue 7.3, Issue 8.11, Issue 8.8
+
+---
+
+### Issue 8.13: Similar Titles
+
+**Description:**  
+"Tương tự" on the title page, from shared genres and people of the admin's own data; reasons shown as text, no score.
+
+**Acceptance Criteria:**
+- The title itself, its visible franchise, unplayable and hidden titles excluded; deterministic order, one per franchise; fixed statement count
+
+**Dependencies:** Issue 7.2, Issue 7.4
+
+---
+
+### Issue 8.14: "Vì bạn đã xem X" Home Row
+
+**Description:**  
+One personal Home row from one seed (a 4-5 rating, else the latest completion): the next part of the seed's franchise first when it applies, then the seed's similar titles. With no history, Home shows only "Mới thêm".
+
+**Acceptance Criteria:**
+- Two users isolated; ratings 1-2 never recommended; a row below 3 items is hidden unless it holds a next part; Admin Preview creates no seed; `Cache-Control: no-store`
+
+**Dependencies:** Issue 7.3, Issue 8.3
+
+---
+
+### Issue 8.15: Editorial Collections
+
+**Description:**  
+Admin-curated collections with a Collections page, title chips and up to three pinned Home rows (hidden below four visible titles); covers are a collage of visible members. "Bộ sưu tập" appears in the navigation once this ships.
+
+**Acceptance Criteria:**
+- Draft, archive and restore tests; hidden members excluded before counts; fixed query counts
+
+**Dependencies:** ADR-021 merged, Issue 7.3, Issue 8.11
+
+---
+
+### Issue 8.16: Shared Upload and Worker Disk Admission
+
+**GitHub:** [#190](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/190) (local implementation; its target-VM run stays in the Pre-production gate)
+
+**Description:**  
+One disk ledger for the one-shot upload spool, resumable upload sessions, encode downloads, the post-encode stage and image jobs, with a pause and drain switch for backups and a free-disk pre-check.
+
+**Acceptance Criteria:**
+- Refusal before the multipart body is parsed; a running encode's reservation is never reclaimed by time alone; crash and ambiguous-commit tests
+
+**Dependencies:** ADR-016 merged
+
+---
+
+### Issue 8.17: Media Sandbox
+
+**Description:**  
+A separate container for decoding untrusted inputs (admin images now, VC-1 later): no network, read-only root, dropped capabilities, CPU, memory and PID limits, job-scoped scratch, inside the worker's single admission slot.
+
+**Acceptance Criteria:**
+- Network egress and writes outside scratch refused; limits enforced; a restart reclaims a job once with no overlapping run
+
+**Dependencies:** ADR-016 merged
+
+---
+
+### Issue 8.18: Stream Selection and Wider Audio Support
+
+**Description:**  
+A two-stage probe (header inventory, then the unchanged strict probe on a verified selected copy), caps of 32 input streams and 4 audio tracks, DTS and TrueHD decoded to AAC stereo, PGS kept as a sidecar file, dropped tracks visible to the admin.
+
+**Acceptance Criteria:**
+- Generated fixtures: web release, fansub with many streams and fonts, DTS, Blu-ray-like remux, MP4 with cover art, no usable audio fails; cap plus one overflow; memory peak with many attachments measured
+
+**Dependencies:** ADR-016 merged, Issue 8.17
+
+---
+
+### Issue 8.19: Protected Image Serving
+
+**Description:**  
+Images served by an authenticated GET to a Blob URL with `no-store`, following the catalog visibility rule, with the generated text poster as the 2:3 fallback. Builds the bounded authenticated body reader that subtitles reuse.
+
+**Acceptance Criteria:**
+- DRAFT or hidden image 404, signed-out 401; no Blob URL survives sign-out or an identity switch
+
+**Dependencies:** ADR-020 merged (#199), Issue 7.2
+
+---
+
+### Issue 8.20: Worker Frames and the Post-Encode Stage
+
+**Description:**  
+A post-encode stage with its own timeout, inside the encode's disk reservation, that never fails READY; WebP frames under the attempt prefix; frames used only on 16:9 surfaces; seek thumbnails reuse the stage later.
+
+**Acceptance Criteria:**
+- Generated fixtures incl. black first frames; a stage failure keeps READY; cost per media hour measured; backups include the frames
+
+**Dependencies:** Issue 8.19, Issue 8.16
+
+---
+
 ### Sprint 8 Definition of Done
 
 - [ ] User can add and remove movies from watchlist
@@ -1423,15 +1605,22 @@ Add rating component on movie detail page. User can submit or update their ratin
 - [ ] Unit and integration tests cover library features
 - [ ] Postman collection includes watchlist, history, rating endpoints
 - [ ] Manual test: add to watchlist, watch, rate, verify in UI
+- [ ] Library features work at the title level (watchlist, rating) and episode level (history), per ADR-013
+- [ ] Own control bar with keyboard and screen-reader rows passed; subtitles with the language preference in Chrome and Firefox
+- [ ] Viewer pages, franchise and episode pages, "Tương tự", the personal Home row and editorial collections on real data
+- [ ] Disk admission (#190) and the media sandbox in place before their consumers; stream selection with DTS/TrueHD; protected images and worker frames
+- [ ] ADR-016, ADR-017, ADR-018, ADR-019, ADR-020 and ADR-021 merged
 
 ---
 
-## Sprint 9 - Admin Operations
+## Sprint 9 - Admin Operations and Media
 
-**Goal:** Implement admin encoding status dashboard and failed job retry.
+**Goal:** Implement the admin encoding dashboard and retry per episode, activation of encoded assets with Admin Preview, the Marker Editor with skip and chapters, multi-audio packages, backup receipts and source-file tracking, admin images and smart collections; write the metadata design.
 
-**Related Stories:** US-016  
-**Related NFRs:** NFR-007, NFR-011, NFR-016
+**Related Stories:** US-008, US-010, US-016
+**Related NFRs:** NFR-004, NFR-007, NFR-009, NFR-011, NFR-016
+
+**Design authority:** ADR-013 (assets per episode, `active`/`candidate`, activation), ADR-016, ADR-019, ADR-020 and ADR-021 (planned). Issues 9.1-9.5 work per episode as ADR-013 amends ADR-010; their paths follow the amended contract. GitHub issues for Issues 9.6-9.18 are created at the sprint start; the metadata design (ADR-014, [#245](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) is written in this sprint.
 
 ### Issue 9.1: Backend Video Asset List API for Admin
 
@@ -1520,6 +1709,166 @@ Add retry button to encoding dashboard for failed assets. Clicking retry calls r
 
 ---
 
+### Issue 9.6: Activation and Admin Preview Route
+
+**Description:**  
+READY means encoded; viewers get only the asset the admin activated. At activation the admin chooses "same cut" (resume, markers and subtitles kept) or "different cut" (resume from 0, history kept); assets that exist at migration stay live. Ships as one release boundary with the separate admin-only preview route (audited, `no-store`, through live admin authorization), a minimal preview player, the activation dialog, progress writes that serialize with activation, and the viewer reload rule for a different cut.
+
+**Acceptance Criteria:**
+- A replacement stays invisible to viewers until activated; race tests for a first save and a stale save against activation
+- Preview writes no progress or history rows or requests, including on page exit; viewers and demoted admins get 404 or 403 with `no-store` on every preview path
+- Purge never selects an unactivated candidate
+
+**Dependencies:** Issue 7.2
+
+---
+
+### Issue 9.7: Marker Editor and Admin Preview Tools
+
+**Description:**  
+The preview player on the Issue 8.8 controls, the Marker Editor (intro, ending and chapter markers with frame-accurate time capture), chapter capture by the worker, timing import, the track inventory and subtitle candidates.
+
+**Acceptance Criteria:**
+- Marker validation and revision conflicts; markers survive a "same cut" activation and are dropped by a "different cut"; an audit row per preview open
+
+**Dependencies:** Issue 9.6, Issue 8.8, ADR-019 merged
+
+---
+
+### Issue 9.8: Skip Buttons and Chapters
+
+**Description:**  
+Skip buttons for confirmed intro and ending markers and a chapter menu; no automatic skipping.
+
+**Acceptance Criteria:**
+- Before, at, inside and after a region; paused stays paused; no markers, no skip control; a different-cut activation drops markers
+
+**Dependencies:** Issue 9.7
+
+---
+
+### Issue 9.9: Multi-Audio Packages
+
+**Description:**  
+Every usable audio track (up to four) packaged with the video in a second layout, the master playlist rendered from database rows, typed HLS routes and an admin track API. Readers, validation and preview parity ship first; writes follow behind a switch that is enabled for viewers only after Issue 9.10. Output dimensions are recorded at READY.
+
+**Acceptance Criteria:**
+- Playlist escaping and route negatives; crash and failure cleanup; real Chrome plays, switches tracks and seeks; existing single-audio assets unchanged
+
+**Dependencies:** Issue 8.18, Issue 7.2, Issue 8.16
+
+---
+
+### Issue 9.10: Audio Menu and Optional-Track Errors
+
+**Description:**  
+Audio menu on the Issue 8.8 bar; a missing or disabled optional audio or subtitle track no longer ends playback.
+
+**Acceptance Criteria:**
+- Switching keeps the position; a track disabled mid-play falls back once; single-audio assets show no menu
+
+**Dependencies:** Issue 8.8, Issue 9.9 (readers)
+
+---
+
+### Issue 9.11: Embedded Text Subtitles
+
+**Description:**  
+The worker extracts embedded SRT, mov_text and WebVTT subtitles (ASS kept, with an optional WebVTT fallback) as candidates the admin accepts in Admin Preview.
+
+**Acceptance Criteria:**
+- Extraction failure keeps READY; offsets correct for a late-starting source
+
+**Dependencies:** Issue 8.9, Issue 8.18, Issue 9.7
+
+---
+
+### Issue 9.12: Backup Manifest, Receipts and Coverage
+
+**Description:**  
+A capture manifest (database dump, package IDs, sizes and checksums, including subtitles, fonts, PGS files, frames and thumbnails) taken while writers are drained; verification of the off-VM copy of the dump and small files; automatic restore checks of the dump; an admin banner when the newest valid receipt is older than 8 days; an admin download of one title's HLS package with checksums.
+
+**Acceptance Criteria:**
+- A capture during an encode, a finalizing upload and an activation still matches the dump; tampered receipts rejected; the download verified by the PC script
+
+**Dependencies:** ADR-016 merged, Issue 8.16
+
+---
+
+### Issue 9.13: Source-File Tracking with Release Disabled
+
+**Description:**  
+SHA-256 and size recorded at upload, a source-file state, hash attestation of the off-VM copy (never revealing the server hash), a dry-run release list, the release API with an operation fence, a reconciler and an audit trail. Deletion stays disabled server-side until the runbook and the restore drill pass.
+
+**Acceptance Criteria:**
+- With deletion disabled every release call is refused; ineligible states refused; a crash between delete and commit reconciles
+
+**Dependencies:** Issue 9.6, Issue 9.12
+
+---
+
+### Issue 9.14: Remux Spike
+
+**Description:**  
+Research only: copy the source video into the package when a probe shows it is eligible, with a per-segment decode check and one encode fallback in the same job. Measured on the CI runner first; the target-VM comparison is a Pre-production gate row.
+
+**Acceptance Criteria:**
+- Eligible fixtures play in Chrome; ineligible ones fall back; adopted only if the target VM shows a gain
+
+**Dependencies:** Issue 8.18
+
+---
+
+### Issue 9.15: Admin Image Upload
+
+**Description:**  
+Admin poster and backdrop uploads, staged and decoded only in the media sandbox through the single admission slot, never in the API process; the separate image lane is built behind a switch that stays off.
+
+**Acceptance Criteria:**
+- Fake, oversized and malformed images rejected; DRAFT images never leak; encode speed unchanged with the switch off
+
+**Dependencies:** Issue 8.19, Issue 8.17, Issue 8.16, UI overhaul phase 1 (#200)
+
+---
+
+### Issue 9.16: "Chụp khung này" Crop Tool
+
+**Description:**  
+In Admin Preview the admin captures a frame and crops it to a poster or backdrop, saved through the Issue 9.15 pipeline.
+
+**Acceptance Criteria:**
+- Card-size preview, explicit save, variant warning; no decode in the API process
+
+**Dependencies:** Issue 9.7, Issue 9.15
+
+---
+
+### Issue 9.17: Smart Collections
+
+**Description:**  
+Collections defined by a closed, versioned rule over the admin's own data (audio or subtitle language, type and genre, year), with preview and sort modes.
+
+**Acceptance Criteria:**
+- Rule validation; query plans recorded before any caching; no provider-imported values used
+
+**Dependencies:** Issue 8.15; language rules after Issue 9.9 and Issue 8.9
+
+---
+
+### Issue 9.18: Bounded Internal Metrics
+
+**GitHub:** [#232](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/232) (local implementation; its target-VM use is a row of #233)
+
+**Description:**  
+Bounded internal metrics, including the encode real-time factor and image-job duration that the image-lane measurement needs.
+
+**Acceptance Criteria:**
+- Per #232; label cardinality bounded; no query strings or identifiers in labels
+
+**Dependencies:** none
+
+---
+
 ### Sprint 9 Definition of Done
 
 - [ ] Admin can view all video assets with status and metadata
@@ -1534,12 +1883,123 @@ Add retry button to encoding dashboard for failed assets. Clicking retry calls r
 - [ ] Unit and integration tests cover retry logic and admin APIs
 - [ ] Postman collection includes admin video asset and retry endpoints
 - [ ] Manual test: fail a job, view in dashboard, retry successfully
+- [ ] Encoding dashboard and retry work per episode with `active` and `candidate` asset states
+- [ ] Activation with Admin Preview, the Marker Editor, skip and chapters; preview writes no viewer state
+- [ ] Multi-audio packages with the audio menu; embedded text subtitles as candidates
+- [ ] Backup receipts and coverage; source-file tracking with release still disabled
+- [ ] Admin images through the media sandbox; smart collections; ADR-014 merged
+
+---
+
+## Metadata and Upload
+
+**Goal:** Import metadata from TMDB and AniList with review before apply, offer resumable upload at the current size limit, and show the admin which worldwide trending titles are missing from the library.
+
+**Related Stories:** US-007, US-008
+**Related NFRs:** NFR-003, NFR-007, NFR-008
+
+**Design authority:** ADR-014 (metadata, planned under [#245](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) and ADR-017 (resumable upload, planned). The admin's own description always wins; provider text is used only when the admin has none and never overwrites admin-edited content. This milestone runs after Sprint 9; Sprint 10 can overlap it. GitHub issues are created at its start.
+
+### Issue MU.1: Metadata Catalog Foundation
+
+**Description:**  
+External IDs per title, episode and person; provider texts and field provenance stored apart from the admin's own fields; a title revision; the description becomes optional; a withdrawal job, fail-closed reads of expired provider text and a "refresh due" list for TMDB's six-month limit.
+
+**Acceptance Criteria:**
+- A manual edit removes provenance; stale revisions return 409; with the withdrawal job stopped past a deadline no provider text is served while the catalogue still works
+
+**Dependencies:** ADR-014 merged, Issue 7.2, Issue 7.4
+
+---
+
+### Issue MU.2: TMDB Movie Import
+
+**GitHub:** [#245](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)
+
+**Description:**  
+Admin search, preview and apply for TMDB movies, with attribution and the refresh flow; no viewer ever calls TMDB.
+
+**Acceptance Criteria:**
+- Per #245; non-admins get 401/403 with zero outbound calls; provider failures return 503 and never sign the admin out
+
+**Dependencies:** Issue MU.1
+
+---
+
+### Issue MU.3: TMDB TV Seasons and Episodes
+
+**Description:**  
+Season links (whole season or part of a split season), episode mapping, provider episode texts, opt-in DRAFT episodes and renumbering detection.
+
+**Acceptance Criteria:**
+- Two local titles referencing one TMDB season; duplicate episode claims return 409; an unknown season change needs re-identification and applies nothing
+
+**Dependencies:** Issue MU.2, Issue 7.3
+
+---
+
+### Issue MU.4: AniList Title Import
+
+**GitHub:** [#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)
+
+**Description:**  
+One title at a time: names, description, year and season, genres, a type suggestion and franchise suggestions from relations; data kept until refreshed or unlinked, with "last fetched" shown.
+
+**Acceptance Criteria:**
+- Per #246; rate budget with `Retry-After`; partial data never clears a field; no viewer call
+
+**Dependencies:** Issue MU.2 (shared pipeline)
+
+---
+
+### Issue MU.5: Trending Titles Missing from the Library
+
+**Description:**  
+An admin-only list of worldwide trending titles (AniList and TMDB charts) that the library does not have, fetched on demand and held in memory only; each provider is enabled only after its use is cleared in ADR-014.
+
+**Acceptance Criteria:**
+- Nothing written to the database; zero calls for non-admins; a provider without a cleared use is not called
+
+**Dependencies:** Issue MU.2, Issue MU.4
+
+---
+
+### Issue MU.6: Resumable Upload Sessions
+
+**Description:**  
+A restricted tus 1.0 profile on object-storage multipart: sessions with a #190 reservation at creation, an episode lock, a declared SHA-256 checked by the worker, a sweeper and an Nginx location with a fixed chunk ceiling. The whole-file limit lives only in backend configuration and stays 2048 MiB until the Pre-production gate raises it.
+
+**Acceptance Criteria:**
+- Resume from a partially committed chunk, a lost completion response and an orphan multipart upload; no automatic replay of an ambiguous upload; 64-bit sizes end to end
+
+**Dependencies:** ADR-017 merged, Issue 8.16, Issue 7.2
+
+---
+
+### Issue MU.7: Resumable Upload in the Admin SPA
+
+**Description:**  
+The admin upload page uses a tus client with a declared digest and resumes after a reload or a network loss, at the current size limit.
+
+**Acceptance Criteria:**
+- Real-Chrome resume after reload and network loss; the exit guard kept; the one-shot route stays until the Pre-production gate retires it
+
+**Dependencies:** Issue MU.6, UI overhaul phase 1 (#200)
+
+---
+
+### Metadata and Upload Definition of Done
+
+- [ ] TMDB movies and TV and AniList titles import with review before apply, provenance and withdrawal
+- [ ] The admin's own text is never overwritten automatically
+- [ ] Resumable upload works at the current size limit in real Chrome
+- [ ] The trending admin list stores nothing
 
 ---
 
 ## Sprint 10 - Polish
 
-**Goal:** Finalize error handling, documentation, OpenAPI/Swagger, Postman collection, and VPS deployment preparation.
+**Goal:** Finalize error handling, documentation, OpenAPI/Swagger, Postman collection, and VPS deployment preparation; polish the player (picture-in-picture, Media Session, shortcut list, seek thumbnails) and answer the subtitle-rendering spike.
 
 **Related Stories:** US-017, US-018  
 **Related NFRs:** NFR-011, NFR-012, NFR-015
@@ -1682,6 +2142,46 @@ Review and enhance GitHub Actions CI pipeline. Ensure backend, frontend, worker 
 
 ---
 
+### Issue 10.9: Player Polish
+
+**GitHub:** [#249](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/249) (remaining part)
+
+**Description:**  
+Picture-in-picture, Media Session actions, the speed menu and the keyboard shortcut list on the Issue 8.8 bar.
+
+**Acceptance Criteria:**
+- Picture-in-picture with captions as a manual row per browser; Media Session respects the no-autoplay rule
+
+**Dependencies:** Issue 8.8
+
+---
+
+### Issue 10.10: Seek Thumbnails
+
+**Description:**  
+Keyframe-based thumbnail sprites produced in the post-encode stage and shown on the seek bar.
+
+**Acceptance Criteria:**
+- Cost and bytes per media hour measured; a stage failure keeps READY; backups include the thumbnails
+
+**Dependencies:** Issue 8.20, Issue 8.8
+
+---
+
+### Issue 10.11: Styled Subtitle and PGS Rendering Spike
+
+**GitHub:** [#248](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/248)
+
+**Description:**  
+Spikes for styled ASS (JASSUB), PGS (libpgs-js) and Document picture-in-picture: performance, sync after seek and resize, teardown and licence notices. The owner accepted the LGPL and FreeType notice obligations if the spike passes; the repository stays MIT.
+
+**Acceptance Criteria:**
+- Per #248; a recommendation per renderer; production rendering gets its own issue only if adopted
+
+**Dependencies:** Issue 8.10
+
+---
+
 ### Sprint 10 Definition of Done
 
 - [ ] Backend has centralized exception handling with consistent error responses
@@ -1696,6 +2196,38 @@ Review and enhance GitHub Actions CI pipeline. Ensure backend, frontend, worker 
 - [ ] No secrets committed; all secrets via environment variables
 - [ ] Known limitations documented
 - [ ] Project is ready for local demo and VPS deployment
+- [ ] Player polish, seek thumbnails and the subtitle-rendering spike delivered or answered
+
+---
+
+## Pre-production gate
+
+**Goal:** Measure on the target VM and switch on what waits for that evidence; prepare deployment. Local feature work never waits for this milestone.
+
+The measurement owners stay as they are: #124 (encode calibration, gate G1/G2 with a test-only 1080p candidate profile), #233 (mixed load, gate G4/G6 and the image-lane test), #180 (upload: the 2 GB baseline and the 8 GiB resumable row), #137 with #190 (disk layout and storage fit, gate G5), and the owner's visual review of #124 outputs (gate G3). Items created when their gate is near:
+
+- **1080p default for new encodes:** after G1-G6 pass; no upscaling, existing 720p assets unchanged
+- **Release of source files enabled:** after the restore drill passes, with an owner confirmation per release (Issue 9.13 ships it disabled)
+- **Volume backups, rotation, the free restore drill and the disaster-recovery document** (child of #136)
+- **Upload limit promotion and retirement of the one-shot route:** after #180's 8 GiB row passes
+- **Image lane switched on:** after #233 shows at most 5 % encode slowdown
+- **Remux adoption:** only if Issue 9.14 shows a gain on the target VM
+- HTTPS preparation (#250) and the deployment children of #136
+
+Conditional items with no issue until their trigger:
+
+| Item | Trigger |
+|---|---|
+| MPEG-2 sources | real samples and a deinterlace policy |
+| VC-1 sources | the Debian fix for the open FFmpeg CVE, plus the media sandbox |
+| HDR-to-SDR conversion | HDR sources exist |
+| An extra 720p rendition with adaptive switching | #233 shows viewers need it |
+| Styled ASS or PGS rendering in production | Issue 10.11 recommends adoption |
+| Studio and creator pages | enough titles carry that data |
+| Personal named lists | the owner asks after using the watchlist |
+| A viewer row of trending titles | provider terms allow it and two weeks show at least four playable matches |
+| Automatic TMDB refresh | the owner asks |
+| AniList staff, characters and studios | a follow-up issue after #246 |
 
 ---
 
@@ -1739,8 +2271,8 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 
 1. Backend and worker use Spring Boot 4.x with Java 21 (ADR-002, amended 2026-10-18); frontend uses React 18 with TypeScript.
 2. Docker Compose is used for local and VPS deployment; no Kubernetes.
-3. Single-quality HLS output (e.g., 720p) is sufficient for MVP; multi-quality deferred.
-4. PostgreSQL full-text search is sufficient; Elasticsearch deferred.
+3. One video quality per asset: 720p today, a 1080p default for new encodes after the target-VM gate (#124, #233); several audio tracks per asset are in scope (ADR-016, planned); an extra rendition only on #233 evidence.
+4. PostgreSQL full-text search with a Java accent-folding normalizer and aliases is sufficient (ADR-015, planned); Elasticsearch only if a relevance fixture shows otherwise.
 5. MinIO buckets are private; HLS delivered through authenticated backend proxy.
 6. Worker concurrency is 1 for MVP stability.
 7. Redis is used for cache only and holds no playback progress (ADR-011 D9); PostgreSQL is source of truth.
@@ -1756,12 +2288,14 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 - FFmpeg and FFprobe must be available in worker Docker image
 - Oracle Cloud Free Tier VPS account for demo deployment (Phase 5)
 - Let's Encrypt for HTTPS (deferred to Phase 5 deployment)
+- A free TMDB API key before the Metadata and Upload milestone; TMDB and AniList terms re-read at implementation
 
 **Internal Dependencies:**
 - Auth (Sprint 2) must complete before catalog, upload, streaming features
 - Upload (Sprint 4) must complete before worker (Sprint 5)
 - Worker (Sprint 5) must complete before streaming (Sprint 6)
-- Search (Sprint 7) and Library (Sprint 8) can run in parallel after Sprint 6
+- The content model and search (Sprint 7) come before the library (Sprint 8), which keys on titles and episodes
+- Measurements and switches that need the target VM wait in the Pre-production gate; local work does not
 - Admin Operations (Sprint 9) depends on upload and worker completion
 
 **Known Risks:**
@@ -1773,7 +2307,7 @@ The sprint order intentionally addresses high-priority risks from RISKREGISTER.m
 
 ## Next Steps After Sprint 10
 
-After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening** and **Phase 5 - Deployment and Operations**:
+After Sprint 10 and the Metadata and Upload milestone, and as the Pre-production gate's measurements allow, the project enters **Phase 4 - Testing and Hardening** and **Phase 5 - Deployment and Operations**:
 
 1. Execute comprehensive Postman/Newman tests
 2. Create manual E2E test checklist and execute
@@ -1801,7 +2335,8 @@ After Sprint 10 completion, the project enters **Phase 4 - Testing and Hardening
 | 2026-11-19 | 1.5 | Browser session design (ADR-012, #72): Issues 6.9 and 6.10 added to Sprint 6, Issue 6.6 depends on Issue 6.9, a Sprint 6 DoD line for the session model |
 | 2026-11-22 | 1.6 | Issue 6.6 follows the ADR-011 addendum of 2026-11-22: the D2 budget per hls.js load and terminal HLS load errors in hls.js 1.7.4 (#223) |
 | 2026-10-26 | 1.2 | Contract-first API documentation (Issue #120, owner decision 2026-10-18): the Global Definition of Done requires `API-CONTRACT.yaml` updated or confirmed with responses validated in tests instead of OpenAPI annotations, and Issue 10.2 serves the frozen contract in Swagger UI instead of generating a code-first document |
-| 2026-11-26 | 1.7 | Sprint 6 closeout (#256): `**GitHub:**` lines under Issues 6.1-6.3 and 6.5-6.10, and the Sprint 6 DoD ticked except the Postman item (#254), with a verified note
+| 2026-11-26 | 1.7 | Sprint 6 closeout (#256): `**GitHub:**` lines under Issues 6.1-6.3 and 6.5-6.10, and the Sprint 6 DoD ticked except the Postman item (#254), with a verified note |
+| 2026-11-26 | 1.8 | Owner scope decisions of 2026-11-25/26 (#258): Sprint 7 rewritten on the content model and search (Issues 7.1-7.7, GitHub #259-#264 and #129); Sprint 8 renamed, its items keyed on titles and episodes, Issues 8.8-8.20 added; Sprint 9 renamed, Issues 9.6-9.18 added; the Metadata and Upload milestone (Issues MU.1-MU.7); Issues 10.9-10.11; the Pre-production gate section with conditional items; the dependency flow, Assumptions 3 and 4, external and internal dependencies |
 
 ---
 

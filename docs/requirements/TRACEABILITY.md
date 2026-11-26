@@ -2,7 +2,7 @@
 
 ## Status
 
-Updated 2026-11-26 for the Sprint 6 closeout, 2026-11-14 for the Sprint 6 streaming design ([ADR-011](../architecture/adr/ADR-011.md)) and 2026-11-13 for the Sprint 5 closeout; the upload and worker design follows [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md), Sprint 4 (F-008 and F-009) in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md), Sprint 5 (F-010 to F-012) in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md), and Sprint 6 (F-013 to F-015, with the playback part of F-012) in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; no row has VPS evidence yet.
+Updated 2026-11-26 for the owner's scope decisions ([#258](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/258)): F-016 and NFR-010 re-planned and rows F-024 to F-036 added, as planned evidence only; nothing in them is verified yet. Updated 2026-11-26 for the Sprint 6 closeout, 2026-11-14 for the Sprint 6 streaming design ([ADR-011](../architecture/adr/ADR-011.md)) and 2026-11-13 for the Sprint 5 closeout; the upload and worker design follows [ADR-010](../architecture/adr/ADR-010.md). Rows for delivered features point to verified evidence: Sprint 2 (F-001 to F-004 and the F-023 backend) is verified in the [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md), Sprint 3 (F-005 to F-007) in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md), Sprint 4 (F-008 and F-009) in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md), Sprint 5 (F-010 to F-012) in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md), and Sprint 6 (F-013 to F-015, with the playback part of F-012) in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md). Other rows list the planned test evidence until the feature is implemented; no row has VPS evidence yet.
 
 ## Feature Traceability
 
@@ -23,7 +23,7 @@ Updated 2026-11-26 for the Sprint 6 closeout, 2026-11-14 for the Sprint 6 stream
 | F-013 | HLS playback | US-010 | backend, frontend, nginx | Playback API tests and Postman test; HLS proxy tests (MIME, `no-store`, current-only 404, query-token 401); player unit tests (token refresh, error mapping, hls.js-only path); one manual row per verified browser (current Chrome or Edge, and Firefox); browser playback smoke test (#125). Verified: [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md) (Chrome playback smoke on `main`; Edge, Chromium and Chrome rows by hand and a scripted Firefox row on #242; the owner accepted the scripted Firefox row as a recorded deviation from ADR-011 D5); a Sprint 6 Newman collection is still missing (#254) |
 | F-014 | Playback progress and resume | US-011 | backend, frontend, PostgreSQL | Progress API tests on PostgreSQL (forward-only upsert, clamp, 90% completion, history write, ownership); player save-trigger test; resume manual E2E evidence. Verified: [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md) (save and reload resume also in the Chrome playback smoke); Newman coverage missing (#254) |
 | F-015 | Continue watching | US-011 | backend, frontend | Continue-watching API tests (unfinished only, PUBLISHED only, order, limit); UI list test. Verified: [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md) |
-| F-016 | Search and suggestions | US-012 | backend, frontend, PostgreSQL | Search service tests; FTS seed data tests; search UI tests |
+| F-016 | Search and suggestions | US-012 | backend, frontend, PostgreSQL | Planned (ADR-015): normalizer unit tests and PostgreSQL rebuild/race tests (Issue 7.4, #261); relevance fixture with Vietnamese, Japanese and romaji cases, visibility and total-order tests, `EXPLAIN` record (Issue 7.5, #263); suggestion and search-page tests (Issue 7.6, #264); 500-title timings (Issue 7.7, #129) |
 | F-017 | Watchlist | US-013 | backend, frontend | Watchlist API tests; duplicate prevention test; UI mutation test |
 | F-018 | Watch history | US-014 | backend, frontend | Watch history service tests; ownership authorization test |
 | F-019 | Rating | US-015 | backend, frontend | Rating validation tests; aggregate rating test; UI mutation test |
@@ -31,6 +31,19 @@ Updated 2026-11-26 for the Sprint 6 closeout, 2026-11-14 for the Sprint 6 stream
 | F-021 | Local Docker runtime | US-017 | deploy, backend, worker, frontend | Docker Compose smoke test; health check evidence |
 | F-022 | VPS demo deployment | US-018 | deploy, docs/deployment | Deployment runbook; HTTPS smoke test; backup/rollback checklist |
 | F-023 | Profile update | US-019 | backend, frontend | Profile update API tests; current-user ownership test; profile UI mutation test. Backend verified: [Sprint 2 closeout](../testing/SPRINT-2-CLOSEOUT.md); profile UI tracked in #131 |
+| F-024 | Content model: franchises, titles, episodes | US-005, US-006, US-007 | backend, frontend, PostgreSQL | Planned (ADR-013): populated upgrade smoke with an `EXCEPT` bijection, unchanged suites after the rename (Issue 7.1, #259); concurrent-upload race tests and the Chrome smoke on episode routes (Issue 7.2, #260); three-level visibility tests (Issue 7.3, #262); episode-grid tests (Issue 8.12) |
+| F-025 | Activation and Admin Preview | US-008, US-016 | backend, frontend | Planned (ADR-013, ADR-019): activation race tests, zero progress and history requests in preview including page exit, viewer 404 and `no-store` on preview paths (Issue 9.6) |
+| F-026 | Custom player controls | US-010 | frontend | Planned (ADR-018): hotkey and menu unit tests, Chrome run on the real stack, axe scan, manual keyboard-only and screen-reader rows per browser (Issue 8.8); picture-in-picture rows (Issue 10.9) |
+| F-027 | Subtitles | US-010 | backend, frontend, worker | Planned (ADR-019): parser and storage tests (Issue 8.9, #247), Chrome and Firefox sync and recovery tests (Issue 8.10), extraction fixtures (Issue 9.11), renderer spike (Issue 10.11, #248) |
+| F-028 | Timed markers, skip and chapters | US-010 | backend, frontend, worker | Planned (ADR-019): marker validation and carry tests (Issue 9.7), skip-region browser tests (Issue 9.8) |
+| F-029 | Multi-audio | US-009, US-010 | worker, backend, frontend | Planned (ADR-016, ADR-018): playlist and route tests, Chrome track switch and seek (Issue 9.9), optional-track recovery tests (Issue 9.10) |
+| F-030 | Rule-based recommendations | US-005, US-006 | backend, frontend | Planned (ADR-015): exclusion and ordering fixtures, two-user isolation, no-seed and no-store tests (Issues 8.13, 8.14) |
+| F-031 | Collections | US-005 | backend, frontend | Planned (ADR-021): draft/archive/restore and visibility tests (Issue 8.15), rule validation and query plans (Issue 9.17) |
+| F-032 | Catalogue images | US-005, US-006, US-007 | backend, frontend, worker | Planned (ADR-020): visibility and Blob-lifecycle tests (Issue 8.19), frame fixtures (Issue 8.20), upload rejection and sandbox tests (Issue 9.15), crop tests (Issue 9.16) |
+| F-033 | Metadata import | US-007 | backend, frontend | Planned (ADR-014): provenance, revision and withdrawal tests with a fake clock (Issue MU.1), zero outbound calls for non-admins and provider-failure tests (Issues MU.2-MU.5, #245, #246) |
+| F-034 | Resumable upload | US-008 | backend, frontend, infra | Planned (ADR-017): resume, lost-response and orphan tests (Issue MU.6), real-Chrome resume (Issue MU.7), 2 GB and 8 GiB target-VM rows (#180) |
+| F-035 | Backup and recovery | US-018 | backend, infra | Planned (ADR-016): capture-consistency and receipt tests (Issue 9.12), release-disabled and reconcile tests (Issue 9.13), restore drill and disaster-recovery document (Pre-production gate, #136) |
+| F-036 | Media ingest selection and the 1080p default | US-009 | worker | Planned (ADR-016): generated stream fixtures and memory peak (Issue 8.18), sandbox negatives (Issue 8.17), target-VM gate G1-G6 (#124, #233) |
 
 ## NFR Traceability
 
@@ -45,7 +58,7 @@ Updated 2026-11-26 for the Sprint 6 closeout, 2026-11-14 for the Sprint 6 stream
 | NFR-007 | F-001, F-002, F-004, F-020 | Auth and authorization tests |
 | NFR-008 | All runtime features | Secret scan/manual review; `.env.example` review |
 | NFR-009 | F-008, F-012 | MinIO storage integration evidence |
-| NFR-010 | F-016 | Search seed-data test |
+| NFR-010 | F-016 | Planned: Issue 7.5 relevance fixture and Issue 7.7 (#129) 500-title timings |
 | NFR-011 | F-010, F-021, F-022 | Health endpoint and lifecycle log review |
 | NFR-012 | All features | Documentation review before milestone completion |
 | NFR-013 | All MVP features | This traceability matrix plus test artifacts |
