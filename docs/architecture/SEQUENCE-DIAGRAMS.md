@@ -269,7 +269,7 @@ sequenceDiagram
     Backend-->>AdminSPA: PreviewInfo with /hls/admin/... manifest, active, candidate, timelines, generation
     Note over Backend: One INFO audit event per preview-info call
     AdminSPA->>Backend: GET /hls/admin/video-assets/{id}/master.m3u8 and segments, with Authorization
-    Backend->>PostgreSQL: Read session and role on every request, check READY and the stored key
+    Backend->>PostgreSQL: Read session and role on every request, check READY, not retired and the stored key
     Backend->>MinIO: Read the playlist or segment
     Backend-->>AdminSPA: Whole object, Cache-Control no-store
     Note over AdminSPA: Preview policy: no progress or history request at all
@@ -281,8 +281,10 @@ sequenceDiagram
         Backend-->>AdminSPA: 409 ACTIVATION_CONFLICT or VIDEO_ASSET_NOT_ACTIVATABLE
     else accepted
         Backend->>PostgreSQL: Set the asset timeline (SAME: the active one, NEW: a new one), also on a re-activation
-        opt SAME
-            Backend->>PostgreSQL: Copy the carried timed data to the new asset, validated against its duration
+        alt SAME
+            Backend->>PostgreSQL: Keep the asset's own timed sets, or replace its carried rows with the active ones, validated against its duration
+        else NEW
+            Backend->>PostgreSQL: Remove the carried rows an earlier activation left on the asset
         end
         Backend->>PostgreSQL: Set the active asset, increment the generation, COMMIT
         Backend-->>AdminSPA: 200 with the active asset, timeline and generation

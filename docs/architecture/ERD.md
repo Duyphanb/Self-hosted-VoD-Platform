@@ -417,8 +417,8 @@ erDiagram
 
   Constraint `ux_episodes_title_ordinal UNIQUE (title_id, ordinal) DEFERRABLE INITIALLY IMMEDIATE`. The backfill creates one `PUBLISHED` episode at ordinal 1 per title.
 - `video_assets` gains `episode_id uuid NOT NULL` (FK -> `episodes.id` restrict delete, backfilled through each title's episode) and drops `movie_id` with `ix_video_assets_movie_id` and `ux_video_assets_movie_in_flight`. New indexes: unique partial `ux_video_assets_episode_in_flight` on `episode_id` where `status IN ('UPLOADED', 'QUEUED', 'PROCESSING')` (409 `VIDEO_UPLOAD_IN_PROGRESS` matches this name), and `ix_video_assets_episode_ready` on (`episode_id`, `created_at` DESC, `id` DESC) where `status = 'READY'`. The raw key of new uploads is `{titleId}/{videoAssetId}.{ext}`, the same shape as today's keys.
-- `playback_progress` gains `episode_id` (FK -> `episodes.id` restrict delete, backfilled), its primary key becomes (`user_id`, `episode_id`), `movie_id` is dropped, and `ix_playback_progress_user_last_played` covers (`user_id`, `last_played_at` DESC, `episode_id` DESC).
-- `watch_history` gains `episode_id` (FK -> `episodes.id` restrict delete, backfilled), `ux_watch_history_user_episode` on (`user_id`, `episode_id`) replaces `ux_watch_history_user_movie`, `movie_id` is dropped, and row IDs are kept.
+- `playback_progress` gains `episode_id uuid NOT NULL` (FK -> `episodes.id` restrict delete, backfilled, then made not null), its primary key becomes (`user_id`, `episode_id`), `movie_id` is dropped, and `ix_playback_progress_user_last_played` covers (`user_id`, `last_played_at` DESC, `episode_id` DESC).
+- `watch_history` gains `episode_id uuid NOT NULL` (FK -> `episodes.id` restrict delete, backfilled, then made not null), `ux_watch_history_user_episode` on (`user_id`, `episode_id`) replaces `ux_watch_history_user_movie`, `movie_id` is dropped, and row IDs are kept.
 - User foreign keys keep `ON DELETE CASCADE`.
 
 **S3, franchises.**
