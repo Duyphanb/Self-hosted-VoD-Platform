@@ -35,7 +35,7 @@ public interface MovieRepository extends JpaRepository<Movie, UUID>, JpaSpecific
     Optional<Movie> findForUpdateById(UUID id);
 
     /**
-     * Slug pre-check on create. The {@code ux_movies_slug} constraint remains the final guard.
+     * Slug pre-check on create. The {@code ux_titles_slug} constraint remains the final guard.
      */
     boolean existsBySlug(String slug);
 

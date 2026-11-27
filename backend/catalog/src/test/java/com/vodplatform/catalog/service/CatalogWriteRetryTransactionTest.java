@@ -103,7 +103,7 @@ class CatalogWriteRetryTransactionTest {
 
     @AfterEach
     void cleanUp() {
-        for (String table : List.of("movie_credits", "movie_genres", "movies", "genres", "people")) {
+        for (String table : List.of("title_credits", "title_genres", "titles", "genres", "people")) {
             jdbc.update("delete from " + table);
         }
     }
@@ -181,10 +181,10 @@ class CatalogWriteRetryTransactionTest {
         // The rows of the aborted attempt were rolled back: the person kept the base slug, and the
         // movie, the genre and the assignments exist once.
         assertThat(jdbc.queryForList("select slug from people", String.class)).containsExactly("ly-hai");
-        assertThat(jdbc.queryForList("select id from movies", UUID.class)).containsExactly(created.id());
+        assertThat(jdbc.queryForList("select id from titles", UUID.class)).containsExactly(created.id());
         assertThat(jdbc.queryForList("select slug from genres", String.class)).containsExactly("kinh-di");
-        assertThat(jdbc.queryForObject("select count(*) from movie_genres", Long.class)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from movie_credits", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from title_genres", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from title_credits", Long.class)).isEqualTo(1);
     }
 
     @Test
@@ -222,11 +222,11 @@ class CatalogWriteRetryTransactionTest {
         assertThat(updated.title()).isEqualTo("Phim Mới");
         assertThat(updated.slug()).isEqualTo("phim-moi");
         assertThat(updated.genres()).containsExactly("Kinh Dị");
-        assertThat(jdbc.queryForList("select slug from movies", String.class)).containsExactly("phim-moi");
+        assertThat(jdbc.queryForList("select slug from titles", String.class)).containsExactly("phim-moi");
         assertThat(jdbc.queryForList("select slug from genres order by slug", String.class))
                 .containsExactly("hai", "kinh-di");
         assertThat(jdbc.queryForList(
-                "select g.slug from movie_genres mg join genres g on g.id = mg.genre_id", String.class))
+                "select g.slug from title_genres mg join genres g on g.id = mg.genre_id", String.class))
                 .containsExactly("kinh-di");
     }
 

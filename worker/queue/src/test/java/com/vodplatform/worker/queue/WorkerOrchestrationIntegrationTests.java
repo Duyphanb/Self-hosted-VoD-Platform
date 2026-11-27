@@ -337,7 +337,7 @@ class WorkerOrchestrationIntegrationTests {
         try (var connection = database.getConnection()) {
             connection.setAutoCommit(false);
             update(connection, """
-                    INSERT INTO movies(id, title, slug, description, status, created_at, updated_at)
+                    INSERT INTO titles(id, title, slug, description, status, created_at, updated_at)
                     VALUES (?, 'Fixture', ?, 'Fixture', 'DRAFT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """, movie, "s5w7-" + movie);
             update(connection, """

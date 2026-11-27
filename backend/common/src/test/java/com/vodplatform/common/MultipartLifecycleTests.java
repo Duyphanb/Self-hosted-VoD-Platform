@@ -156,10 +156,10 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
         parameterHandlerCalls.set(0);
         spoolSeenDuringPut.set(false);
         assertEmpty();
-        Integer movies = jdbc.queryForObject("select count(*) from movies where id=?", Integer.class, MOVIE);
+        Integer movies = jdbc.queryForObject("select count(*) from titles where id=?", Integer.class, MOVIE);
         if (movies == null || movies == 0) {
             jdbc.update(
-                    "insert into movies (id,title,slug,description,status,created_at,updated_at)"
+                    "insert into titles (id,title,slug,description,status,created_at,updated_at)"
                             + " values (?,?,?,?,?,?,?)",
                     MOVIE,
                     "Multipart fixture",
@@ -196,7 +196,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
                 MOVIE);
         jdbc.update("delete from video_assets where movie_id=?", MOVIE);
         // The database outlives this class's context: leave no movie for other classes' lists.
-        jdbc.update("delete from movies where id=?", MOVIE);
+        jdbc.update("delete from titles where id=?", MOVIE);
     }
 
     private String bearer(String role) {

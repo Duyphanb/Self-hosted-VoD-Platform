@@ -38,7 +38,7 @@ def seed_sql(upload_movie: uuid.UUID, in_flight_movie: uuid.UUID) -> str:
     rows = []
     for movie, label in ((upload_movie, "upload"), (in_flight_movie, "in-flight")):
         rows.append(
-            "INSERT INTO movies (id, title, slug, description, status, created_at, updated_at) VALUES "
+            "INSERT INTO titles (id, title, slug, description, status, created_at, updated_at) VALUES "
             f"('{movie}', 'Newman {label} fixture {movie.hex[:8]}', 'newman-{label}-{movie}', "
             "'Newman Sprint 4 upload fixture.', 'DRAFT', now(), now());"
         )

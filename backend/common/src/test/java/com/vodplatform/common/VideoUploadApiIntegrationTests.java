@@ -94,14 +94,14 @@ class VideoUploadApiIntegrationTests implements PostgresTestDatabase {
                             + "(select id from video_assets where movie_id=?)",
                     id);
             jdbc.update("delete from video_assets where movie_id=?", id);
-            jdbc.update("delete from movies where id=?", id);
+            jdbc.update("delete from titles where id=?", id);
         }
     }
 
     private UUID movie(String status) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-                "insert into movies (id,title,slug,description,status,created_at,updated_at)"
+                "insert into titles (id,title,slug,description,status,created_at,updated_at)"
                         + " values (?,?,?,?,?,?,?)",
                 id,
                 "Upload API fixture",

@@ -13,7 +13,7 @@ Frozen requirements and architecture govern implementation. Planning/status docu
 | Backlog issue, dependencies, planned next step | Specific issue in [BACKLOG.md](requirements/BACKLOG.md), [PROJECTPLAN.md](requirements/PROJECTPLAN.md); verify status against current code/GitHub when relevant |
 | Requirement coverage and risks | [TRACEABILITY.md](requirements/TRACEABILITY.md), [RISKREGISTER.md](requirements/RISKREGISTER.md) |
 | Runtime/module boundaries | [SYSTEM-ARCHITECTURE.md](architecture/SYSTEM-ARCHITECTURE.md), relevant [ADR](architecture/adr/) |
-| Tables, fields, constraints, migrations | [ERD.md](architecture/ERD.md); use frozen names such as `people`, `movie_credits`, `watchlist_items` |
+| Tables, fields, constraints, migrations | [ERD.md](architecture/ERD.md); use frozen names such as `people`, `title_credits`, `watchlist_items` |
 | HTTP methods, paths, payloads, status codes | [API-CONTRACT.yaml](architecture/API-CONTRACT.yaml), affected flow in [SEQUENCE-DIAGRAMS.md](architecture/SEQUENCE-DIAGRAMS.md) |
 | Authentication, authorization, uploads, HLS access | [SECURITY.md](architecture/SECURITY.md) and the affected API/sequence. [ADR-012](architecture/adr/ADR-012.md) covers browser sessions, refresh cookies and revocation. |
 | Upload transport, asset/current rules, encoding handoff and media cleanup | [ADR-010](architecture/adr/ADR-010.md), [ADR index](architecture/README.md#adr-index); migration and backlog specifications are planned implementation, not delivered behaviour |

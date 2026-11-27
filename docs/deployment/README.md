@@ -595,7 +595,7 @@ WITH ranked AS (
 SELECT a.id, a.movie_id, a.status, a.raw_bucket, a.raw_object_key,
        a.hls_bucket, a.hls_master_object_key
 FROM ranked a
-JOIN movies m ON m.id = a.movie_id
+JOIN titles m ON m.id = a.movie_id
 LEFT JOIN current_ready c ON c.movie_id = a.movie_id
 WHERE m.status <> 'ARCHIVED'
   AND ((a.status = 'READY' AND a.id IS DISTINCT FROM c.id)

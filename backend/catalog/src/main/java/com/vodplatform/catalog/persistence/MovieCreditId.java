@@ -9,14 +9,14 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Composite primary key of {@code movie_credits}: (movie_id, person_id, credit_role).
+ * Composite primary key of {@code title_credits}: (title_id, person_id, credit_role).
  */
 @Embeddable
 class MovieCreditId implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    @Column(name = "movie_id", nullable = false)
+    @Column(name = "title_id", nullable = false)
     private UUID movieId;
 
     @Column(name = "person_id", nullable = false)

@@ -209,7 +209,7 @@ class MovieServiceTest {
         assertThat(first.genres()).containsExactly("Hài");
         assertThat(second.genres()).containsExactly("Hài");
         assertThat(genreRepository.count()).isEqualTo(1);
-        assertThat(countRows("movie_genres")).isEqualTo(2);
+        assertThat(countRows("title_genres")).isEqualTo(2);
     }
 
     @Test
@@ -233,7 +233,7 @@ class MovieServiceTest {
         flushAndClear();
 
         // The pre-check misses the movie, as when another transaction commits it in between; the
-        // insert then fails on ux_movies_slug, reported the way H2 names it.
+        // insert then fails on ux_titles_slug, reported the way H2 names it.
         MovieSlugConflictException conflict = catchThrowableOfType(
                 MovieSlugConflictException.class,
                 () -> serviceWithStaleSlugCheck().create(new MovieRequestBuilder().slug("dat-rung").build())
@@ -248,7 +248,7 @@ class MovieServiceTest {
 
         movieService.create(new MovieRequestBuilder().slug("phim-moi").genres(List.of("Kinh Dị")).build());
 
-        assertFirstRunsBefore("insert into movies ", "insert into genres ");
+        assertFirstRunsBefore("insert into titles ", "insert into genres ");
     }
 
     @Test
@@ -485,7 +485,7 @@ class MovieServiceTest {
 
         movieService.create(new MovieRequestBuilder().slug("phim-moi").people(List.of(byName("Lý Hải", ACTOR))).build());
 
-        assertFirstRunsBefore("insert into movies ", "insert into people ");
+        assertFirstRunsBefore("insert into titles ", "insert into people ");
     }
 
     @Test
@@ -496,7 +496,7 @@ class MovieServiceTest {
 
         movieService.update(uuid(1), new MovieRequestBuilder().slug("phim-moi").people(List.of(byName("Lý Hải", ACTOR))).build());
 
-        assertFirstRunsBefore("update movies ", "insert into people ");
+        assertFirstRunsBefore("update titles ", "insert into people ");
     }
 
     @Test
@@ -533,7 +533,7 @@ class MovieServiceTest {
         assertThat(movieRepository.findById(uuid(1)).orElseThrow().getCredits())
                 .extracting(entry -> entry.getPerson().getId(), MovieCredit::getRole, MovieCredit::getSortOrder)
                 .containsExactly(tuple(uuid(202), DIRECTOR, 0), tuple(uuid(201), DIRECTOR, 1), tuple(uuid(201), ACTOR, 2));
-        assertThat(countRows("movie_credits")).isEqualTo(3);
+        assertThat(countRows("title_credits")).isEqualTo(3);
         assertThat(personRepository.count()).isEqualTo(2);
     }
 
@@ -635,8 +635,8 @@ class MovieServiceTest {
         assertThat(stored.getCredits())
                 .extracting(entry -> entry.getPerson().getId(), MovieCredit::getRole, MovieCredit::getSortOrder)
                 .containsExactly(tuple(uuid(202), DIRECTOR, 0), tuple(uuid(204), ACTOR, 1), tuple(uuid(201), ACTOR, 2));
-        assertThat(countRows("movie_genres")).isEqualTo(2);
-        assertThat(countRows("movie_credits")).isEqualTo(3);
+        assertThat(countRows("title_genres")).isEqualTo(2);
+        assertThat(countRows("title_credits")).isEqualTo(3);
         // Genres and people are shared catalog rows; replacing assignments never deletes them.
         assertThat(genreRepository.count()).isEqualTo(3);
         assertThat(personRepository.count()).isEqualTo(4);
@@ -662,7 +662,7 @@ class MovieServiceTest {
         assertThat(movieRepository.findById(uuid(1)).orElseThrow().getCredits())
                 .extracting(entry -> entry.getPerson().getId(), MovieCredit::getRole, MovieCredit::getSortOrder)
                 .containsExactly(tuple(uuid(201), DIRECTOR, 0), tuple(uuid(202), DIRECTOR, 1), tuple(uuid(201), ACTOR, 2));
-        assertThat(countRows("movie_credits")).isEqualTo(3);
+        assertThat(countRows("title_credits")).isEqualTo(3);
     }
 
     @Test
@@ -677,7 +677,7 @@ class MovieServiceTest {
         flushAndClear();
 
         assertThat(updated.people()).isEmpty();
-        assertThat(countRows("movie_credits")).isZero();
+        assertThat(countRows("title_credits")).isZero();
         assertThat(personRepository.count()).isEqualTo(1);
     }
 
@@ -719,7 +719,7 @@ class MovieServiceTest {
 
         movieService.update(uuid(1), new MovieRequestBuilder().slug("phim-moi").genres(List.of("Kinh Dị")).build());
 
-        assertFirstRunsBefore("update movies ", "insert into genres ");
+        assertFirstRunsBefore("update titles ", "insert into genres ");
     }
 
     @Test
@@ -997,7 +997,7 @@ class MovieServiceTest {
             Page<MovieSummary> published = movieService.listPublished(null, null, 0, size, MovieSort.LATEST);
             statementCounts.add(RecordingStatementInspector.statements().size());
             assertThat(videoStatusLookup.calls).containsExactly(published.map(MovieSummary::id).getContent());
-            assertThat(statementsReading("movie_genres")).hasSize(1);
+            assertThat(statementsReading("title_genres")).hasSize(1);
             assertThat(published.getContent()).hasSize(size);
             entityManager.clear();
 
@@ -1006,7 +1006,7 @@ class MovieServiceTest {
             Page<MovieSummary> everyStatus = movieService.listForAdmin(null, 0, size, MovieSort.LATEST);
             statementCounts.add(RecordingStatementInspector.statements().size());
             assertThat(videoStatusLookup.calls).containsExactly(everyStatus.map(MovieSummary::id).getContent());
-            assertThat(statementsReading("movie_genres")).hasSize(1);
+            assertThat(statementsReading("title_genres")).hasSize(1);
             assertThat(everyStatus.getContent()).hasSize(size);
             entityManager.clear();
         }
@@ -1034,7 +1034,7 @@ class MovieServiceTest {
 
         assertThat(movieService.listPublished(null, null, 0, 10, MovieSort.LATEST)).isEmpty();
         assertThat(movieService.listForAdmin(ARCHIVED, 0, 10, MovieSort.LATEST)).isEmpty();
-        assertThat(statementsReading("movie_genres")).isEmpty();
+        assertThat(statementsReading("title_genres")).isEmpty();
         assertThat(videoStatusLookup.calls).isEmpty();
     }
 
@@ -1106,13 +1106,13 @@ class MovieServiceTest {
     // ---- helpers ----
 
     /**
-     * Statements that select from {@code movies} with a row lock. H2 renders the pessimistic write
+     * Statements that select from {@code titles} with a row lock. H2 renders the pessimistic write
      * lock as {@code FOR UPDATE}; PostgreSQL would use {@code FOR NO KEY UPDATE}.
      */
     private static List<String> lockingMovieSelects() {
         return RecordingStatementInspector.statements().stream()
                 .map(sql -> sql.toLowerCase(Locale.ROOT))
-                .filter(sql -> sql.startsWith("select") && sql.contains(" from movies ") && sql.contains(" for update"))
+                .filter(sql -> sql.startsWith("select") && sql.contains(" from titles ") && sql.contains(" for update"))
                 .toList();
     }
 

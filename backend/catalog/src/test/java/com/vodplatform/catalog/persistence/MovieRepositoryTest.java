@@ -75,8 +75,8 @@ class MovieRepositoryTest {
                         tuple("Tuấn Trần", CreditRole.ACTOR, 1),
                         tuple("Nguyễn Quang Dũng", CreditRole.ACTOR, 2)
                 );
-        assertThat(countRows("movie_genres")).isEqualTo(2);
-        assertThat(countRows("movie_credits")).isEqualTo(3);
+        assertThat(countRows("title_genres")).isEqualTo(2);
+        assertThat(countRows("title_credits")).isEqualTo(3);
     }
 
     @Test
@@ -141,7 +141,7 @@ class MovieRepositoryTest {
                         tuple(third.getId(), CreditRole.ACTOR, 1),
                         tuple(first.getId(), CreditRole.ACTOR, 2)
                 );
-        assertThat(countRows("movie_credits")).isEqualTo(3);
+        assertThat(countRows("title_credits")).isEqualTo(3);
     }
 
     @Test
@@ -179,7 +179,7 @@ class MovieRepositoryTest {
         assertThat(movieRepository.findById(uuid(1)).orElseThrow().getGenres())
                 .extracting(Genre::getSlug)
                 .containsExactlyInAnyOrder("hai", "kinh-di");
-        assertThat(countRows("movie_genres")).isEqualTo(2);
+        assertThat(countRows("title_genres")).isEqualTo(2);
     }
 
     @Test

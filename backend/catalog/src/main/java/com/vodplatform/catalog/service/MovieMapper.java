@@ -61,7 +61,7 @@ final class MovieMapper {
     }
 
     /**
-     * {@code movie_genres} has no order column, so names are ordered by slug for a stable result.
+     * {@code title_genres} has no order column, so names are ordered by slug for a stable result.
      */
     private static List<String> genreNames(Collection<Genre> genres) {
         return genres.stream()

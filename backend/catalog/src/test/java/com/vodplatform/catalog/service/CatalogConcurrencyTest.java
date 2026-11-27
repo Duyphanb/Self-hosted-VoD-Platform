@@ -112,7 +112,7 @@ class CatalogConcurrencyTest {
     void cleanUp() throws InterruptedException {
         executor.shutdownNow();
         executor.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        for (String table : List.of("movie_credits", "movie_genres", "movies", "genres", "people")) {
+        for (String table : List.of("title_credits", "title_genres", "titles", "genres", "people")) {
             jdbc.update("delete from " + table);
         }
     }
@@ -132,7 +132,7 @@ class CatalogConcurrencyTest {
         MovieDetail created = racing.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         assertThat(created.genres()).containsExactly("Kinh Dị");
         assertThat(genreRepository.findAll()).extracting(genre -> genre.getId()).containsExactly(uuid(1));
-        assertThat(jdbc.queryForObject("select count(*) from movie_genres", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from title_genres", Long.class)).isEqualTo(1);
     }
 
     @Test

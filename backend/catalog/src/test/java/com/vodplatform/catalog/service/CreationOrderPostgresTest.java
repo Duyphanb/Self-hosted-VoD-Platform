@@ -144,9 +144,9 @@ class CreationOrderPostgresTest {
         executor.shutdownNow();
         executor.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         String pattern = slugPattern();
-        jdbc.update("delete from movie_credits where movie_id in (select id from movies where slug like ?)", pattern);
-        jdbc.update("delete from movie_genres where movie_id in (select id from movies where slug like ?)", pattern);
-        jdbc.update("delete from movies where slug like ?", pattern);
+        jdbc.update("delete from title_credits where title_id in (select id from titles where slug like ?)", pattern);
+        jdbc.update("delete from title_genres where title_id in (select id from titles where slug like ?)", pattern);
+        jdbc.update("delete from titles where slug like ?", pattern);
         jdbc.update("delete from people where slug like ?", pattern);
         jdbc.update("delete from genres where slug like ?", pattern);
     }
@@ -172,7 +172,7 @@ class CreationOrderPostgresTest {
         assertThat(jdbc.queryForList("select slug from genres where slug like ?", String.class, slugPattern()))
                 .containsExactlyInAnyOrder(SlugNormalizer.slugify(first), SlugNormalizer.slugify(second));
         assertThat(jdbc.queryForObject(
-                "select count(*) from movie_genres where movie_id in (select id from movies where slug like ?)",
+                "select count(*) from title_genres where title_id in (select id from titles where slug like ?)",
                 Long.class, slugPattern())).isEqualTo(4);
     }
 
@@ -207,8 +207,8 @@ class CreationOrderPostgresTest {
         assertThat(created.get(1).people()).extracting(CreditedPerson::name, CreditedPerson::role)
                 .containsExactly(tuple(bob, ACTOR), tuple(alice, DIRECTOR));
         assertThat(jdbc.query(
-                "select p.name, c.credit_role, c.sort_order from movie_credits c join people p on p.id = c.person_id"
-                        + " join movies m on m.id = c.movie_id where m.slug = ? order by c.sort_order",
+                "select p.name, c.credit_role, c.sort_order from title_credits c join people p on p.id = c.person_id"
+                        + " join titles m on m.id = c.title_id where m.slug = ? order by c.sort_order",
                 (row, index) -> tuple(row.getString(1), CreditRole.valueOf(row.getString(2)), row.getInt(3)),
                 "phim-b-" + token
         )).containsExactly(tuple(bob, ACTOR, 0), tuple(alice, DIRECTOR, 1));

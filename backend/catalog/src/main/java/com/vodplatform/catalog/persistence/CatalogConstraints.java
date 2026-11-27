@@ -10,7 +10,7 @@ import org.hibernate.exception.ConstraintViolationException;
  */
 public final class CatalogConstraints {
 
-    public static final String MOVIES_SLUG = "ux_movies_slug";
+    public static final String TITLES_SLUG = "ux_titles_slug";
     public static final String GENRES_NAME = "ux_genres_name";
     public static final String GENRES_SLUG = "ux_genres_slug";
     public static final String PEOPLE_SLUG = "ux_people_slug";
@@ -22,9 +22,9 @@ public final class CatalogConstraints {
      * Returns whether the failure, or one of its causes, is a Hibernate constraint violation of the
      * named constraint.
      *
-     * <p>PostgreSQL reports the bare name ({@code ux_movies_slug}); H2 reports it schema-qualified
-     * and followed by its backing index ({@code PUBLIC.UX_MOVIES_SLUG INDEX
-     * PUBLIC.UX_MOVIES_SLUG_INDEX_8}). The reported name is reduced to its first token without a
+     * <p>PostgreSQL reports the bare name ({@code ux_titles_slug}); H2 reports it schema-qualified
+     * and followed by its backing index ({@code PUBLIC.UX_TITLES_SLUG INDEX
+     * PUBLIC.UX_TITLES_SLUG_INDEX_8}). The reported name is reduced to its first token without a
      * schema qualifier and compared case-insensitively, so both databases match the same name.
      */
     public static boolean isViolationOf(Throwable failure, String constraintName) {

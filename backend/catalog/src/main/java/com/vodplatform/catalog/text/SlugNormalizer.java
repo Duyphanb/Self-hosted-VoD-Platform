@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
  */
 public final class SlugNormalizer {
 
-    /** Maximum length of a movie slug ({@code movies.slug}, API contract). */
+    /** Maximum length of a movie slug ({@code titles.slug}, API contract). */
     public static final int MOVIE_SLUG_MAX_LENGTH = 255;
 
     /** Maximum length of a generated person slug base, before any collision suffix. */

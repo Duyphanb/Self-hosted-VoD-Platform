@@ -32,7 +32,7 @@ Status values must match the domain glossary.
 | Entity | Column | Values |
 |---|---|---|
 | `users` | `status` | `ACTIVE`, `DISABLED` |
-| `movies` | `status` | `DRAFT`, `PUBLISHED`, `ARCHIVED` |
+| `titles` | `status` | `DRAFT`, `PUBLISHED`, `ARCHIVED` |
 | `video_assets` | `status` | `UPLOADED`, `QUEUED`, `PROCESSING`, `READY`, `FAILED` |
 | `encoding_jobs` | `status` | `QUEUED`, `PROCESSING`, `READY`, `FAILED` |
 
@@ -53,7 +53,7 @@ stateDiagram-v2
 
 The diagram is the asset lifecycle. Each job has QUEUED -> PROCESSING -> READY/FAILED only; retry inserts a new job rather than resetting a terminal job. Claims/finishes update job and asset atomically with expected-state predicates. There is no age-based QUEUED timeout. One non-overlapping worker fails orphaned PROCESSING rows before starting its listener.
 
-Newest means greatest `(created_at, id)` per movie. Current is greatest `(created_at, id)` among READY assets; no pointer column is added to `movies`. `videoStatus` is READY if current exists, otherwise newest status, or null without assets. Superseded means READY but not current, or FAILED but not newest. Retry accepts only newest FAILED.
+Newest means greatest `(created_at, id)` per movie. Current is greatest `(created_at, id)` among READY assets; no pointer column is added to `titles`. `videoStatus` is READY if current exists, otherwise newest status, or null without assets. Superseded means READY but not current, or FAILED but not newest. Retry accepts only newest FAILED.
 
 Assign asset `created_at` inside the asset/job insert transaction, after the raw PUT and acquisition of per-movie serialization, never at asset ID generation or request start. This keeps overlapping uploads ordered by the serialized insert when deriving newest/current.
 
@@ -67,21 +67,21 @@ erDiagram
     users ||--o{ auth_sessions : signs_in
     auth_sessions o|--o{ refresh_tokens : rotates
 
-    movies ||--o{ movie_genres : categorized
-    genres ||--o{ movie_genres : used_by
-    movies ||--o{ movie_credits : credited
-    people ||--o{ movie_credits : contributes
-    movies ||--o{ video_assets : has
+    titles ||--o{ title_genres : categorized
+    genres ||--o{ title_genres : used_by
+    titles ||--o{ title_credits : credited
+    people ||--o{ title_credits : contributes
+    titles ||--o{ video_assets : has
     video_assets ||--o{ encoding_jobs : processed_by
 
     users ||--o{ playback_progress : tracks
-    movies ||--o{ playback_progress : tracked_for
+    titles ||--o{ playback_progress : tracked_for
     users ||--o{ watchlist_items : saves
-    movies ||--o{ watchlist_items : saved_as
+    titles ||--o{ watchlist_items : saved_as
     users ||--o{ watch_history : watches
-    movies ||--o{ watch_history : watched_as
+    titles ||--o{ watch_history : watched_as
     users ||--o{ ratings : rates
-    movies ||--o{ ratings : rated_as
+    titles ||--o{ ratings : rated_as
 ```
 
 ## Tables
@@ -158,7 +158,7 @@ Indexes:
 - `ix_refresh_tokens_expires_at` on `expires_at`
 - `ix_refresh_tokens_session_id` on `session_id`
 
-### `movies`
+### `titles`
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
@@ -176,10 +176,10 @@ Indexes:
 
 Indexes:
 
-- unique `ux_movies_slug` on `slug`
-- GIN `ix_movies_search_vector` on `search_vector`
-- `ix_movies_status` on `status`
-- `ix_movies_release_year` on `release_year`
+- unique `ux_titles_slug` on `slug`
+- GIN `ix_titles_search_vector` on `search_vector`
+- `ix_titles_status` on `status`
+- `ix_titles_release_year` on `release_year`
 
 ### `genres`
 
@@ -194,16 +194,16 @@ Indexes:
 - unique `ux_genres_name` on `name`
 - unique `ux_genres_slug` on `slug`
 
-### `movie_genres`
+### `title_genres`
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `movie_id` | uuid | PK, FK -> `movies.id` on delete cascade | Movie |
+| `title_id` | uuid | PK, FK -> `titles.id` on delete cascade | Movie |
 | `genre_id` | uuid | PK, FK -> `genres.id` restrict delete | Genre |
 
 Constraints:
 
-- primary key: (`movie_id`, `genre_id`)
+- primary key: (`title_id`, `genre_id`)
 
 ### `people`
 
@@ -218,19 +218,19 @@ Indexes:
 - unique `ux_people_slug` on `slug`
 - `ix_people_name` on `name`
 
-### `movie_credits`
+### `title_credits`
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `movie_id` | uuid | PK, FK -> `movies.id` on delete cascade | Movie |
+| `title_id` | uuid | PK, FK -> `titles.id` on delete cascade | Movie |
 | `person_id` | uuid | PK, FK -> `people.id` restrict delete | Person |
 | `credit_role` | varchar(20) | PK, check | `ACTOR`, `DIRECTOR` |
 | `sort_order` | int | null | Display order |
 
 Indexes:
 
-- `ix_movie_credits_person_id` on `person_id`
-- `ix_movie_credits_role` on `credit_role`
+- `ix_title_credits_person_id` on `person_id`
+- `ix_title_credits_role` on `credit_role`
 
 ### `video_assets`
 
@@ -239,7 +239,7 @@ One new row per upload, never an upsert. Raw key: `{movieId}/{videoAssetId}.{ext
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | uuid | PK | Video asset ID |
-| `movie_id` | uuid | FK -> `movies.id` on delete cascade, not null | Owning movie |
+| `movie_id` | uuid | FK -> `titles.id` on delete cascade, not null | Owning movie |
 | `raw_bucket` | varchar(100) | not null | MinIO raw bucket |
 | `raw_object_key` | varchar(512) | not null | Raw video object key |
 | `hls_bucket` | varchar(100) | null | MinIO HLS bucket |
@@ -289,7 +289,7 @@ Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specific
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `user_id` | uuid | PK, FK -> `users.id` on delete cascade | User |
-| `movie_id` | uuid | PK, FK -> `movies.id` on delete cascade | Movie |
+| `movie_id` | uuid | PK, FK -> `titles.id` on delete cascade | Movie |
 | `current_seconds` | int | not null, check `current_seconds >= 0` | Last saved position, clamped by the server to the current asset's duration |
 | `duration_seconds` | int | null, check `duration_seconds >= 0` | Duration of the movie's current asset when the row was saved; never the client's value |
 | `finished` | boolean | not null default false | Server-derived "counts as watched" flag: the player reported the end (the position is then stored as the duration), or the position reached 90% of the duration. It does not set the resume position |
@@ -309,12 +309,12 @@ The progress API writes this table directly in one transaction with `watch_histo
 |---|---|---|---|
 | `id` | uuid | PK | Watchlist item ID |
 | `user_id` | uuid | FK -> `users.id` on delete cascade, not null | Owner |
-| `movie_id` | uuid | FK -> `movies.id` on delete cascade, not null | Saved movie |
+| `title_id` | uuid | FK -> `titles.id` on delete cascade, not null | Saved movie |
 | `created_at` | timestamptz | not null | Creation timestamp |
 
 Constraints and indexes:
 
-- unique `ux_watchlist_items_user_movie` on (`user_id`, `movie_id`)
+- unique `ux_watchlist_items_user_title` on (`user_id`, `title_id`)
 - `ix_watchlist_items_user_created` on (`user_id`, `created_at`)
 
 ### `watch_history`
@@ -323,7 +323,7 @@ Constraints and indexes:
 |---|---|---|---|
 | `id` | uuid | PK | History item ID |
 | `user_id` | uuid | FK -> `users.id` on delete cascade, not null | Owner |
-| `movie_id` | uuid | FK -> `movies.id` on delete cascade, not null | Watched movie |
+| `movie_id` | uuid | FK -> `titles.id` on delete cascade, not null | Watched movie |
 | `started_at` | timestamptz | not null | First accepted progress update |
 | `last_watched_at` | timestamptz | not null | Latest accepted progress update |
 | `completed_at` | timestamptz | null | First time a stored progress update was finished; never cleared |
@@ -339,19 +339,19 @@ Indexes:
 |---|---|---|---|
 | `id` | uuid | PK | Rating ID |
 | `user_id` | uuid | FK -> `users.id` on delete cascade, not null | Owner |
-| `movie_id` | uuid | FK -> `movies.id` on delete cascade, not null | Rated movie |
+| `title_id` | uuid | FK -> `titles.id` on delete cascade, not null | Rated movie |
 | `rating` | int | not null, check `rating >= 1 AND rating <= 5` | User rating |
 | `created_at` | timestamptz | not null | Creation timestamp |
 | `updated_at` | timestamptz | not null | Last update timestamp |
 
 Constraints and indexes:
 
-- unique `ux_ratings_user_movie` on (`user_id`, `movie_id`)
-- `ix_ratings_movie_id` on `movie_id`
+- unique `ux_ratings_user_title` on (`user_id`, `title_id`)
+- `ix_ratings_title_id` on `title_id`
 
 ## Search Design
 
-MVP uses PostgreSQL full-text search. The `movies.search_vector` column includes normalized text from:
+MVP uses PostgreSQL full-text search. The `titles.search_vector` column includes normalized text from:
 
 - movie title
 - description
@@ -363,7 +363,7 @@ The `search_vector` is rebuilt by application code on any metadata change that a
 
 ## Deletion Rules
 
-- Movie delete in API means archive: set `movies.status = 'ARCHIVED'`.
+- Movie delete in API means archive: set `titles.status = 'ARCHIVED'`.
 - Hard delete is not part of MVP user/admin flow.
 - User-owned records are scoped by authenticated user ID.
 - Deleting a `users` row cascades to auth sessions, refresh tokens, playback progress, watchlist items, watch history,
@@ -380,7 +380,9 @@ The `search_vector` is rebuilt by application code on any metadata change that a
 
 ## Planned (ADR-013): content model
 
-Planned schema of [ADR-013](adr/ADR-013.md) (#244). Nothing in this section exists yet: the tables above describe the current schema, and the committed snapshot changes only with the migration of each slice. Each slice adds one Flyway migration after V6 and regenerates the snapshot in the same pull request.
+The tables above reflect the S1 rename in V7. The diagram below shows the planned content model from
+[ADR-013](adr/ADR-013.md) (#244). Each schema slice adds a Flyway migration and regenerates the snapshot
+in the same pull request.
 
 ```mermaid
 erDiagram
@@ -397,7 +399,10 @@ erDiagram
     titles ||--o{ ratings : rated_as
 ```
 
-**S1, rename only.** `movies` becomes `titles`, `movie_genres` becomes `title_genres` and `movie_credits` becomes `title_credits`. The `movie_id` columns of those tables, `ratings` and `watchlist_items` become `title_id`, and their constraints and indexes follow (`ux_movies_slug` to `ux_titles_slug`, `ix_movies_*` to `ix_titles_*`, `ux_ratings_user_movie` to `ux_ratings_user_title`, `ux_watchlist_items_user_movie` to `ux_watchlist_items_user_title`, `ix_ratings_movie_id` to `ix_ratings_title_id`, `ix_movie_credits_*` to `ix_title_credits_*`). `video_assets`, `playback_progress` and `watch_history` keep `movie_id` until S2. No data changes.
+**S1, rename only (V7).** `movies`, `movie_genres` and `movie_credits` became `titles`, `title_genres`
+and `title_credits`. `title_genres`, `title_credits`, `ratings` and `watchlist_items` use `title_id`,
+with renamed constraints and indexes. `video_assets`, `playback_progress` and `watch_history` keep
+`movie_id` until S2. All rows and UUIDs are preserved.
 
 **S2, episodes.**
 

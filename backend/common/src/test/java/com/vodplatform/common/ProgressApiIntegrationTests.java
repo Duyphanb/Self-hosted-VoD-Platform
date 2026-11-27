@@ -64,7 +64,9 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
         user=user(); movie=movie(); asset=asset(movie,"READY",100,0); token=token(user,"ROLE_USER");
     }
     @AfterEach void cleanup() {
-        for(UUID id:movieIds) jdbc.update("delete from movies where id=?",id);
+        for (UUID id : movieIds) {
+            jdbc.update("delete from titles where id = ?", id);
+        }
         for(UUID id:userIds) jdbc.update("delete from users where id=?",id);
     }
 
@@ -322,7 +324,15 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
     private int progressCount() {return jdbc.queryForObject("select count(*) from playback_progress where user_id=?",Integer.class,user);}
     private int historyCount() {return jdbc.queryForObject("select count(*) from watch_history where user_id=?",Integer.class,user);}
     private UUID user() {UUID id=UUID.randomUUID();userIds.add(id);jdbc.update("insert into users(id,email,password_hash,display_name,status,created_at,updated_at) values(?,?,'unused','Progress fixture','ACTIVE',?,?)",id,id+"@example.test",Timestamp.from(T0),Timestamp.from(T0));return id;}
-    private UUID movie() {UUID id=UUID.randomUUID();movieIds.add(id);jdbc.update("insert into movies(id,title,slug,description,status,created_at,updated_at) values(?,'Progress fixture',?,'Progress fixture','PUBLISHED',?,?)",id,"progress-"+id,Timestamp.from(T0),Timestamp.from(T0));return id;}
+    private UUID movie() {
+        UUID id = UUID.randomUUID();
+        movieIds.add(id);
+        jdbc.update("""
+                insert into titles (id, title, slug, description, status, created_at, updated_at)
+                values (?, 'Progress fixture', ?, 'Progress fixture', 'PUBLISHED', ?, ?)
+                """, id, "progress-" + id, Timestamp.from(T0), Timestamp.from(T0));
+        return id;
+    }
     private UUID asset(UUID movie,String state,Integer duration,int second) {UUID id=UUID.randomUUID();jdbc.update("insert into video_assets(id,movie_id,raw_bucket,raw_object_key,status,duration_seconds,created_at,updated_at) values(?,?,'fixture',?,?,?,?,?)",id,movie,id.toString(),state,duration,Timestamp.from(T0.plusSeconds(second)),Timestamp.from(T0));return id;}
     private String token(UUID user, String role) {
         return "Bearer " + bearerSessions.tokenFor(user, "progress@example.test", role);

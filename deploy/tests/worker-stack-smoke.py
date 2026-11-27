@@ -162,7 +162,7 @@ def verify_hls(stack, movie, asset, token):
     check(status == 404 and json.loads(body).get("code") == "VIDEO_ASSET_NOT_FOUND",
           "DRAFT HLS must be hidden with 404")
     check(headers.get("Cache-Control") == "no-store", "DRAFT HLS cache policy")
-    stack.sql(f"UPDATE movies SET status='PUBLISHED', updated_at=now() WHERE id='{movie}';")
+    stack.sql(f"UPDATE titles SET status='PUBLISHED', updated_at=now() WHERE id='{movie}';")
     status, playback = stack.request(f"/api/v1/movies/{movie}/playback", token)
     check(status == 200 and playback.get("videoAssetId") == asset and playback.get("hlsManifestUrl") == master,
           "Playback must select the worker's READY asset")
@@ -253,7 +253,7 @@ def end_to_end(stack, image, pids_limit, timeout):
     token = admin_token()
 
     movie = uuid.uuid4()
-    stack.sql("INSERT INTO movies (id, title, slug, description, status, created_at, updated_at) VALUES "
+    stack.sql("INSERT INTO titles (id, title, slug, description, status, created_at, updated_at) VALUES "
               f"('{movie}', 'Worker stack smoke {movie.hex[:8]}', 'worker-stack-smoke-{movie}', "
               "'Issue 5.8 worker stack smoke fixture.', 'DRAFT', now(), now());")
     with tempfile.TemporaryDirectory(prefix="vod-worker-smoke-") as directory:

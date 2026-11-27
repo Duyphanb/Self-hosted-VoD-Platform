@@ -88,7 +88,7 @@ class MovieServiceUnitTest {
 
     @Test
     void aSlugViolationReportedByPostgresqlOnCreateIsAConflict() {
-        when(movieRepository.saveAndFlush(any(Movie.class))).thenThrow(violation("ux_movies_slug"));
+        when(movieRepository.saveAndFlush(any(Movie.class))).thenThrow(violation("ux_titles_slug"));
 
         Throwable failure = catchThrowable(() -> movieService.create(new MovieRequestBuilder().build()));
 
@@ -98,7 +98,7 @@ class MovieServiceUnitTest {
     @Test
     void aSlugViolationReportedByPostgresqlOnUpdateIsAConflict() {
         when(movieRepository.findForUpdateById(MOVIE_ID)).thenReturn(Optional.of(movie(MovieStatus.PUBLISHED)));
-        doThrow(violation("ux_movies_slug")).when(movieRepository).flush();
+        doThrow(violation("ux_titles_slug")).when(movieRepository).flush();
 
         Throwable failure = catchThrowable(() -> movieService.update(MOVIE_ID, new MovieRequestBuilder().build()));
 

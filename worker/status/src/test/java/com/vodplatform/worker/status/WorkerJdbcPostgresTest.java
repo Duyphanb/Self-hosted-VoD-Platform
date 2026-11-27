@@ -292,7 +292,7 @@ class WorkerJdbcPostgresTest {
         try (var connection = backend.getConnection()) {
             connection.setAutoCommit(false);
             update(connection, """
-                    INSERT INTO movies(id, title, slug, description, status, created_at, updated_at)
+                    INSERT INTO titles(id, title, slug, description, status, created_at, updated_at)
                     VALUES (?, 'Fixture', ?, 'Fixture', 'DRAFT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """, movie, "fixture-" + movie);
             update(connection, """
@@ -345,7 +345,7 @@ class WorkerJdbcPostgresTest {
         @Override
         public void close() throws SQLException {
             try (var connection = backend.getConnection()) {
-                update(connection, "DELETE FROM movies WHERE id = ?", movie);
+                update(connection, "DELETE FROM titles WHERE id = ?", movie);
             }
         }
     }

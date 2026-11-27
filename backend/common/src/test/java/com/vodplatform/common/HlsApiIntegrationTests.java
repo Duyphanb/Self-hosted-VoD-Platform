@@ -85,7 +85,7 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
 
     @AfterEach
     void cleanup() {
-        for (UUID movie : movies) jdbc.update("delete from movies where id = ?", movie);
+        for (UUID movie : movies) jdbc.update("delete from titles where id = ?", movie);
     }
 
     @ParameterizedTest
@@ -178,7 +178,7 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
         notFound(path(old, true), token);
         verifyNoInteractions(storage);
         mvc.perform(request(path(next, true), token)).andExpect(status().isOk());
-        jdbc.update("update movies set status='ARCHIVED' where id=?", movie);
+        jdbc.update("update titles set status='ARCHIVED' where id=?", movie);
         clearInvocations(storage);
         notFound(path(next, true), token);
         verifyNoInteractions(storage);
@@ -380,7 +380,7 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
     private UUID movie(String status) {
         UUID id = UUID.randomUUID();
         movies.add(id);
-        jdbc.update("insert into movies(id,title,slug,description,status,created_at,updated_at) values(?,? ,?,'HLS fixture',?,?,?)",
+        jdbc.update("insert into titles(id,title,slug,description,status,created_at,updated_at) values(?,? ,?,'HLS fixture',?,?,?)",
                 id, "HLS fixture", "hls-" + id, status, Timestamp.from(T0), Timestamp.from(T0));
         return id;
     }
