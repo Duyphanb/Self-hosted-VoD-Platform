@@ -251,8 +251,10 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   original title gets `lang="ja"`).
 - **Formatting:** numbers, dates and durations use `Intl` with `vi-VN`; no raw ISO timestamps on screen.
 - **Server errors:** known API error codes map to Vietnamese messages from the table; field errors (which carry a
-  field name and a message, no machine-readable reason) get a Vietnamese message per field, with a generic
-  field-level fallback. The request ID is shown when the response supplies one (it is optional and nullable). The
+  field name and a message, no machine-readable reason) get a Vietnamese message keyed by the field and, where the
+  table recognises it, the context the server message gives (for example `people[n].personId` for an unknown person
+  versus an ambiguous name, where today's form tells the admin to pick a person), with a generic Vietnamese fallback
+  for anything unrecognised; tests keep both of today's corrections. The request ID is shown when the response supplies one (it is optional and nullable). The
   server's own English text appears only for codes the table explicitly allows, as a secondary detail marked
   `lang="en"`; unknown codes get a generic Vietnamese message. Viewer screens never show encoding failure codes or
   messages (ADR-011 D18).
@@ -286,7 +288,7 @@ Starter glossary (the table may refine wording; the meaning stays):
 | `AuthFormCard` and the auth pages | existing, restyled | no flow change |
 | `MovieCard` (later the title card) | changed | one link; 2:3 artwork with the generated poster as fallback (ADR-020 owns real artwork); status line in words |
 | `ContinueWatchingCard` | changed | progress bar per section 4.2; position as text |
-| `PosterArt` | changed | pink and black gradients (section 4.2) |
+| `PosterArt` | changed | pink and black gradients (section 4.2); inside a card that already shows the title as its caption, the generated poster drops its own title line (genre and year stay), so the title appears once |
 | `MovieStatusBadges` → `StatusBadge` | changed | word plus colour; catalogue status only in admin views |
 | `buttonStyles.ts` → `Button` and `LinkButton` | replaced | variants primary, secondary, danger, ghost; loading and disabled states; the old helpers are removed only after every import moves |
 | `useModalFocus` and the three dialogs → `Dialog` | merged | one dialog for archive, unsaved changes and upload exit (later also activation); focus moves in, Tab stays inside, Escape closes where safe, and on close focus goes to the target each caller provides, keeping today's destinations (the archive dialog focuses the list heading after a successful archive and the opener otherwise; the upload leave dialog returns to the upload status or outcome); existing focus assertions stay |
@@ -325,8 +327,8 @@ otherwise.
 | Guest landing, sign-in, registration | idle, submitting, field errors, server error (section 9), the unconfirmed sign-out banner; sign-in success returns to the safe intended route with its query and fragment (as today), with the signed-in landing page as the fallback, and the protected deep-link case stays covered; registration success shows the account-created confirmation with a link to sign in and creates no session (ADR-012) |
 | Not found, forbidden | heading as the page title, one way back, no private data |
 | Account | as today |
-| Admin list | loading skeleton, list (from ADR-013 S2 the viewer page is published-only for every role, so a row's "Xem" link is offered only for published titles), empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (`aria-busy` and a loading indicator instead of dimming the rows, which would put `text-muted` at 3.14:1; Archive disabled and the View, Edit and Upload links unchanged, as today), archive dialog, success notice after save or archive, selected status filter visible |
-| Admin form (create, edit) | loading, initial load error with retry, not found, forbidden, a background refresh error that keeps the unsaved draft, field errors with the error summary that receives focus, dirty-form guard on navigation and sign-out, saving (guard says the save is in progress), conflict (slug already used), success back to the same filtered list |
+| Admin list | loading skeleton, list (from ADR-013 S2 the viewer page is published-only for every role, so a row's "Xem" link is offered only for published titles), empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (`aria-busy` and a loading indicator instead of dimming the rows, which would put `text-muted` at 3.14:1; Archive disabled and the View, Edit and Upload links unchanged, as today), archive dialog (pending: focus stays in the dialog while both actions are disabled; recoverable failure: the dialog stays open and allows a retry), success notice after save or archive, selected status filter visible |
+| Admin form (create, edit) | loading, initial load error with retry, not found, forbidden, a background refresh error that keeps the unsaved draft, field errors with the error summary that receives focus, a save failure without field errors (the draft is kept, the summary receives focus, the admin can save again), dirty-form guard on navigation and sign-out, saving (guard says the save is in progress), conflict (slug already used), success back to the same filtered list |
 | Admin upload | the frozen #175 states unchanged: initial movie lookup error with retry, idle, checking, sending with progress and cancel, saving to storage (cancel hidden), accepted, unknown outcome (no automatic resend), confirmed not accepted (nothing committed; manual retry), cancelled, already in progress (409), too large (413), rejected file (400), signed out, forbidden, not found. Exit guards: the in-app dialogs for navigation and, new, sign-out are tested in the sending, checking and saving phases, including a phase that settles while the dialog is open and the focus target afterwards; the browser's own page-unload prompt is tested for appearing in each pending phase after a user interaction and, by dismissing a real `beforeunload` dialog in Playwright, for keeping the upload page open |
 
 The viewer phase 2 screens inherit sections 4-10; their states are specified in the phase 2 issue with ADR-013,
