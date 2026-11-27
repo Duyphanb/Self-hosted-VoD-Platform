@@ -69,7 +69,7 @@ The Sprint 4 (4.x) parts of these rows are verified in the [Sprint 4 closeout](.
 
 ## Sprint 6 design-to-test plan
 
-These rows were the planned evidence for [ADR-011](../architecture/adr/ADR-011.md). They are verified in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md), which maps each Sprint 6 issue to its tests, the CI run, the Chrome playback smoke on `main` and the manual browser rows. Firefox in D5-D8 rests on a scripted row, accepted by the owner as a recorded deviation from the hand-run row. The Chrome smoke runs on every pull request as a required check since #255. One part remains open: the admin projection part of D15-D18, owned by Sprint 9 (9.1).
+These rows were the planned evidence for [ADR-011](../architecture/adr/ADR-011.md). They are verified in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md), which maps each Sprint 6 issue to its tests, the CI run, the Chrome playback smoke on `main` and the manual browser rows. Firefox in D5-D8 rests on a scripted row, accepted by the owner as a recorded deviation from the hand-run row. Since #255 the Chrome smoke runs on every pull request, and its `chrome-playback` job is a required check for merges into `main`. One part remains open: the admin projection part of D15-D18, owned by Sprint 9 (9.1).
 
 | Decisions / feature | Planned evidence and owner |
 |---|---|
