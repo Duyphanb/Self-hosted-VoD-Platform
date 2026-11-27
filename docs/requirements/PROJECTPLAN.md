@@ -38,7 +38,7 @@ See `BACKLOG.md` for detailed sprint backlog with issues, acceptance criteria, d
 ## Implementation Principles
 
 - Build local end-to-end before deployment polish.
-- Keep worker concurrency at 1 until the encoding flow is reliable.
+- Keep one active video encode (worker concurrency and prefetch 1, one non-overlapping replica); a separately budgeted admin-image job runs beside it only after its measured gate (ADR-020, planned).
 - Freeze ERD and API contract before broad feature implementation.
 - Add tests with behavior changes.
 - Update docs when behavior, configuration, or contracts change.
