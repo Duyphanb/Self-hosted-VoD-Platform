@@ -70,7 +70,8 @@ own issue; sections 7 and 8 give only the layout and navigation rules they inher
 
 Values are defined once, as CSS custom properties holding RGB channels, and mapped into the Tailwind 3 theme
 (`theme.extend.colors` with `<alpha-value>`), so components never hard-code a colour. Ratios below are WCAG 2.x
-relative-luminance contrast ratios, computed for these exact values.
+relative-luminance contrast ratios, computed for these exact values; a translucent colour is first composited over
+its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
 
 | Token | Value | Use | Contrast |
 |---|---|---|---|
@@ -103,15 +104,17 @@ relative-luminance contrast ratios, computed for these exact values.
   meets 3:1. `accent` as text is used only on `bg`, `surface` or `raised`.
 - **Fills:** `accent` carries only `on-accent` (white on `accent` is 3.53:1 and `text` on it 3.26:1, both too low).
   `action-solid`, `action-solid-hover` and `danger-solid` carry only `on-solid` and are never used as text colours
-  (`action-solid` as text is 3.04:1 on `surface`).
+  (`action-solid` as text is 2.95:1 on `surface`).
 - **Focus:** every focusable element shows a 2 px `focus` ring outside a 2 px gap in the colour of the surface behind
   it, so the ring never touches an `accent` fill (ring on `accent` would be 1.33:1). The ring is never removed without
   a visible replacement and is not clipped by `overflow: hidden` containers. Under `forced-colors: active` the ring
   uses the system `Highlight` colour.
-- **Selection and state:** a selected or current item changes its border and its fill (`selected-bg`) and carries
-  `aria-pressed`, `aria-current`, `aria-selected` or `aria-checked` as its pattern requires. `selected-bg` alone is
-  not a boundary (1.01:1 against `raised`), so the border is required. Colour is never the only signal: statuses
-  always carry a word ("Sẵn sàng", "Đang xử lý", "Lỗi").
+- **Selection and state:** a selected or current item shows a non-colour indicator that the unselected item does
+  not have (a check icon, an underline or a 2 px border that appears only when selected), with at least 3:1 against
+  the adjacent colours, in addition to the `selected-bg` fill; it carries `aria-pressed`, `aria-current`,
+  `aria-selected` or `aria-checked` as its pattern requires. A change of colour alone (fill or border hue) is not
+  enough, and `selected-bg` alone is not a boundary (1.01:1 against `raised`). The selected state is checked in normal
+  and forced colours. Statuses always carry a word ("Sẵn sàng", "Đang xử lý", "Lỗi").
 - **Disabled:** disabled controls use a `raised` fill, a `line` border and `disabled-text`; text is never dimmed with
   opacity (45 % opacity puts a `text` label at 4.25:1 on `surface`). A disabled control stays readable and, where it
   hides an explanation, a nearby text says why.
@@ -154,8 +157,14 @@ relative-luminance contrast ratios, computed for these exact values.
 - **Widths:** content up to 1600 px with 32-64 px side gutters at desktop widths; the admin workspace is a 220 px
   rail plus content up to 1600 px.
 - **Viewports:** designed and screenshot-checked at 1280x800, 1440x900 and 1920x1080; functional (no broken layout,
-  no lost action) at 1024 px and at 320 px wide; no horizontal page scroll except deliberate rails and wide tables.
-  200 % zoom at 1280 px is checked as the 640 px case.
+  no lost content or action) at 1024 px and at 320 CSS px wide. Text resized to 200 % at 1280 px and reflow at
+  320 CSS px are checked separately (WCAG 1.4.4 and 1.4.10). At 320 px nothing scrolls horizontally except content
+  that needs a two-dimensional layout (a video, a wide data table in its own scroll region); rows of cards wrap
+  instead of scrolling sideways.
+- **Narrow shells (below 1024 px):** the header wraps onto two lines (wordmark and account menu, then the navigation
+  links, which wrap rather than hide behind a menu); the admin rail becomes a wrapped row of links above the content;
+  admin tables switch to the stacked row-as-card layout the admin list already uses below 768 px, so every action
+  stays reachable without horizontal scrolling.
 - **Density A ("cinematic"):** Home and title pages (and franchise pages). Six 2:3 posters per row at 1440 px. A hero
   surface is height-limited so that the first content row (on Home, "Đang xem") is visible at 1280x800.
 - **Density B ("compact"):** browse, search, library and admin. Eight posters per row at 1440 px with a minimum card
@@ -203,10 +212,14 @@ relative-luminance contrast ratios, computed for these exact values.
   unconfirmed sign-out or failed restore with its retry button) are restyled as banners without changing their roles
   (`note`, `alert`) or their logic.
 - **Fixes required by #200:** the upload page registers a form-exit guard so that "Đăng xuất" during an upload asks
-  first (today only route changes and page unload are guarded); the admin status filter shows its selected button
-  visibly (today both states share one style).
-- Every route sets the document title ("Danh sách phim · Yuumé"); route changes move focus to the page heading or the
-  page region, as the current pages already do.
+  first (today only route changes and page unload are guarded), with the same phase policy as the existing leave
+  dialog: while the file is being sent the admin may cancel the upload and sign out, or stay; while the movie is
+  being checked or the file saved to storage the dialog only offers to stay until the phase settles; if the phase
+  settles while the dialog is open, the dialog follows the new phase (no sign-out happens by itself). The admin status
+  filter shows its selected button visibly (today both states share one style; section 4.2).
+- Every route sets the document title ("Danh sách phim · Yuumé"). On a route change focus moves to the page heading
+  or the page region; the list, detail and watch pages do this today, and the shells make it shared behaviour for the
+  pages that do not yet (guest, access and not-found pages).
 
 ## 9. Strings and language
 
@@ -216,9 +229,12 @@ relative-luminance contrast ratios, computed for these exact values.
 - **Document language:** `<html lang="vi">`; text in another language carries its own `lang` (for example a Japanese
   original title gets `lang="ja"`).
 - **Formatting:** numbers, dates and durations use `Intl` with `vi-VN`; no raw ISO timestamps on screen.
-- **Server errors:** known API error codes and known field errors map to Vietnamese messages from the table. The
-  server's own (English) message is shown only as a secondary detail with the request ID; unknown codes get a generic
-  Vietnamese message that still shows the request ID.
+- **Server errors:** known API error codes map to Vietnamese messages from the table; field errors (which carry a
+  field name and a message, no machine-readable reason) get a Vietnamese message per field, with a generic
+  field-level fallback. The request ID is shown when the response supplies one (it is optional and nullable). The
+  server's own English text appears only for codes the table explicitly allows, as a secondary detail marked
+  `lang="en"`; unknown codes get a generic Vietnamese message. Viewer screens never show encoding failure codes or
+  messages (ADR-011 D18).
 - **Tests:** tests import their expected text from the table instead of repeating literals, so a wording change does
   not rewrite tests.
 - **Content names:** the display title comes first; when the owner or a provider supplied an original or romaji name
@@ -252,7 +268,7 @@ Starter glossary (the table may refine wording; the meaning stays):
 | `PosterArt` | changed | pink and black gradients (section 4.2) |
 | `MovieStatusBadges` → `StatusBadge` | changed | word plus colour; catalogue status only in admin views |
 | `buttonStyles.ts` → `Button` and `LinkButton` | replaced | variants primary, secondary, danger, ghost; loading and disabled states; the old helpers are removed only after every import moves |
-| `useModalFocus` and the three dialogs → `Dialog` | merged | one dialog for archive, unsaved changes and upload exit (later also activation); focus moves in, Tab stays inside, Escape closes where safe, focus returns to the opener |
+| `useModalFocus` and the three dialogs → `Dialog` | merged | one dialog for archive, unsaved changes and upload exit (later also activation); focus moves in, Tab stays inside, Escape closes where safe, focus returns to the opener or, when the opener is gone (an archived row), to the page heading as the archive dialog does today |
 | `AppLayout` → `ViewerShell`, `AdminShell`, `GuestShell` | split | section 8 |
 | `Field`, `TextInput`, `TextArea`, `Select`, `Checkbox` | new | visible label, help text and error wired with `aria-describedby` and `aria-invalid`, as the current forms do |
 | `StatusNotice` | new | the inline `role="status"` notice already used after saves; no timed toasts |
@@ -290,7 +306,7 @@ otherwise.
 | Account | as today |
 | Admin list | loading skeleton, list, empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (busy, dimmed, actions disabled), archive dialog, success notice after save or archive, selected status filter visible |
 | Admin form (create, edit) | loading, not found, forbidden, field errors, dirty-form guard on navigation and sign-out, saving (guard says the save is in progress), conflict (slug already used), success back to the same filtered list |
-| Admin upload | the frozen #175 states unchanged: idle, checking, sending with progress and cancel, saving to storage (cancel hidden), accepted, unknown outcome (no automatic resend), cancelled, already in progress (409), too large (413), invalid (400), signed out, forbidden, not found; exit guard on navigation, page unload and, new, sign-out |
+| Admin upload | the frozen #175 states unchanged: idle, checking, sending with progress and cancel, saving to storage (cancel hidden), accepted, unknown outcome (no automatic resend), confirmed not accepted (nothing committed; manual retry), cancelled, already in progress (409), too large (413), rejected file (400), signed out, forbidden, not found; exit guard on navigation, page unload and, new, sign-out, each tested in the sending, checking and saving phases and with a phase that settles while the dialog is open |
 
 The viewer phase 2 screens inherit sections 4-10; their states are specified in the phase 2 issue with ADR-013,
 ADR-015, ADR-020 and ADR-021. Player states belong to ADR-018 and ADR-019.
@@ -302,7 +318,8 @@ The UI targets **WCAG 2.2 Level AA** in the verified desktop browsers
 focus rules of section 4, each screen meets in particular:
 
 - 1.3.1 and 4.1.2: native elements first; names, roles and states exposed (pressed, current, expanded, invalid);
-- 1.4.1: no information by colour alone; 1.4.4 and 1.4.10: text resizes to 200 % and reflows without loss;
+- 1.4.1: no information by colour alone; 1.4.4: text resizes to 200 % without loss; 1.4.10: content reflows at
+  320 CSS px without horizontal scrolling, except content that needs a two-dimensional layout;
 - 1.4.11: control boundaries and state indicators at 3:1;
 - 2.1.1 and 2.1.2: everything operable by keyboard, no trap; 2.4.1: the skip link; 2.4.2: a title per route;
 - 2.4.3 and 2.4.7: logical focus order and a visible focus; 2.4.11: focus not hidden by the sticky header
@@ -321,10 +338,11 @@ This is a design target, not a conformance claim: only tested screens may be des
 | Check | How | Pass |
 |---|---|---|
 | Token contrast | Vitest test over the token definitions | every declared pair meets its threshold |
-| Automated accessibility scan | axe rules run in the existing Playwright harness (Chromium and Firefox) on each changed screen state; the scanner (axe-core, MPL-2.0) is a development-only dependency, never shipped | no serious or critical violation; the target-size rule enabled |
+| Automated accessibility scan | axe rules tagged for WCAG 2.0, 2.1 and 2.2 Level A and AA run in the existing Playwright harness (Chromium and Firefox) on each changed screen state; the scanner (axe-core, MPL-2.0) is a development-only dependency, never shipped | every reported A or AA violation is fixed, whatever axe's impact rating; the target-size rule enabled. A clean scan is not a WCAG result: the manual rows below cover what automation cannot |
 | Keyboard | Playwright keyboard-only walk-through of each changed screen | every action reachable; logical order; focus visible and not hidden |
 | Reduced motion and forced colours | Playwright contexts with `reducedMotion: 'reduce'` and `forcedColors: 'active'` | no running animation; focus, selection and disabled states stay visible |
-| Reflow | 1280 px at 200 % zoom and 320 px wide | no horizontal page scroll outside rails and tables |
+| Text resize and reflow | text at 200 % at 1280 px; the page at 320 CSS px wide | no lost content or action; at 320 px no horizontal scrolling except two-dimensional content (section 7) |
+| Manual criteria | a short checklist per changed screen for what automation misses: meaningful focus order and headings, error identification and suggestions, consistent navigation, language of parts, status announcements | each applicable item checked and noted in the pull request |
 | Screenshots for review | 1280x800, 1440x900, 1920x1080 from fixtures only (no real titles, accounts or personal data) | reviewed by the owner; never updated blindly |
 | Behaviour | existing Vitest, Playwright and real-Chrome smoke suites | green; selectors change only where the visible text changed |
 | Screen reader | manual NVDA row in Chrome or Edge and a Firefox row for the shell, dialogs and the admin table | announcements and focus as specified |

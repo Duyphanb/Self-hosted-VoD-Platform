@@ -21,7 +21,6 @@ Frozen requirements and architecture govern implementation. Planning/status docu
 | Movie visibility, archive retention, catalog slugs and matching | [SECURITY.md](architecture/SECURITY.md#movie-visibility), [ADR-009](architecture/adr/ADR-009.md) |
 | Compose, network exposure, storage, environment configuration | [INFRASTRUCTURE.md](architecture/INFRASTRUCTURE.md); private buckets are `vod-raw`, `vod-hls`, `vod-thumbnails` |
 | Logs, health, metrics | [OBSERVABILITY.md](architecture/OBSERVABILITY.md) |
-| UI tokens, typography, layout, navigation, strings, components, accessibility evidence | [UI-BRIEF.md](design/UI-BRIEF.md); screen-specific behaviour stays in the requirement and architecture documents |
 
 ## Implementation and verification
 
