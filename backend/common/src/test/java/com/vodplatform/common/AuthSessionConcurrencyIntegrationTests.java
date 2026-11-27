@@ -8,8 +8,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.vodplatform.auth.service.AuthSessionPruningJob;
+import com.vodplatform.auth.service.AuthSessionService;
 import com.vodplatform.auth.service.JwtAccessTokenService;
 import com.vodplatform.common.support.CookieAuthFixture;
+import com.vodplatform.common.support.JdbcStatementRecorder;
+import com.vodplatform.common.support.JdbcStatementRecorder.RecordedStatement;
 import com.vodplatform.common.support.PostgresTestDatabase;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.servlet.http.Cookie;
@@ -34,6 +37,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.MockMvcPrint;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MvcResult;
@@ -48,8 +53,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implements PostgresTestDatabase {
 
     private static final String TOKEN_HASHES = "select token_hash from refresh_tokens where user_id=?";
+    private static final String DELETE_BY_EXPLICIT_IDS =
+            "DELETE FROM (refresh_tokens|auth_sessions) WHERE id IN \\(\\?(, \\?)*\\)";
 
     @Autowired DataSource dataSource;
+    @Autowired AuthSessionService authSessions;
     @MockitoSpyBean JwtAccessTokenService accessTokens;
     @Autowired AuthSessionPruningJob pruning;
     @Autowired @Qualifier("taskScheduler") TaskScheduler relayScheduler;
@@ -297,6 +305,74 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
     @Test
     void pruningBoundsTheCombinedRowCountEvenForASessionWithManyTokens() throws Exception {
         issued();
+        insertEndedSessionsAndTokensForPruning();
+
+        assertPruningUsesBoundedTransactions();
+
+        assertThat(jdbc.queryForObject("select count(*) from auth_sessions where user_id=?", Integer.class, user))
+                .isEqualTo(2);
+        assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class, user))
+                .isEqualTo(1);
+        assertThat(revokedSessions()).isZero();
+    }
+
+    // The trigger test above counts real deletes, but a statement such as DELETE ... WHERE id IN (SELECT ... LIMIT n)
+    // can stay within the bound on one query plan and exceed it on another (#269). This test checks the statements
+    // themselves: each transaction deletes at most one explicit list of at most 500 IDs that it has just read.
+    @Test
+    void pruningDeletesOnlyTheIdsEachTransactionHasJustRead() throws Exception {
+        issued();
+        insertEndedSessionsAndTokensForPruning();
+        var recorder = new JdbcStatementRecorder();
+        DataSource recordingDataSource = recorder.wrap(dataSource);
+        var recordingPruning = new AuthSessionPruningJob(JdbcClient.create(recordingDataSource), authSessions,
+                new DataSourceTransactionManager(recordingDataSource), clock);
+
+        recordingPruning.prune();
+
+        int sessionDeletes = 0;
+        int sessionTokenDeletes = 0;
+        int legacyTokenDeletes = 0;
+        for (List<RecordedStatement> statements : recorder.transactions()) {
+            List<RecordedStatement> deletes = statements.stream().filter(RecordedStatement::isDelete).toList();
+            assertThat(deletes).hasSizeLessThanOrEqualTo(1);
+            if (deletes.isEmpty()) {
+                continue;
+            }
+            RecordedStatement delete = deletes.get(0);
+            assertThat(singleSpaced(delete.sql())).matches(DELETE_BY_EXPLICIT_IDS);
+            assertThat(delete.parameters()).hasSizeBetween(1, 500).allMatch(UUID.class::isInstance);
+
+            RecordedStatement readBeforeDelete = statements.get(statements.indexOf(delete) - 1);
+            if (singleSpaced(delete.sql()).startsWith("DELETE FROM auth_sessions")) {
+                // The sessions go only after a token read under the same locks found nothing left to delete.
+                assertThat(readBeforeDelete.resultValues()).isEmpty();
+                assertThat(delete.parameters()).containsExactlyElementsOf(statements.get(0).resultValues());
+                sessionDeletes++;
+            } else {
+                assertThat(delete.parameters()).containsExactlyElementsOf(readBeforeDelete.resultValues());
+                if (singleSpaced(readBeforeDelete.sql()).contains("session_id IS NULL")) {
+                    legacyTokenDeletes++;
+                } else {
+                    sessionTokenDeletes++;
+                }
+            }
+        }
+        assertThat(sessionDeletes).isPositive();
+        assertThat(sessionTokenDeletes).isPositive();
+        assertThat(legacyTokenDeletes).isPositive();
+
+        assertThat(jdbc.queryForObject("select count(*) from auth_sessions where user_id=?", Integer.class, user))
+                .isEqualTo(2);
+        assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class, user))
+                .isEqualTo(1);
+    }
+
+    private static String singleSpaced(String sql) {
+        return sql.strip().replaceAll("\\s+", " ");
+    }
+
+    private void insertEndedSessionsAndTokensForPruning() {
         var cutoff = now.minus(Duration.ofDays(30));
         jdbc.update("""
                 insert into auth_sessions (id, user_id, created_at, expires_at, revoked_at)
@@ -320,14 +396,6 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
                 insert into refresh_tokens (id, user_id, token_hash, expires_at, created_at)
                 select id, ?, id::text, ?, ? from (select gen_random_uuid() id from generate_series(1, 501)) fixture
                 """, user, Timestamp.from(now.plusSeconds(600)), Timestamp.from(now));
-
-        assertPruningUsesBoundedTransactions();
-
-        assertThat(jdbc.queryForObject("select count(*) from auth_sessions where user_id=?", Integer.class, user))
-                .isEqualTo(2);
-        assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class, user))
-                .isEqualTo(1);
-        assertThat(revokedSessions()).isZero();
     }
 
     private void assertPruningUsesBoundedTransactions() {
