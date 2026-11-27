@@ -57,8 +57,9 @@ own issue; sections 7 and 8 give only the layout and navigation rules they inher
   outline wordmark is a later option when a logo is wanted.
 - **Where the name appears:** the header wordmark (a link to the signed-in landing page or, signed out, to `/`); the
   document title of every route as `Tên trang · Yuumé`; `<meta name="application-name">`; the guest landing and the
-  sign-in and registration cards; an About page ("Giới thiệu") that also carries the third-party notices. The About
-  page arrives with the first pull request that ships a third-party asset (the icon set, section 10).
+  sign-in and registration cards; an About page ("Giới thiệu") with the third-party notices, which #143 owns. The
+  first pull request that ships the icon set (section 10) adds its ISC notice to the project's notices in the form
+  #143 sets.
 - **Identifiers stay:** repository, package `vod-frontend`, Java packages, Compose services, buckets, the Web Lock
   name, storage keys and cookie names keep their current names (renaming them would sign everyone out). New external
   identifiers use the ASCII form `yuume`.
@@ -161,9 +162,10 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   320 CSS px are checked separately (WCAG 1.4.4 and 1.4.10). At 320 px nothing scrolls horizontally except content
   that needs a two-dimensional layout (a video, a wide data table in its own scroll region); rows of cards wrap
   instead of scrolling sideways.
-- **Narrow shells (below 1024 px):** the header wraps onto two lines: the wordmark, search and the account menu on the
-  first, the navigation links on the second, wrapping rather than hiding behind a menu; the source and keyboard order
-  follow the visual order. The admin rail becomes a wrapped row of links above the content;
+- **Narrow shells (below 1024 px):** the header keeps its wide order, wordmark, primary navigation, then search and the
+  account menu, in both source and visual order, and lets the groups wrap onto further lines instead of hiding links
+  behind a menu, so the keyboard order always matches what is shown (checked at 320 CSS px and with enlarged text).
+  The admin rail becomes a wrapped row of links above the content;
   admin tables switch to the stacked row-as-card layout the admin list already uses below 768 px, so every action
   stays reachable without horizontal scrolling.
 - **Density A ("cinematic"):** Home and title pages (and franchise pages). Six 2:3 posters per row at 1440 px. A hero
@@ -189,7 +191,10 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   "Đang xem" row exists.
 - **Account menu** (a menu button): Đang xem (only after it has left the primary navigation), Danh sách của tôi (once
   the watchlist ships, Sprint 8), Tài khoản, Quản trị (administrators only; visibility in the menu is presentation, the
-  server still enforces the role), Đăng xuất.
+  server still enforces the role), Đăng xuất. Choosing "Đăng xuất" closes the menu; while sign-out is pending the menu
+  trigger stays visible and shows "Đang đăng xuất…", and the item cannot start a second sign-out. If a form or upload
+  guard asks first and the admin stays, focus returns to the menu trigger. Tests may change their DOM-specific
+  assertions for this widget but keep the one-logout-request and session assertions.
 - The current page's link carries `aria-current="page"` and a visible indicator (an `accent` underline, 5.05:1 on the
   `surface` header) besides the colour change.
 - A "Bỏ qua đến nội dung" skip link is the first focusable element of the page, before the session banners of
@@ -221,9 +226,11 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   status, as the route-leave dialog does; the admin can then sign out again. The dialog keeps the warning that
   cancelling does not roll back server work. The admin status filter shows its selected button visibly (today both
   states share one style; section 4.2).
-- Every route sets the document title ("Danh sách phim · Yuumé"). On a route change focus moves to the page heading
-  or the page region; the list, detail and watch pages do this today, and the shells make it shared behaviour for the
-  pages that do not yet (guest, access and not-found pages).
+- Every route sets the document title ("Danh sách phim · Yuumé").
+- Focus on page changes has one owner, the shell: after an in-app navigation it moves focus to the new page's heading
+  or page region. On the initial page load nothing moves focus, so the first Tab reaches the skip link. Today only the
+  watch page moves focus on route entry (that becomes the shell's job); the action-specific destinations that pages
+  set today stay with the pages (the list heading after paging or a filter change, the detail region on retry).
 
 ## 9. Strings and language
 
@@ -291,8 +298,8 @@ Starter glossary (the table may refine wording; the meaning stays):
 - Menus follow the menu-button pattern (`aria-haspopup`, `aria-expanded`, arrow keys, Escape returns focus); player
   menus are specified in ADR-018.
 - Rails scroll by buttons and keyboard; focused cards scroll into view; nothing auto-advances.
-- Target size: at least 24x24 CSS px for every pointer target (WCAG 2.5.8); normal buttons and inputs are 36-44 px
-  tall.
+- Target size: the project rule is at least 24x24 CSS px for every app-authored pointer target, without relying on
+  WCAG 2.5.8's spacing or inline exceptions; normal buttons and inputs are 36-44 px tall.
 - Status changes that do not move focus are announced through one polite `role="status"` region; errors use
   `role="alert"`.
 - No hover-only information or actions; tooltips also appear on focus.
@@ -312,7 +319,7 @@ otherwise.
 | Account | as today |
 | Admin list | loading skeleton, list, empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (`aria-busy` and a loading indicator instead of dimming the rows, which would put `text-muted` at 3.14:1; Archive disabled and the View, Edit and Upload links unchanged, as today), archive dialog, success notice after save or archive, selected status filter visible |
 | Admin form (create, edit) | loading, not found, forbidden, field errors, dirty-form guard on navigation and sign-out, saving (guard says the save is in progress), conflict (slug already used), success back to the same filtered list |
-| Admin upload | the frozen #175 states unchanged: idle, checking, sending with progress and cancel, saving to storage (cancel hidden), accepted, unknown outcome (no automatic resend), confirmed not accepted (nothing committed; manual retry), cancelled, already in progress (409), too large (413), rejected file (400), signed out, forbidden, not found; exit guard on navigation, page unload and, new, sign-out, each tested in the sending, checking and saving phases and with a phase that settles while the dialog is open |
+| Admin upload | the frozen #175 states unchanged: idle, checking, sending with progress and cancel, saving to storage (cancel hidden), accepted, unknown outcome (no automatic resend), confirmed not accepted (nothing committed; manual retry), cancelled, already in progress (409), too large (413), rejected file (400), signed out, forbidden, not found. Exit guards: the in-app dialogs for navigation and, new, sign-out are tested in the sending, checking and saving phases, including a phase that settles while the dialog is open and the focus target afterwards; the browser's own page-unload prompt is tested only for appearing in each pending phase after a user interaction |
 
 The viewer phase 2 screens inherit sections 4-10; their states are specified in the phase 2 issue with ADR-013,
 ADR-015, ADR-020 and ADR-021. Player states belong to ADR-018 and ADR-019.
@@ -335,8 +342,9 @@ focus rules of section 4, each screen meets in particular:
 - 1.4.12: no loss when text spacing is increased; 1.4.13: content shown on hover or focus (tooltips) is dismissible,
   hoverable and persistent;
 - 3.2.3: repeated navigation keeps the same relative order on every page (guest and signed-in navigation may differ);
-- 3.3.1 and 3.3.3: errors identified in text with a suggestion; 3.3.7 and 3.3.8: no re-entry of known data and no
-  memory or puzzle test in sign-in (paste allowed in the password field);
+- 3.3.1 and 3.3.3: errors identified in text with a suggestion; 3.3.7: information already entered in the same
+  process is not asked for again (except where security requires it, such as a password confirmation); 3.3.8: no
+  memory or puzzle test in sign-in, with paste and autofill allowed in both the email and the password field;
 - 4.1.3: status messages announced without moving focus.
 
 This is a design target, not a conformance claim. A claim may only name tested full pages and complete processes (for
