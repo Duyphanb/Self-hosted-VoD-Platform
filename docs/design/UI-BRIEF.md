@@ -57,9 +57,9 @@ own issue; sections 7 and 8 give only the layout and navigation rules they inher
   outline wordmark is a later option when a logo is wanted.
 - **Where the name appears:** the header wordmark (a link to the signed-in landing page or, signed out, to `/`); the
   document title of every route as `Tên trang · Yuumé`; `<meta name="application-name">`; the guest landing and the
-  sign-in and registration cards; an About page ("Giới thiệu") with the third-party notices, which #143 owns. The
-  first pull request that ships the icon set (section 10) adds its ISC notice to the project's notices in the form
-  #143 sets.
+  sign-in and registration cards; an About page ("Giới thiệu") with the third-party notices, whose locations #143
+  defines (before or alongside the first icon shipment). The pull request that adopts the icon set (section 10)
+  updates both: its `THIRD_PARTY_NOTICES` entry and its About-page entry.
 - **Identifiers stay:** repository, package `vod-frontend`, Java packages, Compose services, buckets, the Web Lock
   name, storage keys and cookie names keep their current names (renaming them would sign everyone out). New external
   identifiers use the ASCII form `yuume`.
@@ -193,8 +193,10 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   the watchlist ships, Sprint 8), Tài khoản, Quản trị (administrators only; visibility in the menu is presentation, the
   server still enforces the role), Đăng xuất. Choosing "Đăng xuất" closes the menu; while sign-out is pending the menu
   trigger stays visible and shows "Đang đăng xuất…", and the item cannot start a second sign-out. If a form or upload
-  guard asks first and the admin stays, focus returns to the menu trigger. Tests may change their DOM-specific
-  assertions for this widget but keep the one-logout-request and session assertions.
+  guard asks first, focus after the dialog has one destination per exit: the menu trigger after an explicit "Ở lại"
+  or Escape, and the upload outcome or status when the upload settles while the dialog is open (section 8.4); both
+  paths are tested with zero logout requests. Tests may change their DOM-specific assertions for this widget but keep
+  the one-logout-request and session assertions.
 - The current page's link carries `aria-current="page"` and a visible indicator (an `accent` underline, 5.05:1 on the
   `surface` header) besides the colour change.
 - A "Bỏ qua đến nội dung" skip link is the first focusable element of the page, before the session banners of
@@ -228,7 +230,10 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   states share one style; section 4.2).
 - Every route sets the document title ("Danh sách phim · Yuumé").
 - Focus on page changes has one owner, the shell: after an in-app navigation it moves focus to the new page's heading
-  or page region. On the initial page load nothing moves focus, so the first Tab reaches the skip link. Today only the
+  or page region. On the initial page load nothing moves focus, so the first Tab reaches the skip link; client-side
+  redirects made while the session bootstraps (signed-in landing, sign-in, forbidden; `RouteGuards.tsx`) count as part
+  of the initial load. A cold protected URL that redirects to sign-in is tested separately from an in-app navigation
+  that moves focus to the destination heading. Today only the
   watch page moves focus on route entry (that becomes the shell's job); the action-specific destinations that pages
   set today stay with the pages (the list heading after paging or a filter change, the detail region on retry).
 
@@ -319,7 +324,7 @@ otherwise.
 | Account | as today |
 | Admin list | loading skeleton, list, empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (`aria-busy` and a loading indicator instead of dimming the rows, which would put `text-muted` at 3.14:1; Archive disabled and the View, Edit and Upload links unchanged, as today), archive dialog, success notice after save or archive, selected status filter visible |
 | Admin form (create, edit) | loading, not found, forbidden, field errors, dirty-form guard on navigation and sign-out, saving (guard says the save is in progress), conflict (slug already used), success back to the same filtered list |
-| Admin upload | the frozen #175 states unchanged: idle, checking, sending with progress and cancel, saving to storage (cancel hidden), accepted, unknown outcome (no automatic resend), confirmed not accepted (nothing committed; manual retry), cancelled, already in progress (409), too large (413), rejected file (400), signed out, forbidden, not found. Exit guards: the in-app dialogs for navigation and, new, sign-out are tested in the sending, checking and saving phases, including a phase that settles while the dialog is open and the focus target afterwards; the browser's own page-unload prompt is tested only for appearing in each pending phase after a user interaction |
+| Admin upload | the frozen #175 states unchanged: idle, checking, sending with progress and cancel, saving to storage (cancel hidden), accepted, unknown outcome (no automatic resend), confirmed not accepted (nothing committed; manual retry), cancelled, already in progress (409), too large (413), rejected file (400), signed out, forbidden, not found. Exit guards: the in-app dialogs for navigation and, new, sign-out are tested in the sending, checking and saving phases, including a phase that settles while the dialog is open and the focus target afterwards; the browser's own page-unload prompt is tested for appearing in each pending phase after a user interaction and, by dismissing a real `beforeunload` dialog in Playwright, for keeping the upload page open |
 
 The viewer phase 2 screens inherit sections 4-10; their states are specified in the phase 2 issue with ADR-013,
 ADR-015, ADR-020 and ADR-021. Player states belong to ADR-018 and ADR-019.
@@ -342,13 +347,18 @@ focus rules of section 4, each screen meets in particular:
 - 1.4.12: no loss when text spacing is increased; 1.4.13: content shown on hover or focus (tooltips) is dismissible,
   hoverable and persistent;
 - 3.2.3: repeated navigation keeps the same relative order on every page (guest and signed-in navigation may differ);
-- 3.3.1 and 3.3.3: errors identified in text with a suggestion; 3.3.7: information already entered in the same
-  process is not asked for again (except where security requires it, such as a password confirmation); 3.3.8: no
-  memory or puzzle test in sign-in, with paste and autofill allowed in both the email and the password field;
+- 3.3.1: errors identified in text; 3.3.3: a correction suggestion whenever one is known and giving it keeps security
+  and the purpose of the content; 3.3.7: information entered or supplied earlier in the same process is filled in or
+  offered for selection when it is needed again, except where re-entry is essential, required for security (such as
+  a password confirmation) or the earlier value is no longer valid; 3.3.8: no memory or puzzle test in sign-in, with
+  paste and autofill allowed in both the email and the password field;
 - 4.1.3: status messages announced without moving focus.
 
 This is a design target, not a conformance claim. A claim may only name tested full pages and complete processes (for
-example the whole upload flow), never a single component.
+example the whole upload flow), never a single component. The Watch page cannot be claimed yet: captions are out of
+scope in ADR-011 today, so the prerecorded-media criteria (1.2.2 captions, 1.2.5 audio description, where applicable
+to a title) stay open for that page until the subtitle work settled by ADR-019 (planned) delivers them. The shell PRs
+test the parts of the Watch page they change and record this limit.
 
 ## 13. Evidence each UI pull request provides
 
