@@ -186,9 +186,9 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   bộ" lists seasons, OVAs, ONAs and specials, "Anime" filters by the owner's "Anime" genre, and "Bộ sưu tập" appears
   once collections ship (ADR-021). The routes behind these items come with the content model (ADR-013) and the
   viewer phase 2; an item is shown only when its route exists.
-- **Interim navigation** (until those routes exist): "Phim" (today's `/movies` list, which becomes `/titles` with
-  ADR-013 S2; old `/movies/...` links redirect there) and "Đang xem" (`/continue-watching`), with search added when it
-  ships. "Đang xem" moves into the account menu once Home with its "Đang xem" row exists.
+- **Interim navigation** (until those routes exist): "Phim" (today's `/movies` list; the list moves to `/titles` with
+  ADR-013 S2, and old bookmarks follow ADR-013 D13's URL mapping) and "Đang xem" (`/continue-watching`), with search
+  added when it ships. "Đang xem" moves into the account menu once Home with its "Đang xem" row exists.
 - **Account menu** (a menu button): Đang xem (only after it has left the primary navigation), Danh sách của tôi (once
   the watchlist ships, Sprint 8), Tài khoản, Quản trị (administrators only; visibility in the menu is presentation, the
   server still enforces the role), Đăng xuất. Choosing "Đăng xuất" closes the menu; while sign-out is pending the menu
@@ -205,7 +205,8 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
 ### 8.2 Admin shell
 
 - Same header; below it a left rail with only the items that exist: "Nội dung" today (`/admin/movies`, which
-  becomes `/admin/titles` with ADR-013 S2); "Tải lên", "Metadata" and "Sao lưu" join when their features ship. The rail marks the current item with `aria-current`.
+  becomes `/admin/titles` with ADR-013 S2); "Tải lên", "Metadata" and "Sao lưu" join when their features ship. The
+  rail marks the current item with `aria-current`.
 - Admin pages keep their URL filter state, their return-to-list navigation and their focus restoration.
 
 ### 8.3 Guest shell
@@ -233,9 +234,10 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   or page region. On the initial page load nothing moves focus, so the first Tab reaches the skip link; client-side
   redirects made while the session bootstraps (signed-in landing, sign-in, forbidden; `RouteGuards.tsx`) count as part
   of the initial load. A cold protected URL that redirects to sign-in is tested separately from an in-app navigation
-  that moves focus to the destination heading. Today only the
-  watch page moves focus on route entry (that becomes the shell's job); the action-specific destinations that pages
-  set today stay with the pages (the list heading after paging or a filter change, the detail region on retry).
+  that moves focus to the destination heading. Today the watch page moves focus on ordinary route entry (that becomes
+  the shell's job); the action-specific destinations that pages set today stay with the pages: the list heading after
+  paging or a filter change, the detail region on retry, and the admin list heading when it is entered with a save
+  notice (one focus move on that return, not two).
 
 ## 9. Strings and language
 
@@ -319,7 +321,7 @@ otherwise.
 | Screen | States to design and test |
 |---|---|
 | Shell | initialising (no navigation flash), signed out, signed in, signed in as administrator, signing out (button disabled, "Đang đăng xuất…"), unconfirmed sign-out or failed restore (alert with retry), blocked site data (note), single-tab mode (note) |
-| Guest landing, sign-in, registration | idle, submitting, field errors, server error (section 9), success redirect, the unconfirmed sign-out banner |
+| Guest landing, sign-in, registration | idle, submitting, field errors, server error (section 9), the unconfirmed sign-out banner; sign-in success redirects to the signed-in landing page; registration success shows the account-created confirmation with a link to sign in and creates no session (ADR-012) |
 | Not found, forbidden | heading as the page title, one way back, no private data |
 | Account | as today |
 | Admin list | loading skeleton, list (from ADR-013 S2 the viewer page is published-only for every role, so a row's "Xem" link is offered only for published titles), empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (`aria-busy` and a loading indicator instead of dimming the rows, which would put `text-muted` at 3.14:1; Archive disabled and the View, Edit and Upload links unchanged, as today), archive dialog, success notice after save or archive, selected status filter visible |
@@ -356,9 +358,9 @@ focus rules of section 4, each screen meets in particular:
 
 This is a design target, not a conformance claim. A claim may only name tested full pages and complete processes (for
 example the whole upload flow), never a single component. The Watch page cannot be claimed yet: captions are out of
-scope in ADR-011 today, so the prerecorded-media criteria (1.2.2 captions, 1.2.5 audio description, where applicable
-to a title) stay open for that page until the subtitle work settled by ADR-019 (planned) delivers them. The shell PRs
-test the parts of the Watch page they change and record this limit.
+scope in ADR-011 today, so the prerecorded-media criteria that apply to a title stay open for that page, each until
+its own evidence passes: 1.2.2 captions with the subtitle work settled by ADR-019 (planned), 1.2.5 audio description
+with no deliverable planned yet. The shell PRs test the parts of the Watch page they change and record this limit.
 
 ## 13. Evidence each UI pull request provides
 
@@ -372,6 +374,7 @@ test the parts of the Watch page they change and record this limit.
 | Manual criteria | every applicable WCAG 2.2 A and AA criterion that automation cannot decide, checked on each changed screen: at least focus order and headings, text spacing (1.4.12), content on hover or focus (1.4.13), error identification and suggestions, consistent navigation, language of parts, status announcements | the result and its scope (screens, browsers) recorded in the pull request |
 | Screenshots for review | 1280x800, 1440x900, 1920x1080 from fixtures only (no real titles, accounts or personal data) | reviewed by the owner; never updated blindly |
 | Behaviour | existing Vitest, Playwright and real-Chrome smoke suites | green; selectors and interactions change only where the visible text or the widget changed (for example "Sign out" moving into the account menu), and the session, upload and playback assertions stay as they are |
+| Target size | measure the hit area of each changed app-authored control in the browser, including compact admin row actions (View, Edit, Upload, Archive) | at least 24x24 CSS px, the project rule of section 10.2, which is stricter than the axe `target-size` rule's spacing and inline exceptions |
 | Screen reader | manual NVDA row in Chrome or Edge and a Firefox row for the shell, dialogs and the admin table | announcements and focus as specified |
 | Bundle | build output size before and after | the change and its cause stated in the pull request |
 
