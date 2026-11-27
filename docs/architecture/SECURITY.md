@@ -78,6 +78,8 @@ Backend enforcement:
 
 Admin endpoints are enforced by URL authorization rules (`/api/v1/admin/**`, `POST /api/v1/movies`, and `PUT`/`DELETE /api/v1/movies/{movieId}`; user sub-resources such as `/api/v1/movies/{movieId}/progress` are not admin endpoints) before request validation runs, with method-level `@PreAuthorize` as a second layer. A `ROLE_USER` request to an admin endpoint returns 403 even when its body is invalid or the target does not exist. A multipart body sent to any operation other than `POST /api/v1/admin/movies/{movieId}/video`, including other methods on that path, is rejected with 400 `MALFORMED_REQUEST` before authentication; the upload operation authorizes from headers before its multipart body is parsed.
 
+Planned ([ADR-013](adr/ADR-013.md), #244): with S2 the catalog writes move under `/api/v1/admin/titles`, so the URL rules become `/api/v1/admin/**` alone, and the multipart exception moves to `POST /api/v1/admin/episodes/{episodeId}/video`. The old upload path is not kept: the previous SPA build checks the movie before sending a body, so an upload whose check starts after the cutover stops before the removed path. A stale tab whose check succeeded before it gets `400 MALFORMED_REQUEST` (body within the 1 MiB edge limit) or `413` and nothing is stored; reloading recovers ([ADR-013 D13](adr/ADR-013.md#d13-migration-cutover-and-rollback)). With S5, `/hls/admin/**` joins the admin URL rules ([Admin Preview routes](#planned-admin-preview-routes-adr-013)).
+
 Frontend route guards are UX only. Backend authorization is the security boundary.
 
 ## Ownership Rules
@@ -102,6 +104,15 @@ Movie visibility is the catalog access rule referenced by playback and HLS check
 - `ROLE_ADMIN` sees and manages every status on `GET`, `PUT`, and `DELETE /api/v1/movies/{movieId}` and under `/api/v1/admin/**`; these are the only exceptions to the 404 rule. For admins, playback, HLS, progress, rating, and watchlist on non-published movies still return 404 unless a later decision changes this rule.
 - The catalog module owns one visibility check that other modules reuse; modules must not re-implement the status rule.
 
+### Planned: content visibility (ADR-013)
+
+[ADR-013 D3](adr/ADR-013.md#d3-visibility-at-three-levels) replaces this section's movie rule when its slices land (titles and episodes in S2, franchises in S3):
+
+- An episode is visible when it and its title are `PUBLISHED`; a title when it is `PUBLISHED`. A franchise's status gates only its own page, strip, references in title responses and name in search, never its titles. The episode of a `MOVIE` title is always `PUBLISHED` and follows its title.
+- Every viewer endpoint that takes a franchise, title or episode ID returns the same 404 for a hidden item as for a missing one, and lists and counts contain only visible items, for every role.
+- The admin exceptions are exactly `/api/v1/admin/**` and, from S5, `/hls/admin/**`. `GET /api/v1/titles/{titleId}` is published-only for every role.
+- The catalog module keeps one visibility check for all three levels.
+
 ## HLS Access Control
 
 MVP HLS access uses the frozen delivery path:
@@ -120,6 +131,26 @@ Rules:
 - HLS responses, including errors, carry `Cache-Control: no-store`, and Nginx does not cache them: a shared browser must not serve media from its cache after logout, and the next request after a current-asset switch is refused. Media the player already buffered can still play. Every not-found case the application validates returns the same 404 `VIDEO_ASSET_NOT_FOUND`, including a malformed asset ID or segment name.
 - Native HLS playback (`video.src`), AirPlay and casting cannot send the header and are unsupported; supporting them needs a new ADR, not a URL token.
 - MinIO remains private; HLS is not served through direct MinIO or presigned playback URLs.
+
+Planned ([ADR-013](adr/ADR-013.md)): from S2 "current" and visibility are per episode (the episode and its title must be `PUBLISHED`). From S5 the only playable asset of an episode is the one the admin activated; a READY candidate gets the same 404 as any other non-current asset on the viewer routes.
+
+### Planned: Admin Preview routes (ADR-013)
+
+Owner decision of 2026-11-25: Admin Preview is an exception for checking an encode and entering timed metadata before viewers see it. It lands with activation in ADR-013 S5 ([D9](adr/ADR-013.md#d9-admin-preview-and-the-activation-enablement-set-s5)).
+
+| Route | Caller | Checked on every request | Responses |
+|---|---|---|---|
+| `GET /api/v1/admin/video-assets/{videoAssetId}/preview` | `ROLE_ADMIN`, session and database role read directly | asset exists, is READY and is not retired (its objects may be purged), whatever the episode and title status | 200 `PreviewInfo`; 401; 403; 404 `VIDEO_ASSET_NOT_FOUND`; 503 `AUTH_STATE_UNAVAILABLE` |
+| `GET /hls/admin/video-assets/{videoAssetId}/master.m3u8` | same | as above, plus the stored master key pattern | 200 whole playlist; 401; 403; 404 `VIDEO_ASSET_NOT_FOUND`; 503 `HLS_STORAGE_UNAVAILABLE` or `AUTH_STATE_UNAVAILABLE` |
+| `GET /hls/admin/video-assets/{videoAssetId}/segments/{segmentName}` | same | as above, plus the segment name pattern before storage is read | as the playlist |
+| `POST /api/v1/admin/video-assets/{videoAssetId}/activation` | same | episode lock, expected generation, READY, not active and not retired; `SAME` needs an active asset | 200; 400; 401; 403; 404; 409 `ACTIVATION_CONFLICT`, `VIDEO_ASSET_NOT_ACTIVATABLE` or `ACTIVATION_CARRY_INVALID`; 503 |
+
+- `/hls/admin/**` joins `ADMIN_ENDPOINTS`, so the admin authentication path reads the session and the database role on every request ([ADR-012](adr/ADR-012.md)); a demoted or signed-out admin is refused on the next request. A `ROLE_USER` caller gets 403 before any asset lookup.
+- Every `/hls/admin/*` response, denials included, carries `Cache-Control: no-store`; `HlsRouteFilter` sets it before security runs and logs 401, 403 and 404 denials with the request ID and asset ID, never the token. The bearer token is accepted only in the `Authorization` header, as on the viewer routes. Nginx's `/hls/` location already forwards these paths.
+- Preview never writes viewer state: the Preview player sends no progress or history request, and the viewer progress route accepts only the active asset of a visible episode.
+- The viewer routes are not loosened: `/hls/video-assets/...` still returns 404 for candidates, superseded assets and hidden content, also for admins.
+- Each preview-info call and each activation logs one INFO event with the admin's user ID, the asset and the request ID; this is the audit record.
+- Evidence (S5): `ROLE_USER` and a demoted admin get 403 with `no-store` on every `/hls/admin/**` path; a revoked session gets 401; Preview produces zero progress and history requests and rows, including on `pagehide`; viewer routes still return 404 for a candidate.
 
 ## Upload Validation
 
@@ -152,6 +183,7 @@ Owner-approved 2026-10-29 in #100/#103/#116 ([ADR-010](adr/ADR-010.md)):
   `requestId` and no keys, URLs, bucket names or SDK text. Deliberate re-upload is safe: in-flight returns 409
   VIDEO_UPLOAD_IN_PROGRESS; after completion it creates a newer asset with extra storage for manual purge. Never
   auto-resubmit; a direct newest-asset view arrives with #168, not a new endpoint here.
+- Planned ([ADR-013](adr/ADR-013.md) S2): the upload operation becomes `POST /api/v1/admin/episodes/{episodeId}/video` with these safeguards unchanged. The raw key is `{titleId}/{videoAssetId}.{ext}` (unchanged for existing movies, whose UUID the title keeps), and `ux_video_assets_episode_in_flight` enforces one in-flight asset per episode.
 
 Deferred safeguards:
 
