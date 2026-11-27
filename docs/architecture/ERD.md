@@ -471,7 +471,7 @@ Planned schema of [ADR-015](adr/ADR-015.md) (#128). Nothing in this section exis
   | `index_version` | int | not null | Version of the normalizer and builder that wrote the row |
 
   B-tree indexes on `exact_key`, `folded_key`, `compact_key` and `title_id`.
-- New `title_search_documents` (search, derived): `title_id` uuid PK (FK -> `titles.id` on delete cascade), `document` tsvector not null, `index_version` int not null, `rebuilt_at` timestamptz not null; GIN index on `document`. Built with `pg_catalog.simple` from folded text: display title, part label and aliases (weight A), genres and credited people (B), release year (C), the admin's own description (D); TMDB-origin values and provider descriptions are never included.
+- New `title_search_documents` (search, derived): `title_id` uuid PK (FK -> `titles.id` on delete cascade), `document` tsvector not null, `index_version` int not null, `rebuilt_at` timestamptz not null; GIN index on `document`. Built with `pg_catalog.simple` from folded text: display title, part label (from ADR-013 S2) and aliases (weight A), genres and credited people (B), release year (C), the admin's own description (D); TMDB-origin values and provider descriptions are never included.
 - `titles.search_vector` and its GIN index are dropped.
 - Every title has its rows whatever its status; visibility applies at query time. No extension is required.
 
