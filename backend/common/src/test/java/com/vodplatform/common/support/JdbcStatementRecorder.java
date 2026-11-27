@@ -20,8 +20,8 @@ import javax.sql.DataSource;
  * connection is one transaction, so a test can check what each transaction ran without depending on the query plan.
  *
  * <p>Supported calls: {@code prepareStatement}, the {@code set...} binders, {@code executeQuery} (its result set is
- * recorded through {@code getObject}) and {@code executeUpdate}. Each execution is recorded separately.
- * {@code execute} and plain {@code Statement}s are rejected, so that a statement cannot run unrecorded.
+ * recorded through {@code getObject}) and {@code executeUpdate}. Each execution is recorded separately. Every other
+ * {@code execute...} method, batches and plain {@code Statement}s are rejected, so that nothing runs unrecorded.
  */
 public final class JdbcStatementRecorder {
 
@@ -80,7 +80,9 @@ public final class JdbcStatementRecorder {
                 new Class<?>[] {PreparedStatement.class},
                 (proxy, method, args) -> {
                     String name = method.getName();
-                    if (name.equals("execute") || name.equals("executeBatch") || name.equals("addBatch")) {
+                    boolean recordedExecution = name.equals("executeQuery") || name.equals("executeUpdate");
+                    boolean otherExecution = name.startsWith("execute") || name.equals("addBatch");
+                    if (otherExecution && !recordedExecution) {
                         throw new UnsupportedOperationException(name + " is not recorded");
                     }
                     boolean bindsParameter = name.startsWith("set")

@@ -55,6 +55,9 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
     private static final String TOKEN_HASHES = "select token_hash from refresh_tokens where user_id=?";
     private static final String DELETE_BY_EXPLICIT_IDS =
             "DELETE FROM (refresh_tokens|auth_sessions) WHERE id IN \\(\\?(, \\?)*\\)";
+    // Exactly this shape: an extra predicate could leave tokens under a locked session that the read did not see.
+    private static final String TOKEN_READ_FOR_SESSIONS =
+            "SELECT id FROM refresh_tokens WHERE session_id IN \\(\\?(, \\?)*\\) LIMIT \\?";
 
     @Autowired DataSource dataSource;
     @Autowired AuthSessionService authSessions;
@@ -352,7 +355,7 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
                 assertThat(singleSpaced(sessionLock.sql()))
                         .startsWith("SELECT id FROM auth_sessions")
                         .contains("FOR UPDATE SKIP LOCKED");
-                assertThat(singleSpaced(readBeforeDelete.sql())).startsWith("SELECT id FROM refresh_tokens");
+                assertThat(singleSpaced(readBeforeDelete.sql())).matches(TOKEN_READ_FOR_SESSIONS);
                 assertThat(uuidParameters(readBeforeDelete)).containsExactlyElementsOf(lockedSessionIds);
                 assertThat(readBeforeDelete.resultValues()).isEmpty();
                 assertThat(delete.parameters()).containsExactlyElementsOf(lockedSessionIds);
