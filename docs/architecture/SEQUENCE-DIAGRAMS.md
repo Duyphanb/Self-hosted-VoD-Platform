@@ -250,6 +250,60 @@ sequenceDiagram
 
 Progress is committed to PostgreSQL before the response; there is no Redis buffer or flush job ([ADR-011 D9](adr/ADR-011.md#playback-progress-d9-d14)). The playback API, the progress `GET` and continue-watching read the same rows and normalize them against the current asset in the same way, so a reload resumes from the last accepted update. The player sends at most one save at a time, so a save delayed by a token refresh cannot overwrite a newer one; between tabs or devices the last save to arrive wins.
 
+Planned ([ADR-013](adr/ADR-013.md)): from S2 the playback and progress routes take an `episodeId` (`/api/v1/episodes/{episodeId}/...`) and every check above applies to the episode and its current asset. From S5 the save first locks the episode row `FOR SHARE` and also requires the request's `activationGeneration`; see the next diagram.
+
+## Asset Activation and Admin Preview (planned, ADR-013 S5)
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant AdminSPA as Admin SPA
+    participant Backend
+    participant PostgreSQL
+    participant MinIO
+    participant ViewerSPA as Viewer SPA
+
+    Admin->>AdminSPA: Open the preview of a READY asset
+    AdminSPA->>Backend: GET /api/v1/admin/video-assets/{id}/preview
+    Backend->>PostgreSQL: Read session and database role directly, then the asset (READY, not retired, any content status)
+    Backend-->>AdminSPA: PreviewInfo with /hls/admin/... manifest, active, candidate, timelines, generation
+    Note over Backend: One INFO audit event per preview-info call
+    AdminSPA->>Backend: GET /hls/admin/video-assets/{id}/master.m3u8 and segments, with Authorization
+    Backend->>PostgreSQL: Read session and role on every request, check READY, not retired and the stored key
+    Backend->>MinIO: Read the playlist or segment
+    Backend-->>AdminSPA: Whole object, Cache-Control no-store
+    Note over AdminSPA: Preview policy: no progress or history request at all
+    Admin->>AdminSPA: Activate as SAME or NEW
+    AdminSPA->>Backend: POST /api/v1/admin/video-assets/{id}/activation with timeline and expected generation
+    Backend->>PostgreSQL: BEGIN, lock the episode FOR NO KEY UPDATE
+    alt generation changed, asset not READY, active or retired, or SAME without an active asset
+        Backend->>PostgreSQL: ROLLBACK
+        Backend-->>AdminSPA: 409 ACTIVATION_CONFLICT or VIDEO_ASSET_NOT_ACTIVATABLE
+    else accepted
+        Backend->>PostgreSQL: Set the asset timeline (SAME: the active one, NEW: a new one), also on a re-activation
+        alt SAME
+            Backend->>PostgreSQL: Keep the asset's own timed sets, or replace its carried rows with the active ones, validated against its duration
+        else NEW
+            Backend->>PostgreSQL: Remove the carried rows an earlier activation left on the asset
+        end
+        Backend->>PostgreSQL: Set the active asset, increment the generation, COMMIT
+        Backend-->>AdminSPA: 200 with the active asset, timeline and generation
+    end
+    Note over Backend,PostgreSQL: A progress save holds the episode row FOR SHARE until it commits,<br/>so it finishes before the activation or starts after it
+    ViewerSPA->>Backend: Next request for the old asset (HLS segment or progress save)
+    Backend-->>ViewerSPA: HLS 404, or progress 409 VIDEO_ASSET_NOT_CURRENT
+    ViewerSPA->>Backend: GET /api/v1/episodes/{episodeId}/playback
+    Backend-->>ViewerSPA: A different active asset, timelineId, activationGeneration, resumeSeconds
+    Note over ViewerSPA: Same asset with a newer generation: ADR-013 D9 (adopt in place, or a new run<br/>at the live position after an HLS 404)
+    alt timelineId unchanged and position inside the new duration
+        ViewerSPA->>ViewerSPA: Reload at the live position
+    else otherwise
+        ViewerSPA->>ViewerSPA: Reload at resumeSeconds, reset the run memory
+    end
+```
+
+The viewer routes never serve a candidate. Activation runs no storage I/O inside its transaction, and the worker takes no part in it. [ADR-013 D7-D9](adr/ADR-013.md#d7-activation-s5) define the rules, including re-activation of an earlier asset and the same-asset answer the diagram does not show.
+
 ## Auth Refresh
 
 ```mermaid
