@@ -161,8 +161,9 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   320 CSS px are checked separately (WCAG 1.4.4 and 1.4.10). At 320 px nothing scrolls horizontally except content
   that needs a two-dimensional layout (a video, a wide data table in its own scroll region); rows of cards wrap
   instead of scrolling sideways.
-- **Narrow shells (below 1024 px):** the header wraps onto two lines (wordmark and account menu, then the navigation
-  links, which wrap rather than hide behind a menu); the admin rail becomes a wrapped row of links above the content;
+- **Narrow shells (below 1024 px):** the header wraps onto two lines: the wordmark, search and the account menu on the
+  first, the navigation links on the second, wrapping rather than hiding behind a menu; the source and keyboard order
+  follow the visual order. The admin rail becomes a wrapped row of links above the content;
   admin tables switch to the stacked row-as-card layout the admin list already uses below 768 px, so every action
   stays reachable without horizontal scrolling.
 - **Density A ("cinematic"):** Home and title pages (and franchise pages). Six 2:3 posters per row at 1440 px. A hero
@@ -186,12 +187,13 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
 - **Interim navigation** (until those routes exist): "Phim" (today's `/movies` list) and "Đang xem"
   (`/continue-watching`), with search added when it ships. "Đang xem" moves into the account menu once Home with its
   "Đang xem" row exists.
-- **Account menu** (a menu button): Đang xem, Danh sách của tôi (once the watchlist ships, Sprint 8), Tài khoản,
-  Quản trị (administrators only; visibility in the menu is presentation, the server still enforces the role), Đăng
-  xuất.
+- **Account menu** (a menu button): Đang xem (only after it has left the primary navigation), Danh sách của tôi (once
+  the watchlist ships, Sprint 8), Tài khoản, Quản trị (administrators only; visibility in the menu is presentation, the
+  server still enforces the role), Đăng xuất.
 - The current page's link carries `aria-current="page"` and a visible indicator (an `accent` underline, 5.05:1 on the
   `surface` header) besides the colour change.
-- A "Bỏ qua đến nội dung" skip link is the first focusable element and moves focus to `main`.
+- A "Bỏ qua đến nội dung" skip link is the first focusable element of the page, before the session banners of
+  section 8.4, and moves focus to `main`. The first Tab stop is tested with the retry banner visible.
 
 ### 8.2 Admin shell
 
@@ -208,15 +210,17 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
 - One authentication and form-exit-guard provider sits above all shells, so splitting the presentation never splits
   the session lifecycle. Sign-out stays guarded: a mounted form or upload can ask first, and only one sign-out runs at
   a time.
-- The session notices rendered by the authentication provider above the shell (blocked site data, single-tab mode,
-  unconfirmed sign-out or failed restore with its retry button) are restyled as banners without changing their roles
-  (`note`, `alert`) or their logic.
+- The session notices that the authentication provider renders today above the shell (blocked site data, single-tab
+  mode, unconfirmed sign-out or failed restore with its retry button) are restyled as banners and placed after the
+  skip link, without changing their roles (`note`, `alert`) or their logic.
 - **Fixes required by #200:** the upload page registers a form-exit guard so that "Đăng xuất" during an upload asks
   first (today only route changes and page unload are guarded), with the same phase policy as the existing leave
   dialog: while the file is being sent the admin may cancel the upload and sign out, or stay; while the movie is
-  being checked or the file saved to storage the dialog only offers to stay until the phase settles; if the phase
-  settles while the dialog is open, the dialog follows the new phase (no sign-out happens by itself). The admin status
-  filter shows its selected button visibly (today both states share one style; section 4.2).
+  being checked or the file saved to storage the dialog only offers to stay until the phase settles. If the upload
+  settles while the dialog is open, the dialog closes without signing out and focus moves to the upload outcome or
+  status, as the route-leave dialog does; the admin can then sign out again. The dialog keeps the warning that
+  cancelling does not roll back server work. The admin status filter shows its selected button visibly (today both
+  states share one style; section 4.2).
 - Every route sets the document title ("Danh sách phim · Yuumé"). On a route change focus moves to the page heading
   or the page region; the list, detail and watch pages do this today, and the shells make it shared behaviour for the
   pages that do not yet (guest, access and not-found pages).
@@ -225,7 +229,9 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
 
 - **One typed string table:** `src/strings/vi.ts`, grouped by feature, holding constants and parameterised functions
   (for example `resumeAt(position)`); no i18n library. A second language later becomes a second module of the same
-  type chosen at start-up.
+  type chosen at start-up. The table covers app-authored visible text and accessible names. Labels the browser draws
+  itself (the native video controls until ADR-018 replaces them, the file picker, the page-unload prompt) follow the
+  browser's language and are outside the table.
 - **Document language:** `<html lang="vi">`; text in another language carries its own `lang` (for example a Japanese
   original title gets `lang="ja"`).
 - **Formatting:** numbers, dates and durations use `Intl` with `vi-VN`; no raw ISO timestamps on screen.
@@ -260,7 +266,7 @@ Starter glossary (the table may refine wording; the meaning stays):
 
 | Component | Status | Notes |
 |---|---|---|
-| `LoadingState`, `EmptyState`, `ErrorState` | existing, restyled | keep their semantics and heading levels; `ErrorState` shows the mapped message, then the server detail and request ID |
+| `LoadingState`, `EmptyState`, `ErrorState` | existing, restyled | keep their semantics and heading levels; `ErrorState` follows section 9 (mapped Vietnamese message, request ID only when supplied, English detail only for allowlisted codes) and is tested with an unknown code and with an absent or null request ID |
 | `Pagination` | existing, restyled | behaviour and tests unchanged |
 | `AuthFormCard` and the auth pages | existing, restyled | no flow change |
 | `MovieCard` (later the title card) | changed | one link; 2:3 artwork with the generated poster as fallback (ADR-020 owns real artwork); status line in words |
@@ -268,7 +274,7 @@ Starter glossary (the table may refine wording; the meaning stays):
 | `PosterArt` | changed | pink and black gradients (section 4.2) |
 | `MovieStatusBadges` → `StatusBadge` | changed | word plus colour; catalogue status only in admin views |
 | `buttonStyles.ts` → `Button` and `LinkButton` | replaced | variants primary, secondary, danger, ghost; loading and disabled states; the old helpers are removed only after every import moves |
-| `useModalFocus` and the three dialogs → `Dialog` | merged | one dialog for archive, unsaved changes and upload exit (later also activation); focus moves in, Tab stays inside, Escape closes where safe, focus returns to the opener or, when the opener is gone (an archived row), to the page heading as the archive dialog does today |
+| `useModalFocus` and the three dialogs → `Dialog` | merged | one dialog for archive, unsaved changes and upload exit (later also activation); focus moves in, Tab stays inside, Escape closes where safe, and on close focus goes to the target each caller provides, keeping today's destinations (the archive dialog focuses the list heading after a successful archive and the opener otherwise; the upload leave dialog returns to the upload status or outcome); existing focus assertions stay |
 | `AppLayout` → `ViewerShell`, `AdminShell`, `GuestShell` | split | section 8 |
 | `Field`, `TextInput`, `TextArea`, `Select`, `Checkbox` | new | visible label, help text and error wired with `aria-describedby` and `aria-invalid`, as the current forms do |
 | `StatusNotice` | new | the inline `role="status"` notice already used after saves; no timed toasts |
@@ -301,10 +307,10 @@ otherwise.
 | Screen | States to design and test |
 |---|---|
 | Shell | initialising (no navigation flash), signed out, signed in, signed in as administrator, signing out (button disabled, "Đang đăng xuất…"), unconfirmed sign-out or failed restore (alert with retry), blocked site data (note), single-tab mode (note) |
-| Guest landing, sign-in, registration | idle, submitting, field errors, server error with request ID, success redirect, the unconfirmed sign-out banner |
+| Guest landing, sign-in, registration | idle, submitting, field errors, server error (section 9), success redirect, the unconfirmed sign-out banner |
 | Not found, forbidden | heading as the page title, one way back, no private data |
 | Account | as today |
-| Admin list | loading skeleton, list, empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (busy, dimmed, actions disabled), archive dialog, success notice after save or archive, selected status filter visible |
+| Admin list | loading skeleton, list, empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (`aria-busy` and a loading indicator instead of dimming the rows, which would put `text-muted` at 3.14:1; Archive disabled and the View, Edit and Upload links unchanged, as today), archive dialog, success notice after save or archive, selected status filter visible |
 | Admin form (create, edit) | loading, not found, forbidden, field errors, dirty-form guard on navigation and sign-out, saving (guard says the save is in progress), conflict (slug already used), success back to the same filtered list |
 | Admin upload | the frozen #175 states unchanged: idle, checking, sending with progress and cancel, saving to storage (cancel hidden), accepted, unknown outcome (no automatic resend), confirmed not accepted (nothing committed; manual retry), cancelled, already in progress (409), too large (413), rejected file (400), signed out, forbidden, not found; exit guard on navigation, page unload and, new, sign-out, each tested in the sending, checking and saving phases and with a phase that settles while the dialog is open |
 
@@ -326,25 +332,28 @@ focus rules of section 4, each screen meets in particular:
   (`scroll-padding-top`);
 - 2.5.7 and 2.5.8: drag alternatives and 24 px targets;
 - 3.1.1 and 3.1.2: page and part language;
-- 3.2.3: the same navigation on every page;
+- 1.4.12: no loss when text spacing is increased; 1.4.13: content shown on hover or focus (tooltips) is dismissible,
+  hoverable and persistent;
+- 3.2.3: repeated navigation keeps the same relative order on every page (guest and signed-in navigation may differ);
 - 3.3.1 and 3.3.3: errors identified in text with a suggestion; 3.3.7 and 3.3.8: no re-entry of known data and no
   memory or puzzle test in sign-in (paste allowed in the password field);
 - 4.1.3: status messages announced without moving focus.
 
-This is a design target, not a conformance claim: only tested screens may be described as meeting it.
+This is a design target, not a conformance claim. A claim may only name tested full pages and complete processes (for
+example the whole upload flow), never a single component.
 
 ## 13. Evidence each UI pull request provides
 
 | Check | How | Pass |
 |---|---|---|
 | Token contrast | Vitest test over the token definitions | every declared pair meets its threshold |
-| Automated accessibility scan | axe rules tagged for WCAG 2.0, 2.1 and 2.2 Level A and AA run in the existing Playwright harness (Chromium and Firefox) on each changed screen state; the scanner (axe-core, MPL-2.0) is a development-only dependency, never shipped | every reported A or AA violation is fixed, whatever axe's impact rating; the target-size rule enabled. A clean scan is not a WCAG result: the manual rows below cover what automation cannot |
+| Automated accessibility scan | axe rules tagged for WCAG 2.0, 2.1 and 2.2 Level A and AA run in the Playwright suite (Chromium and Firefox) on each changed screen state; the harness, which today renders only session and player fixtures, is extended to render the real app routes against fixture API responses; the scanner (axe-core, MPL-2.0) is a development-only dependency, never shipped | every reported A or AA violation is fixed, whatever axe's impact rating; the target-size rule enabled. A clean scan is not a WCAG result: the manual rows below cover what automation cannot |
 | Keyboard | Playwright keyboard-only walk-through of each changed screen | every action reachable; logical order; focus visible and not hidden |
 | Reduced motion and forced colours | Playwright contexts with `reducedMotion: 'reduce'` and `forcedColors: 'active'` | no running animation; focus, selection and disabled states stay visible |
 | Text resize and reflow | text at 200 % at 1280 px; the page at 320 CSS px wide | no lost content or action; at 320 px no horizontal scrolling except two-dimensional content (section 7) |
-| Manual criteria | a short checklist per changed screen for what automation misses: meaningful focus order and headings, error identification and suggestions, consistent navigation, language of parts, status announcements | each applicable item checked and noted in the pull request |
+| Manual criteria | every applicable WCAG 2.2 A and AA criterion that automation cannot decide, checked on each changed screen: at least focus order and headings, text spacing (1.4.12), content on hover or focus (1.4.13), error identification and suggestions, consistent navigation, language of parts, status announcements | the result and its scope (screens, browsers) recorded in the pull request |
 | Screenshots for review | 1280x800, 1440x900, 1920x1080 from fixtures only (no real titles, accounts or personal data) | reviewed by the owner; never updated blindly |
-| Behaviour | existing Vitest, Playwright and real-Chrome smoke suites | green; selectors change only where the visible text changed |
+| Behaviour | existing Vitest, Playwright and real-Chrome smoke suites | green; selectors and interactions change only where the visible text or the widget changed (for example "Sign out" moving into the account menu), and the session, upload and playback assertions stay as they are |
 | Screen reader | manual NVDA row in Chrome or Edge and a Firefox row for the shell, dialogs and the admin table | announcements and focus as specified |
 | Bundle | build output size before and after | the change and its cause stated in the pull request |
 
