@@ -18,6 +18,10 @@ import javax.sql.DataSource;
  * Wraps a DataSource and records, for every connection it hands out, the SQL text of each prepared statement, its
  * bound parameters and the values read from its result set. With a DataSourceTransactionManager on the wrapper, one
  * connection is one transaction, so a test can check what each transaction ran without depending on the query plan.
+ *
+ * <p>Supported calls: {@code prepareStatement}, the {@code set...} binders, {@code executeQuery} (its result set is
+ * recorded through {@code getObject}) and {@code executeUpdate}. Each execution is recorded separately.
+ * {@code execute} and plain {@code Statement}s are rejected, so that a statement cannot run unrecorded.
  */
 public final class JdbcStatementRecorder {
 
@@ -55,8 +59,12 @@ public final class JdbcStatementRecorder {
                 Connection.class.getClassLoader(),
                 new Class<?>[] {Connection.class},
                 (proxy, method, args) -> {
+                    String name = method.getName();
+                    if (name.equals("createStatement") || name.equals("prepareCall")) {
+                        throw new UnsupportedOperationException(name + " is not recorded; use prepareStatement");
+                    }
                     Object result = invoke(target, method, args);
-                    if (method.getName().equals("prepareStatement")) {
+                    if (name.equals("prepareStatement")) {
                         String sql = (String) args[0];
                         return recordingStatement((PreparedStatement) result, sql, statements);
                     }
@@ -67,12 +75,14 @@ public final class JdbcStatementRecorder {
     private PreparedStatement recordingStatement(PreparedStatement target, String sql,
                                                  List<RecordedStatement> statements) {
         Map<Integer, Object> parameters = new TreeMap<>();
-        List<Object> resultValues = new ArrayList<>();
         return (PreparedStatement) Proxy.newProxyInstance(
                 PreparedStatement.class.getClassLoader(),
                 new Class<?>[] {PreparedStatement.class},
                 (proxy, method, args) -> {
                     String name = method.getName();
+                    if (name.equals("execute") || name.equals("executeBatch") || name.equals("addBatch")) {
+                        throw new UnsupportedOperationException(name + " is not recorded");
+                    }
                     boolean bindsParameter = name.startsWith("set")
                             && args != null
                             && args.length >= 2
@@ -80,12 +90,13 @@ public final class JdbcStatementRecorder {
                     if (bindsParameter) {
                         parameters.put((Integer) args[0], args[1]);
                     }
-                    boolean executes = name.equals("executeQuery") || name.equals("executeUpdate")
-                            || name.equals("execute");
-                    if (executes) {
-                        List<Object> boundValues = Collections.unmodifiableList(new ArrayList<>(parameters.values()));
-                        statements.add(new RecordedStatement(sql, boundValues, resultValues));
+                    if (!name.equals("executeQuery") && !name.equals("executeUpdate")) {
+                        return invoke(target, method, args);
                     }
+
+                    List<Object> boundValues = Collections.unmodifiableList(new ArrayList<>(parameters.values()));
+                    List<Object> resultValues = new CopyOnWriteArrayList<>();
+                    statements.add(new RecordedStatement(sql, boundValues, resultValues));
                     Object result = invoke(target, method, args);
                     if (name.equals("executeQuery")) {
                         return recordingResultSet((ResultSet) result, resultValues);

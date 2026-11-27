@@ -345,9 +345,17 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
 
             RecordedStatement readBeforeDelete = statements.get(statements.indexOf(delete) - 1);
             if (singleSpaced(delete.sql()).startsWith("DELETE FROM auth_sessions")) {
-                // The sessions go only after a token read under the same locks found nothing left to delete.
+                // The sessions go only after a token read covering every locked session found nothing left, so the
+                // ON DELETE CASCADE cannot add token rows to this transaction.
+                RecordedStatement sessionLock = statements.get(0);
+                List<Object> lockedSessionIds = sessionLock.resultValues();
+                assertThat(singleSpaced(sessionLock.sql()))
+                        .startsWith("SELECT id FROM auth_sessions")
+                        .contains("FOR UPDATE SKIP LOCKED");
+                assertThat(singleSpaced(readBeforeDelete.sql())).startsWith("SELECT id FROM refresh_tokens");
+                assertThat(uuidParameters(readBeforeDelete)).containsExactlyElementsOf(lockedSessionIds);
                 assertThat(readBeforeDelete.resultValues()).isEmpty();
-                assertThat(delete.parameters()).containsExactlyElementsOf(statements.get(0).resultValues());
+                assertThat(delete.parameters()).containsExactlyElementsOf(lockedSessionIds);
                 sessionDeletes++;
             } else {
                 assertThat(delete.parameters()).containsExactlyElementsOf(readBeforeDelete.resultValues());
@@ -370,6 +378,10 @@ class AuthSessionConcurrencyIntegrationTests extends CookieAuthFixture implement
 
     private static String singleSpaced(String sql) {
         return sql.strip().replaceAll("\\s+", " ");
+    }
+
+    private static List<Object> uuidParameters(RecordedStatement statement) {
+        return statement.parameters().stream().filter(UUID.class::isInstance).toList();
     }
 
     private void insertEndedSessionsAndTokensForPruning() {
