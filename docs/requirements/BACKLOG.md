@@ -37,8 +37,11 @@ Sprint 9 (Admin Operations and Media)
   ├─→ A1 qualification setup and early measurements (about the end of Sprint 9; Pre-production gate)
   ↓
 Metadata and Upload + Sprint 10 (Polish) [may overlap]
-  ↓   (Issue MU.7 closes at 2048 MiB, then the #180 8 GiB row)
-Pre-production gate switches, then the VPS demo after the readiness gates (local work never waits for it)
+
+Pre-production gate (local work never waits for it); each switch has its own gate:
+  1080p default ← G1-G6     source-file release ← R2 drill     image lane ← #233 lane test
+  8 GiB upload limit ← Issue MU.7 + the #180 8 GiB row
+  VPS demo ← target-VM evidence, security gates, #136 children, tested recovery, HTTPS
 ```
 
 ## Sprint 1 - Foundation
@@ -1194,8 +1197,9 @@ Introduce episodes and re-key media, progress and history from the movie to the 
 **Acceptance Criteria:**
 - One migration transaction adds `episodes` (one backfilled PUBLISHED episode per title), `titles.content_type` and `part_label`, and re-keys `video_assets`, `playback_progress` and `watch_history`; the in-flight index is per episode
 - Episode playback, progress and upload endpoints; the Nginx upload location, multipart filter and `ADMIN_ENDPOINTS` cover the episode upload route
+- The title API switch of ADR-013 D11 in the same release: the viewer list and title detail are published-only for every role, and admin reads and writes use the admin title routes; every reader of the current asset uses one per-episode definition; any temporary bridge is gone when this issue closes
 - SPA: `/watch/:episodeId`, the title route, a redirect from `/movies/:id/watch`, Continue Watching with one card per title: the latest interaction on a visible episode is chosen first; a finished one advances only to the immediately following episode when it is visible, playable and unfinished; if the selected unfinished episode loses its playable asset, the card is dropped and no older episode resurfaces; a next-episode card starts from that episode's own saved position; tests cover each of these cases, an older resumable episode and a hidden or unready successor
-- The fenced deployment of ADR-013 D13: new uploads stopped and in-flight ones drained, the edge and backend stopped, the worker drained before the migration; a test runs the previous SPA build's upload against the deployed configuration and confirms that no request body reaches a removed route (the same evidence when a bridge is used)
+- The fenced deployment of ADR-013 D13: new uploads stopped and in-flight ones drained, the edge and backend stopped, the worker drained before the migration; a test runs the previous SPA build's upload, including a preflight that starts after the cutover, against the deployed configuration and confirms that no request body reaches a removed route (the same evidence when a bridge is used)
 - Populated upgrade smoke with an `EXCEPT` bijection on every carried column; a job queued before the migration finishes; PostgreSQL race tests for concurrent uploads; the real-Chrome smoke passes on the new routes
 - Rollback boundary documented: the restore decision is taken at the fenced migration checkpoint, before the new backend or worker starts; once either has started, roll forward only (restoring PostgreSQL alone cannot rewind the broker or object store)
 
@@ -1212,6 +1216,7 @@ The admin groups titles into an optional franchise and manages episodes. A DRAFT
 
 **Acceptance Criteria:**
 - `franchises` table and admin CRUD; `titles.franchise_id`/`franchise_order`; episode CRUD, ordering and per-episode publish; admin UI for parts and episodes
+- Film invariants (ADR-013): a `MOVIE` title has exactly one episode, at ordinal 1 and `PUBLISHED`; that episode cannot be archived or unpublished on its own, a second episode cannot be added, and a change to `MOVIE` is refused unless the title already has exactly that one published episode; tests cover each refusal
 - Visibility tests at three levels; counts exclude hidden items before paging; concurrent reorder tests; fixed statement count per page
 - Franchise names join the search tables: a rename rewrites one row and a hidden franchise's name row is never eligible (index-level tests here); for each endpoint, the published and hidden franchise tests belong to the later of that endpoint's issue (7.5 for search, 7.6 for suggestions) and this one
 - Until Issue 8.12 ships the viewer pages, publishing a title that is not a MOVIE returns 409 `TITLE_PUBLISH_NOT_AVAILABLE` (ADR-013 D4): before then the title page can open only a film's single episode; admins can still create and prepare a title that is not a MOVIE, and upload and publish its episodes, while the title stays hidden; a test covers the refusal and Issue 8.12 flips it
@@ -1242,7 +1247,7 @@ A versioned Java text normalizer (exact and accent-folded keys, Vietnamese đ/Đ
 **GitHub:** [#263](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/263)
 
 **Description:**  
-Implement `GET /api/v1/search` on titles per ADR-015: ranked tiers, one card per PUBLISHED title (a title with nothing playable yet stays, labelled like the catalog list), a deterministic total order and stable paging. Filters use only the admin's own data; TMDB-imported genres, cast or year join a filter only after ADR-014 records that TMDB's terms allow that use.
+Implement `GET /api/v1/search` on titles per ADR-015: ranked tiers, one card per PUBLISHED title (a title with nothing playable yet stays, labelled "Đang xử lý" or "Chưa có tập" like the catalog list; ADR-015 maps the labels to title availability), a deterministic total order and stable paging. Filters use only the admin's own data; TMDB-imported genres, cast or year join a filter only after ADR-014 records that TMDB's terms allow that use.
 
 **Acceptance Criteria:**
 - Endpoint requires a valid access token; `q` trimmed, at most 100 code points, 400 when blank or too long; `genre`, `year` and `type` filters; visibility applied through joins before rank and count
@@ -1269,7 +1274,7 @@ Title suggestions (`GET /api/v1/search/suggestions`) and the search page with a 
 - Combobox keyboard support with `aria-activedescendant`; loading, empty, error and approximate-results states
 - A result card opens its title page; selecting a suggestion opens the selected title by its ID (tested with two titles that share a display name); Enter on the input opens the full results
 
-**Dependencies:** Issue 7.5, UI overhaul phase 1 (#200)
+**Dependencies:** Issue 7.5, the UX-1a slice of #200 (tokens, primitives and shells)
 
 ---
 
@@ -1643,7 +1648,9 @@ A post-encode stage with its own timeout, inside the encode's disk reservation, 
 **Related Stories:** US-008, US-010, US-016
 **Related NFRs:** NFR-004, NFR-007, NFR-009, NFR-011, NFR-016
 
-**Design authority:** ADR-013 (assets per episode, `active`/`candidate`, activation), ADR-016, ADR-019, ADR-020 and ADR-021 (planned). Issues 9.1-9.5 work per episode as ADR-013 amends ADR-010; their paths follow the amended contract. GitHub issues for Issues 9.6-9.18 are created at the sprint start; the metadata design (ADR-014, [#245](https://github. The criteria of Issues 9.6-9.18 summarize the approved plan; exact acceptance wording and sequencing are settled by the owning ADR (planned): ADR-013 for Issue 9.6, ADR-019 for Issues 9.7-9.8 and 9.11, ADR-016 for Issues 9.9, 9.12-9.14 and 9.18, ADR-018 for Issue 9.10, ADR-020 for Issues 9.15-9.16, ADR-021 for Issue 9.17.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) is written in this sprint.
+**Design authority:** ADR-013 (assets per episode, `active`/`candidate`, activation), ADR-016, ADR-019, ADR-020 and ADR-021 (planned). Issues 9.1-9.5 work per episode as ADR-013 amends ADR-010; their paths follow the amended contract. GitHub issues for Issues 9.6-9.18 are created at the sprint start; the metadata design (ADR-014, [#245](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) is written in this sprint.
+
+The criteria of Issues 9.6-9.18 summarize the approved plan; exact acceptance wording and sequencing are settled by the owning ADR (planned): ADR-013 for Issue 9.6, ADR-019 for Issues 9.7-9.8 and 9.11, ADR-016 for Issues 9.9, 9.12-9.14 and 9.18, ADR-018 for Issue 9.10, ADR-020 for Issues 9.15-9.16, ADR-021 for Issue 9.17.
 
 ### Issue 9.1: Backend Video Asset List API for Admin
 
@@ -1972,10 +1979,10 @@ Admin search, preview and apply for TMDB movies, with attribution and the refres
 ### Issue MU.3: TMDB TV Seasons and Episodes
 
 **Description:**  
-Season links (whole season or part of a split season), episode mapping, provider episode texts and renumbering detection. The preview may propose missing episodes; the admin creates the chosen DRAFT episodes through the catalog, and the import maps provider IDs only to local episodes the admin created (ADR-013).
+Season links (one TMDB season to one local title), episode mapping, provider episode texts and renumbering detection. The preview may propose missing episodes; the admin creates the chosen DRAFT episodes through the catalog, and the import maps provider IDs only to local episodes the admin created (ADR-013).
 
 **Acceptance Criteria:**
-- Two local titles referencing one TMDB season; duplicate episode claims return 409; an unknown season change needs re-identification and applies nothing
+- Each TMDB season the admin picks maps to one local title (ADR-013 D12); duplicate episode claims return 409; an unknown season change needs re-identification and applies nothing. Splitting one TMDB season across two titles (split cours) is not an acceptance criterion until ADR-014 reconciles it with ADR-013
 
 **Dependencies:** Issue MU.2, Issue 7.3
 
