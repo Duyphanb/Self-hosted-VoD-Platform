@@ -131,7 +131,7 @@ Out of scope:
 
 Moved into scope (owner, 2026-11-24 to 2026-11-26):
 
-- **series, seasons, OVAs and films** with episodes and an optional franchise (ADR-013, planned under #244)
+- **series, seasons, OVAs and films** with episodes and an optional franchise ([ADR-013](../architecture/adr/ADR-013.md), #244)
 - **rule-based recommendations without scores:** "Tương tự" (similar titles) on the title page, the next part of a franchise, and one Home row "Vì bạn đã xem X"; with no eligible seed there is no personal row and Home shows "Mới thêm" beside any other eligible row; reasons are shown as text (ADR-015, planned)
 - **collections:** editorial and smart collections built from the owner's own data, a Collections page and up to three pinned Home rows (ADR-021, planned)
 - **studio and creator pages (conditional):** once enough titles carry that data
@@ -158,7 +158,7 @@ Out of scope:
 
 Moved into scope (owner, 2026-11-25/26):
 
-- **activation of encoded assets with Admin Preview:** a separate admin-only preview route, audited, `no-store`, writing no viewer progress or history (ADR-013, ADR-019, planned)
+- **activation of encoded assets with Admin Preview:** a separate admin-only preview route, audited, `no-store`, writing no viewer progress or history ([ADR-013](../architecture/adr/ADR-013.md); ADR-019, planned)
 - **release of source files (conditional):** originals are archived long-term on the owner's PC or NAS, not on the VM; a file on the VM is released only after activation, a verified SHA-256 of the off-VM archive copy, the current HLS package in a verified backup set and a passed R2 volume-restore drill (#136), with an explicit owner confirmation for the exact files released (ADR-016, planned)
 - **backups:** a database dump, small files and one verified archive copy are mandatory; block-volume backups with rotation inside the free limit; restore tests; a disaster-recovery document; an admin download of one title's HLS package. No step may cost money or delete the source volume without the owner's consent (ADR-016, planned; #136)
 

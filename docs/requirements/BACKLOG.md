@@ -1164,7 +1164,7 @@ Verified against `main` at `5c2c863` on 2026-11-26, except the manual close-and-
 **Related Stories:** US-005, US-006, US-007, US-012
 **Related NFRs:** NFR-010, NFR-013, NFR-016
 
-**Design authority:** ADR-013 (content model, planned under [#244](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/244)) and ADR-015 (search and discovery, planned under [#128](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/128)), both written for the owner's decisions of 2026-11-25/26 ([#258](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/258)). Until they merge, the frozen ADRs and API contract govern; the issues below summarize the plan and the ADRs govern when they differ.
+**Design authority:** [ADR-013](../architecture/adr/ADR-013.md) (content model, merged under [#244](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/244)) and ADR-015 (search and discovery, planned under [#128](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/128)), both written for the owner's decisions of 2026-11-25/26 ([#258](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/258)). ADR-013 is merged; until ADR-015 merges, the frozen ADRs and API contract govern search; the issues below summarize the plan and the ADRs govern when they differ.
 
 Also in this sprint, outside the numbered items: the decision record [#258](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/258), the UI brief and UI overhaul phase 1 ([#200](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/200)), the frontend dev proxy ([#121](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/121)), the code health audit ([#239](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/239)), the Sprint 6 Newman collection ([#254](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/254)) and the Chrome playback smoke on pull requests ([#255](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/255)).
 
@@ -1317,7 +1317,7 @@ An idempotent seed script through the admin API creates titles with episodes, al
 
 ### Issue 8.1: Backend Watchlist Service and API
 
-**Level (ADR-013, planned):** per title. "Movie" in the criteria below means the title, and `{movieId}` becomes the title ID in the path ADR-013 sets.
+**Level (ADR-013):** per title. "Movie" in the criteria below means the title, and `{movieId}` becomes the title ID in the path ADR-013 sets.
 
 **Description:**  
 Implement watchlist service with add, remove, list operations per API-CONTRACT.yaml (Watchlist tag): `PUT /api/v1/me/watchlist/{movieId}` (add), `DELETE /api/v1/me/watchlist/{movieId}` (remove), `GET /api/v1/me/watchlist` (list). Require authentication. Enforce ownership.
@@ -1338,7 +1338,7 @@ Implement watchlist service with add, remove, list operations per API-CONTRACT.y
 
 ### Issue 8.2: Backend Watch History Service and API
 
-**Level (ADR-013, planned):** history rows per episode, listed with their title; visibility follows the episode and its title.
+**Level (ADR-013):** history rows per episode, listed with their title; visibility follows the episode and its title.
 
 **Description:**  
 Implement the watch history read API per API-CONTRACT.yaml (History tag): `GET /api/v1/me/history` returns paginated watch history. The rows are written by the progress transaction of Issue 6.3 (ADR-011 D12); this issue adds no second writer. Require authentication. Enforce ownership.
@@ -1360,7 +1360,7 @@ Implement the watch history read API per API-CONTRACT.yaml (History tag): `GET /
 
 ### Issue 8.3: Backend Rating Service and API
 
-**Level (ADR-013, planned):** per title. "Movie" in the criteria below means the title.
+**Level (ADR-013):** per title. "Movie" in the criteria below means the title.
 
 **Description:**  
 Implement rating service with create/update operation per API-CONTRACT.yaml (Rating tag): `PUT /api/v1/titles/{titleId}/rating` (the path the contract carries after Issue 7.2, ADR-013) creates or updates user's rating. Require authentication. Enforce ownership.
@@ -1382,7 +1382,7 @@ Implement rating service with create/update operation per API-CONTRACT.yaml (Rat
 
 ### Issue 8.4: Backend Aggregate Rating in Movie APIs
 
-**Level (ADR-013, planned):** aggregate rating per title, in the title APIs.
+**Level (ADR-013):** aggregate rating per title, in the title APIs.
 
 **Description:**  
 Update movie detail and list APIs to include aggregate rating (average, count). Optionally cache in Redis for performance.
@@ -1400,7 +1400,7 @@ Update movie detail and list APIs to include aggregate rating (average, count). 
 
 ### Issue 8.5: Frontend Watchlist UI
 
-**Level (ADR-013, planned):** titles, as Issue 8.1.
+**Level (ADR-013):** titles, as Issue 8.1.
 
 **Description:**  
 Create watchlist page showing user's saved movies. Add "Add to Watchlist" / "Remove from Watchlist" button on movie detail page.
@@ -1419,7 +1419,7 @@ Create watchlist page showing user's saved movies. Add "Add to Watchlist" / "Rem
 
 ### Issue 8.6: Frontend Watch History UI
 
-**Level (ADR-013, planned):** episodes with their title, as Issue 8.2.
+**Level (ADR-013):** episodes with their title, as Issue 8.2.
 
 **Description:**  
 Create the watch history page showing the user's recently watched episodes with their title. Display the last watched timestamp.
@@ -1437,7 +1437,7 @@ Create the watch history page showing the user's recently watched episodes with 
 
 ### Issue 8.7: Frontend Rating UI
 
-**Level (ADR-013, planned):** titles, as Issue 8.3.
+**Level (ADR-013):** titles, as Issue 8.3.
 
 **Description:**  
 Add rating component on movie detail page. User can submit or update their rating. Display aggregate rating (stars, count).
@@ -1656,7 +1656,7 @@ The criteria of Issues 9.6-9.18 summarize the approved plan; exact acceptance wo
 
 **GitHub:** [#168](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/168)
 
-**Level (ADR-013, planned):** assets per episode, with title context. Rewritten 2026-11-26 for the episode level; the path and field names follow the contract as ADR-013 amends it.
+**Level (ADR-013):** assets per episode, with title context. Rewritten 2026-11-26 for the episode level; the path and field names follow the contract as ADR-013 amends it.
 
 **Description:**
 Implement `GET /api/v1/admin/video-assets`: all video assets with status, metadata and failure reason, filterable by status, episode and title. Require `ROLE_ADMIN`.
@@ -1675,7 +1675,7 @@ Implement `GET /api/v1/admin/video-assets`: all video assets with status, metada
 
 ### Issue 9.2: Backend Encoding Retry Service
 
-**Level (ADR-013, planned):** retry the newest asset of its episode, serialized on the episode row in the ADR-013 lock order; "movie" below means the episode.
+**Level (ADR-013):** retry the newest asset of its episode, serialized on the episode row in the ADR-013 lock order; "movie" below means the episode.
 
 **Description:**  
 Retry only the newest `(created_at,id)` asset of its movie when FAILED. Serialize per movie with the same movie-row lock order as upload commit, conditionally claim FAILED -> QUEUED, clear failure, insert next attempt/published_at NULL and commit before eager publish/relay.
@@ -1695,7 +1695,7 @@ Retry only the newest `(created_at,id)` asset of its movie when FAILED. Serializ
 
 ### Issue 9.3: Backend Encoding Retry API
 
-**Level (ADR-013, planned):** episode level, as Issue 9.2.
+**Level (ADR-013):** episode level, as Issue 9.2.
 
 **Description:**  
 Implement `POST /api/v1/admin/video-assets/{videoAssetId}/retry` per API-CONTRACT. Require ROLE_ADMIN and call the newest-FAILED retry service.
@@ -1713,7 +1713,7 @@ Implement `POST /api/v1/admin/video-assets/{videoAssetId}/retry` per API-CONTRAC
 
 ### Issue 9.4: Frontend Admin Encoding Dashboard
 
-**Level (ADR-013, planned):** episode level with title context, as Issue 9.1.
+**Level (ADR-013):** episode level with title context, as Issue 9.1.
 
 **Description:**  
 Create admin dashboard page showing video assets with status. Display movie title, upload date, status, duration, failure reason. Support filtering by status.
@@ -1733,7 +1733,7 @@ Create admin dashboard page showing video assets with status. Display movie titl
 
 ### Issue 9.5: Frontend Admin Retry UI
 
-**Level (ADR-013, planned):** episode level, as Issue 9.2.
+**Level (ADR-013):** episode level, as Issue 9.2.
 
 **Description:**  
 Add retry button to encoding dashboard for failed assets. Clicking retry calls retry API and updates dashboard.
