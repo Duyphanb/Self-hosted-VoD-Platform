@@ -28,6 +28,20 @@ info:
     /api/v1/admin/video-assets/{videoAssetId}/preview and
     /hls/admin/video-assets/{videoAssetId}/... . ADR-013 D11 lists every
     planned path, schema and error code; info.version stays 1.0.0-frozen.
+    Planned, not yet implemented (ADR-015, #128): search and discovery on
+    titles. Each slice changes the operations it serves in its own pull
+    request. SR-1 adds GET and PUT /api/v1/admin/titles/{titleId}/aliases.
+    SR-2 bounds q of /api/v1/search to 1-100 code points after trimming
+    (400 VALIDATION_ERROR otherwise), adds the genre, year and type filters,
+    and returns SearchHit items (a TitleSummary and matchedName) with an
+    approximate flag. SR-3 returns at most five typed title suggestions.
+    RC-1 adds GET /api/v1/titles/{titleId}/similar and RC-2 adds
+    GET /api/v1/me/recommendations (Cache-Control no-store). Search,
+    suggestions, similar titles and recommendations list only PUBLISHED
+    titles, for every role; TMDB-origin values are never indexed, and
+    filters and similar titles ignore them until ADR-014 allows each use.
+    ADR-015 D17 lists every planned path and schema; info.version stays
+    1.0.0-frozen.
 servers:
   - url: http://localhost
     description: Local Nginx edge
@@ -955,6 +969,18 @@ paths:
     get:
       tags: [Search]
       summary: Search movie catalog
+      description: >
+        Planned (ADR-015 SR-2, not yet implemented): one SearchHit per PUBLISHED
+        title, for every role, including titles with nothing playable yet. q is
+        trimmed and holds 1-100 code points (400 VALIDATION_ERROR when blank,
+        longer, or containing a control character); a q without any letter or
+        digit returns an empty page. Matching tiers: exact, accent-folded,
+        prefix and substring matches on the display title and aliases, then the
+        visible franchise name, then full text; a typo fallback, only if the
+        SR-2 fixture adopts it, runs when nothing else matches and sets
+        approximate. Total order: tier, score within the tier, group name,
+        franchise order, display title, title id (ADR-015 D7). genre, year and
+        type filters apply before count and paging.
       parameters:
         - name: q
           in: query
@@ -980,7 +1006,13 @@ paths:
     get:
       tags: [Search]
       summary: Get search suggestions
-      description: MVP core helper for US-012 using persisted catalog metadata.
+      description: >
+        MVP core helper for US-012 using persisted catalog metadata.
+        Planned (ADR-015 SR-3, not yet implemented): the q rules of
+        /api/v1/search, and at most five typed title suggestions (titleId,
+        displayTitle, matchedName, contentType, partLabel, releaseYear,
+        franchiseName) from the name tiers only, never genres, people or the
+        typo fallback, in the search total order.
       parameters:
         - name: q
           in: query

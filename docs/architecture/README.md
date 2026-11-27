@@ -34,6 +34,7 @@ Choose the contract sections relevant to the task; this list is not a required r
 | [ADR-011](adr/ADR-011.md) | Authenticated HLS playback, player behaviour and playback progress |
 | [ADR-012](adr/ADR-012.md) | Browser session: HttpOnly refresh cookie, in-memory access token, sessions and bounded revocation |
 | [ADR-013](adr/ADR-013.md) | Content model: franchises, titles, episodes and asset activation (planned slices S1-S5) |
+| [ADR-015](adr/ADR-015.md) | Search and discovery: normalizer, aliases, search tables, tiers, suggestions, similar titles, the personal Home row and the Home row order (planned slices SR-1 to SR-4, RC-1, RC-2) |
 
 ## Purpose
 

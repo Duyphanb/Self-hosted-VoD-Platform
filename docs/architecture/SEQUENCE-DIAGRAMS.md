@@ -349,7 +349,7 @@ sequenceDiagram
 The host-only cookie has `Path=/api/v1/auth` and a `Max-Age` equal to the remaining absolute session lifetime.
 An authentication-state outage keeps the cookie and leaves the request retryable. See [ADR-012](adr/ADR-012.md).
 
-## Search
+## Search (planned, ADR-015)
 
 ```mermaid
 sequenceDiagram
@@ -357,22 +357,35 @@ sequenceDiagram
     participant Frontend
     participant Nginx
     participant Backend
-    participant Redis
     participant PostgreSQL
 
-    User->>Frontend: Type search query
-    Frontend->>Frontend: Debounce around 300ms
-    Frontend->>Nginx: GET /api/v1/search?q={query}
-    Nginx->>Backend: Forward request with Authorization
-    Backend->>Redis: Check short-lived search cache
-    alt cache miss
-        Backend->>PostgreSQL: PostgreSQL full-text search over movie metadata
-        PostgreSQL-->>Backend: Ranked movie results
-        Backend->>Redis: Store short-lived cache entry
-    else cache hit
-        Redis-->>Backend: Cached result
+    User->>Frontend: Type in the search box
+    Frontend->>Frontend: Wait while an input method composes, then debounce 250-350 ms and abort the previous request
+    Frontend->>Nginx: GET /api/v1/search/suggestions?q={query} with Authorization
+    Note over Nginx: Access log records the path without the query string
+    Nginx->>Backend: Forward request
+    Backend->>Backend: Trim q, check 1-100 code points (400 otherwise), build exact, folded and compact keys
+    alt no letter or digit in the query
+        Backend-->>Frontend: 200 with no items, no database query
+    else
+        Backend->>PostgreSQL: Name tiers 1-7 over title_search_names, visible titles only, total order, limit 5
+        PostgreSQL-->>Backend: Up to five title IDs with matchedName
+        Backend-->>Frontend: Typed title suggestions
     end
-    Backend-->>Nginx: Search response
+    Frontend->>Frontend: Drop the response if the query or the signed-in account changed
+    User->>Frontend: Press Enter
+    Frontend->>Frontend: Open the search page with the query in the URL fragment, never in the query string
+    Frontend->>Nginx: GET /api/v1/search?q={query}&page={page}
+    Nginx->>Backend: Forward request
+    Backend->>PostgreSQL: One read-only REPEATABLE READ transaction
+    PostgreSQL-->>Backend: Best tier per visible title (names, franchise name, full text), filters, count, page
+    opt typo fallback adopted by the SR-2 fixture and no strict match
+        Backend->>PostgreSQL: Trigram similarity on names, at most 20 titles
+    end
+    Backend->>PostgreSQL: Title summaries for the page, in the same transaction
+    Backend-->>Nginx: SearchHit items, approximate flag, page
     Nginx-->>Frontend: Search response
-    Frontend-->>User: Show results, empty state, or error state
+    Frontend-->>User: Results, empty state, approximate notice or error state
 ```
+
+There is no search cache. The Redis cache drawn here before ADR-015 would keep serving an archived title until its entry expired (#128), and PostgreSQL answers the whole query in milliseconds for the planned catalog size. The search tables are rebuilt inside each catalog write transaction that changes an indexed value, so a read never sees a catalog change without its search rows ([ADR-015 D5](adr/ADR-015.md#d5-keeping-the-search-data-correct), [D15](adr/ADR-015.md#d15-privacy-logs-and-caching)).
