@@ -38,7 +38,7 @@ public class AuthSessionPruningJob {
             // Commit each batch before getting the next one.
         }
         while (transactions.execute(status -> pruneLegacyTokens()) == BATCH_SIZE) {
-            // Legacy token rows have no session to cascade from.
+            // Legacy token rows have no session to cascade from. A full batch means more rows may remain.
         }
     }
 
@@ -54,25 +54,36 @@ public class AuthSessionPruningJob {
 
         // No ORDER BY: any 500 tokens will do. The query returns at most 500 rows and never sorts every remaining
         // token of a high-fan-out session.
-        int deletedTokens = jdbc.sql("""
-                DELETE FROM refresh_tokens WHERE id IN (
-                    SELECT id FROM refresh_tokens WHERE session_id IN (:sessionIds) LIMIT :limit
-                )
-                """).param("sessionIds", locked).param("limit", BATCH_SIZE).update();
-        if (deletedTokens == 0) {
-            // We still hold FOR UPDATE on every parent, so no new FK reference can appear before the delete.
-            jdbc.sql("DELETE FROM auth_sessions WHERE id IN (:sessionIds)").param("sessionIds", locked).update();
-            sessions.invalidateAfterCommit(locked);
+        List<UUID> tokenBatch = jdbc.sql("""
+                SELECT id FROM refresh_tokens WHERE session_id IN (:sessionIds) LIMIT :limit
+                """).param("sessionIds", locked).param("limit", BATCH_SIZE).query(UUID.class).list();
+        if (!tokenBatch.isEmpty()) {
+            deleteTokens(tokenBatch);
+            return true;
         }
+
+        // We still hold FOR UPDATE on every parent, so no new FK reference can appear before the delete, and the
+        // ON DELETE CASCADE from auth_sessions adds no token rows to this transaction.
+        jdbc.sql("DELETE FROM auth_sessions WHERE id IN (:sessionIds)").param("sessionIds", locked).update();
+        sessions.invalidateAfterCommit(locked);
         return true;
     }
 
     private int pruneLegacyTokens() {
-        return jdbc.sql("""
-                DELETE FROM refresh_tokens WHERE id IN (
-                    SELECT id FROM refresh_tokens WHERE session_id IS NULL
-                    ORDER BY id LIMIT :limit FOR UPDATE SKIP LOCKED
-                )
-                """).param("limit", BATCH_SIZE).update();
+        List<UUID> tokenBatch = jdbc.sql("""
+                SELECT id FROM refresh_tokens WHERE session_id IS NULL
+                ORDER BY id LIMIT :limit FOR UPDATE SKIP LOCKED
+                """).param("limit", BATCH_SIZE).query(UUID.class).list();
+        if (!tokenBatch.isEmpty()) {
+            deleteTokens(tokenBatch);
+        }
+        return tokenBatch.size();
+    }
+
+    // Each batch is read first and then deleted by its exact IDs. A DELETE ... WHERE id IN (SELECT ... LIMIT n)
+    // can remove more than n rows when the plan evaluates the subquery more than once, which broke the 500-row
+    // bound per transaction (#269).
+    private void deleteTokens(List<UUID> tokenIds) {
+        jdbc.sql("DELETE FROM refresh_tokens WHERE id IN (:tokenIds)").param("tokenIds", tokenIds).update();
     }
 }
