@@ -293,15 +293,16 @@ sequenceDiagram
     ViewerSPA->>Backend: Next request for the old asset (HLS segment or progress save)
     Backend-->>ViewerSPA: HLS 404, or progress 409 VIDEO_ASSET_NOT_CURRENT
     ViewerSPA->>Backend: GET /api/v1/episodes/{episodeId}/playback
-    Backend-->>ViewerSPA: New asset, timelineId, activationGeneration, resumeSeconds
+    Backend-->>ViewerSPA: A different active asset, timelineId, activationGeneration, resumeSeconds
+    Note over ViewerSPA: Same asset with a newer generation: ADR-013 D9 (adopt in place, or a new run<br/>at the live position after an HLS 404)
     alt timelineId unchanged and position inside the new duration
         ViewerSPA->>ViewerSPA: Reload at the live position
-    else different timeline
+    else otherwise
         ViewerSPA->>ViewerSPA: Reload at resumeSeconds, reset the run memory
     end
 ```
 
-The viewer routes never serve a candidate. Activation runs no storage I/O inside its transaction, and the worker takes no part in it. [ADR-013 D7-D9](adr/ADR-013.md#d7-activation-s5) define the rules, including re-activation of an earlier asset.
+The viewer routes never serve a candidate. Activation runs no storage I/O inside its transaction, and the worker takes no part in it. [ADR-013 D7-D9](adr/ADR-013.md#d7-activation-s5) define the rules, including re-activation of an earlier asset and the same-asset answer the diagram does not show.
 
 ## Auth Refresh
 
