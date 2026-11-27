@@ -34,10 +34,11 @@ Sprint 7 (Content Model and Search)
 Sprint 8 (Library, Player Core and Viewer UI)
   ↓
 Sprint 9 (Admin Operations and Media)
+  ├─→ A1 qualification setup and early measurements (about the end of Sprint 9; Pre-production gate)
   ↓
 Metadata and Upload + Sprint 10 (Polish) [may overlap]
-  ↓
-Pre-production gate (target-VM evidence and switches; local work never waits for it)
+  ↓   (Issue MU.7 closes at 2048 MiB, then the #180 8 GiB row)
+Pre-production gate switches, then the VPS demo after the readiness gates (local work never waits for it)
 ```
 
 ## Sprint 1 - Foundation
@@ -1307,7 +1308,7 @@ An idempotent seed script through the admin API creates titles with episodes, al
 **Related Stories:** US-005, US-006, US-010, US-012, US-013, US-014, US-015
 **Related NFRs:** NFR-004, NFR-005, NFR-007, NFR-016
 
-**Design authority:** ADR-013 for the title and episode level of Issues 8.1-8.7 (watchlist and rating per title, history per episode; their paths follow the contract as ADR-013 amends it); ADR-016 and ADR-017 (media, backup and upload), ADR-020 (images, [#199](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/199)), ADR-021 (collections) and ADR-018/ADR-019 (player controls, subtitles, markers), all planned and written in this sprint before the items that need them. Existing issues in this sprint: [#130](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/130) (library contract preparation for Issues 8.1-8.7), [#131](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/131) (profile edit UI), #249 (Issue 8.8), #247 (Issue 8.9), #190 (Issue 8.16) and #199 (the image design). GitHub issues for the other items are created at the sprint start.
+**Design authority:** ADR-013 for the title and episode level of Issues 8.1-8.7 (watchlist and rating per title, history per episode; their paths follow the contract as ADR-013 amends it); ADR-016 and ADR-017 (media, backup and upload), ADR-020 (images, [#199](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/199)), ADR-021 (collections) and ADR-018/ADR-019 (player controls, subtitles, markers), all planned and written in this sprint before the items that need them. Existing issues in this sprint: [#130](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/130) (library contract preparation for Issues 8.1-8.7), [#131](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/131) (profile edit UI), #249 (Issue 8.8), #247 (Issue 8.9), #190 (Issue 8.16) and #199 (the image design). GitHub issues for the other items are created at the sprint start. The criteria of Issues 8.8-8.20 summarize the approved plan; exact acceptance wording and sequencing are settled by the owning ADR (planned): ADR-018 for Issues 8.8 and 8.10, ADR-019 for Issue 8.9, ADR-013 and the UI brief for Issues 8.11-8.12, ADR-015 for Issues 8.13-8.14, ADR-021 for Issue 8.15, ADR-016 for Issues 8.16-8.18 and 8.20, ADR-020 for Issue 8.19.
 
 ### Issue 8.1: Backend Watchlist Service and API
 
@@ -1642,7 +1643,7 @@ A post-encode stage with its own timeout, inside the encode's disk reservation, 
 **Related Stories:** US-008, US-010, US-016
 **Related NFRs:** NFR-004, NFR-007, NFR-009, NFR-011, NFR-016
 
-**Design authority:** ADR-013 (assets per episode, `active`/`candidate`, activation), ADR-016, ADR-019, ADR-020 and ADR-021 (planned). Issues 9.1-9.5 work per episode as ADR-013 amends ADR-010; their paths follow the amended contract. GitHub issues for Issues 9.6-9.18 are created at the sprint start; the metadata design (ADR-014, [#245](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) is written in this sprint.
+**Design authority:** ADR-013 (assets per episode, `active`/`candidate`, activation), ADR-016, ADR-019, ADR-020 and ADR-021 (planned). Issues 9.1-9.5 work per episode as ADR-013 amends ADR-010; their paths follow the amended contract. GitHub issues for Issues 9.6-9.18 are created at the sprint start; the metadata design (ADR-014, [#245](https://github. The criteria of Issues 9.6-9.18 summarize the approved plan; exact acceptance wording and sequencing are settled by the owning ADR (planned): ADR-013 for Issue 9.6, ADR-019 for Issues 9.7-9.8 and 9.11, ADR-016 for Issues 9.9, 9.12-9.14 and 9.18, ADR-018 for Issue 9.10, ADR-020 for Issues 9.15-9.16, ADR-021 for Issue 9.17.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) is written in this sprint.
 
 ### Issue 9.1: Backend Video Asset List API for Admin
 
@@ -1751,7 +1752,7 @@ READY means encoded; viewers get only the asset the admin activated. At activati
 - A replacement stays invisible to viewers until activated; progress inserts and updates take the episode lock that activation takes and carry the activation generation; race tests for a first save and a stale A→B→A save against activation
 - Preview writes no progress or history rows or requests, including on page exit
 - Route matrix: on `/hls/admin/**` a signed-in non-admin or demoted admin gets 403 before any asset lookup and a signed-out or revoked session gets 401, both with `no-store`; on the viewer HLS routes a candidate returns 404
-- This release adds to the Issue 9.1 list the `active`, `candidate` and `retired` fields with their tests, and the admin UI's Preview and activation entry points, so a first upload can be activated after leaving the upload page
+- This release adds to the Issue 9.1 list the `active`, `candidate` and `retired` fields with their tests and switches its `superseded` and current rules to the activation model (ADR-013 D7, D11), tested with an older active asset, a newer candidate and a retired READY row together; and the admin UI's Preview and activation entry points, so a first upload can be activated after leaving the upload page
 - The purge handoff ships in this release, following ADR-013: with writers stopped (activation included), the reviewed assets are rechecked against the new eligibility rules and `retired_at` is committed before any object is deleted; purge spares active and candidate assets; a test shows an older active asset is never purged as "not newest"
 - Browser evidence for "same cut" and "different cut" during playback, including a progress 409 and an HLS 404 that share one refetch
 - Carry rules of ADR-013 D7 for the admin-confirmed subtitle tracks delivered by Issue 8.9 (per kind): on "same cut", a target with its own confirmed set keeps it and loses its stale carried rows, otherwise its carried rows are replaced by a copy of the active set; on "different cut", carried rows are removed and the target's own set stays; worker-extracted subtitles stay with their asset; repeated activations of the same asset are tested
@@ -1940,7 +1941,7 @@ Bounded internal metrics, including the encode real-time factor and image-job du
 **Related Stories:** US-007, US-008
 **Related NFRs:** NFR-003, NFR-007, NFR-008
 
-**Design authority:** ADR-014 (metadata, planned under [#245](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) and ADR-017 (resumable upload, planned). The display title and slug stay the admin's own; the admin's own description always wins, provider text is used only when the admin has none and never overwrites admin-edited content; provider names are stored as aliases with their provenance, indexed only under the search rules of Issue 7.4. This milestone runs after Sprint 9; Sprint 10 can overlap it. GitHub issues are created at its start.
+**Design authority:** ADR-014 (metadata, planned under [#245](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/245)/[#246](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/246)) and ADR-017 (resumable upload, planned). The display title and slug stay the admin's own; the admin's own description always wins, provider text is used only when the admin has none and never overwrites admin-edited content; provider names are stored as aliases with their provenance, indexed only under the search rules of Issue 7.4. This milestone runs after Sprint 9; Sprint 10 can overlap it. GitHub issues are created at its start. The criteria below summarize the approved plan; exact acceptance wording and sequencing are settled by ADR-014 (Issues MU.1-MU.5) and ADR-017 (Issues MU.6-MU.7).
 
 ### Issue MU.1: Metadata Catalog Foundation
 
@@ -1971,7 +1972,7 @@ Admin search, preview and apply for TMDB movies, with attribution and the refres
 ### Issue MU.3: TMDB TV Seasons and Episodes
 
 **Description:**  
-Season links (whole season or part of a split season), episode mapping, provider episode texts, opt-in DRAFT episodes and renumbering detection.
+Season links (whole season or part of a split season), episode mapping, provider episode texts and renumbering detection. The preview may propose missing episodes; the admin creates the chosen DRAFT episodes through the catalog, and the import maps provider IDs only to local episodes the admin created (ADR-013).
 
 **Acceptance Criteria:**
 - Two local titles referencing one TMDB season; duplicate episode claims return 409; an unknown season change needs re-identification and applies nothing
@@ -2013,6 +2014,7 @@ A restricted tus 1.0 profile on object-storage multipart: sessions with a #190 r
 
 **Acceptance Criteria:**
 - Resume from a partially committed chunk, a lost completion response and an orphan multipart upload; no automatic replay of an ambiguous upload; 64-bit sizes end to end
+- Uploads stream to storage without assembling the file in memory: memory per upload stays bounded by the chunk size as the configured whole-file limit grows (owner decision 2026-11-26; mechanism by ADR-017 and its storage spike)
 
 **Dependencies:** ADR-017 merged, Issue 8.16, Issue 7.2
 
@@ -2045,6 +2047,8 @@ The admin upload page uses a tus client with a declared digest and resumes after
 
 **Related Stories:** US-017, US-018  
 **Related NFRs:** NFR-011, NFR-012, NFR-015
+
+The criteria of Issues 10.9-10.11 summarize the approved plan; ADR-018 (Issue 10.9), ADR-016 and ADR-019 (Issue 10.10) and ADR-019 (Issue 10.11) settle the exact acceptance wording (planned).
 
 ### Issue 10.1: Backend Centralized Exception Handling
 
@@ -2250,7 +2254,7 @@ The measurement owners stay as they are: #124 (encode calibration, gate G1/G2 wi
 
 - **1080p default for new encodes:** after G1-G6 pass (G1/G2 #124, G3 the owner's visual review, G4/G6 #233, G5 #137 with #190) and 1080p plays in the real browser; needs Issue 9.9; no upscaling, existing 720p assets unchanged
 - **Release of source files enabled:** the admin release button with its dry-run list and a warning whenever only one archive copy exists, and the owner's authorization to turn on the server-side switch, after the runbook exists and the R2 volume-restore drill (#136; single-audio and multi-audio playback with a track switch, on a backup taken with writers drained) has passed; every release still rechecks the archive SHA-256, activation, the verified backup coverage of the current package and the owner's confirmation for the exact object set (Issue 9.13 ships it disabled)
-- **Volume backups and the disaster-recovery document** (child of #136): a restore runs the provider withdrawal and replays later unlinks before serving traffic (mechanism in ADR-014 and the recovery runbook); automatic rotation within the free limit that deletes an older backup only after the new one is AVAILABLE; immediate failure notification and the admin banner; the free R2 drill on a 50 GB data volume before the volume grows; no step that costs money or deletes the source volume without the owner's consent
+- **Volume backups and the disaster-recovery document** (child of #136): a restore runs the provider withdrawal and replays later unlinks before serving traffic (mechanism in ADR-014 and the recovery runbook); automatic rotation within the free limit that deletes an older backup only after the new one is AVAILABLE; immediate failure notification and the admin banner; the free R2 drill on a 50 GB data volume before the volume grows; the mandatory set is verified: the database dump, the small files and one SHA-256-checked RAW copy on the owner's PC or NAS for each asset; no step that costs money or deletes the source volume without the owner's consent
 - **Upload limit promotion and retirement of the one-shot route:** Issue MU.7 closes at 2048 MiB, #180 runs the separate test-only 8 GiB qualification, and only when both are done does this item raise the deployed limit and retire the one-shot route; if the 8 GiB row fails, the 2048 MiB limit and the one-shot route stay
 - **Image lane switched on:** after #233's lane qualification passes: #232 instrumentation, sustained and overlapping load, restart recovery, at most 5 % encode slowdown and the full playback thresholds; the sequential single-slot path stays the fallback
 - **Remux adoption:** only if Issue 9.14 shows a gain on the target VM

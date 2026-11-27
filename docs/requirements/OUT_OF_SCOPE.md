@@ -69,7 +69,7 @@ Out of scope:
 
 Moved into scope (owner, 2026-11-26):
 
-- **resumable, chunked browser upload** with a free-disk pre-check, at the current size limit first (ADR-017, planned)
+- **resumable, chunked browser upload** with a free-disk pre-check, streamed to storage with memory bounded by the chunk size, at the current size limit first (ADR-017, planned)
 - **a larger, configurable size limit (conditional):** 8 GiB is the target once #180's test-only row qualifies it on the target VM; if it fails, 2048 MiB stays; no hard-coded long-term cap
 
 Allowed focus:
