@@ -1213,7 +1213,7 @@ The admin groups titles into an optional franchise and manages episodes. A DRAFT
 - `franchises` table and admin CRUD; `titles.franchise_id`/`franchise_order`; episode CRUD, ordering and per-episode publish; admin UI for parts and episodes
 - Visibility tests at three levels; counts exclude hidden items before paging; concurrent reorder tests; fixed statement count per page
 - Franchise names join the search tables: a rename rewrites one row and a hidden franchise's name row is never eligible (index-level tests here); for each endpoint, the published and hidden franchise tests belong to the later of that endpoint's issue (7.5 for search, 7.6 for suggestions) and this one
-- Publishing a second episode of one title returns 409 until Issue 8.12 ships the episode grid and the next-episode card
+- Until Issue 8.12 ships the viewer pages, publishing a title that is not a MOVIE returns 409 `TITLE_PUBLISH_NOT_AVAILABLE` (ADR-013 D4): before then the title page can open only a film's single episode; series and their episodes can still be created, uploaded and published under the hidden title; a test covers the refusal and Issue 8.12 flips it
 
 **Dependencies:** Issue 7.2, Issue 7.4
 
@@ -1502,7 +1502,7 @@ Home, browse ("Phim lẻ", "Phim bộ", "Anime"), the title header and the Conti
 ### Issue 8.12: Franchise, Part and Episode Pages
 
 **Description:**  
-Franchise page with the part strip, title page with the episode grid and part switcher (beside the player on wide screens, below on narrow ones), previous and next episode, Continue Watching per title, and the "Tập tiếp theo" button that starts the next episode once (never on reload or a shared link). Lifts the Issue 7.3 multi-episode publish guard.
+Franchise page with the part strip, title page with the episode grid and part switcher (beside the player on wide screens, below on narrow ones), previous and next episode, Continue Watching per title, and the "Tập tiếp theo" button that starts the next episode once (never on reload or a shared link). Lifts the Issue 7.3 guard, so titles that are not a MOVIE can be published.
 
 **Acceptance Criteria:**
 - Two-episode tests: finished last episode with a next one; hidden or unready next episode
