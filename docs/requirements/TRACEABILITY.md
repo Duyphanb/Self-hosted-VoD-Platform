@@ -65,6 +65,7 @@ Updated 2026-11-26 for the owner's scope decisions ([#258](https://github.com/Du
 | NFR-014 | F-021, F-022 | Compose service-name verification |
 | NFR-015 | Backend API features | Contract ApiError tests, edge 413/502/503/504 JSON/status/requestId, backend upload 503 `AUTH_STATE_UNAVAILABLE`/`UPLOAD_STORAGE_UNAVAILABLE` and 500 `UPLOAD_DATABASE_ERROR`/`UPLOAD_OUTCOME_UNKNOWN`/`INTERNAL_ERROR` with requestId, and SPA not-accepted versus unknown-result/no-auto-resubmit handling even while videoStatus stays READY |
 | NFR-016 | Frontend features | UI state tests or manual checklist |
+| NFR-017 | Frontend features | Planned (NFR-017 is added to `NFR.md` by the UI brief pull request under #200): UI-BRIEF §13 evidence per UI change (token contrast test, axe scan, keyboard walk-through, reduced-motion/forced-colours, manual screen-reader rows) |
 
 ## Sprint 4 design-to-test plan
 
