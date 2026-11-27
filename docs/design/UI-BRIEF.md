@@ -19,11 +19,11 @@ In scope (shared UI, #200 phase 1 and the base for later screens):
 - screen states of the shell, the access pages and the admin pages;
 - accessibility rules and the evidence each UI pull request provides.
 
-Out of scope here, designed elsewhere (planned decision records; links work once they are merged):
+Out of scope here, designed elsewhere (ADR-013 is merged; the others are planned decision records):
 
 | Area | Owner document |
 |---|---|
-| Content model, title/episode routes, activation, Admin Preview route | ADR-013 (#244) |
+| Content model, title/episode routes, activation and its dialog, Admin Preview route and player | [ADR-013](../architecture/adr/ADR-013.md) (#244) |
 | Search, suggestions, recommendations and the Home row order | ADR-015 (#128) |
 | Player controls, menus, hotkeys, captions, skip button, end card | ADR-018 (#249) |
 | Subtitle tracks, markers, seek previews, Marker Editor | ADR-019 (#247, #248) |
@@ -172,9 +172,9 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   surface is height-limited so that the first content row (on Home, "Đang xem") is visible at 1280x800.
 - **Density B ("compact"):** browse, search, library and admin. Eight posters per row at 1440 px with a minimum card
   width; cards show the title once as text.
-- **Watch page:** a 16:9 video area; for a title with several episodes the episode list sits in a 280-320 px panel
-  beside the player from 1280 px wide, and below the player on narrower windows; a film has no list. The player and
-  its controls follow ADR-018.
+- **Watch page** (`/watch/:episodeId` from ADR-013 S2; the title page is `/titles/:id`): a 16:9 video area; for a
+  title with several episodes the episode list sits in a 280-320 px panel beside the player from 1280 px wide, and
+  below the player on narrower windows; a film has no list. The player and its controls follow ADR-018 (planned).
 - **Admin:** density B, with server-paged semantic tables; no hero.
 
 ## 8. Navigation and shells
@@ -186,9 +186,9 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
   bộ" lists seasons, OVAs, ONAs and specials, "Anime" filters by the owner's "Anime" genre, and "Bộ sưu tập" appears
   once collections ship (ADR-021). The routes behind these items come with the content model (ADR-013) and the
   viewer phase 2; an item is shown only when its route exists.
-- **Interim navigation** (until those routes exist): "Phim" (today's `/movies` list) and "Đang xem"
-  (`/continue-watching`), with search added when it ships. "Đang xem" moves into the account menu once Home with its
-  "Đang xem" row exists.
+- **Interim navigation** (until those routes exist): "Phim" (today's `/movies` list, which becomes `/titles` with
+  ADR-013 S2; old `/movies/...` links redirect there) and "Đang xem" (`/continue-watching`), with search added when it
+  ships. "Đang xem" moves into the account menu once Home with its "Đang xem" row exists.
 - **Account menu** (a menu button): Đang xem (only after it has left the primary navigation), Danh sách của tôi (once
   the watchlist ships, Sprint 8), Tài khoản, Quản trị (administrators only; visibility in the menu is presentation, the
   server still enforces the role), Đăng xuất. Choosing "Đăng xuất" closes the menu; while sign-out is pending the menu
@@ -204,8 +204,8 @@ its backdrop in sRGB and rounded to 8-bit channels, as a browser renders it.
 
 ### 8.2 Admin shell
 
-- Same header; below it a left rail with only the items that exist: "Nội dung" today; "Tải lên", "Metadata" and "Sao
-  lưu" join when their features ship. The rail marks the current item with `aria-current`.
+- Same header; below it a left rail with only the items that exist: "Nội dung" today (`/admin/movies`, which
+  becomes `/admin/titles` with ADR-013 S2); "Tải lên", "Metadata" and "Sao lưu" join when their features ship. The rail marks the current item with `aria-current`.
 - Admin pages keep their URL filter state, their return-to-list navigation and their focus restoration.
 
 ### 8.3 Guest shell
@@ -290,7 +290,7 @@ Starter glossary (the table may refine wording; the meaning stays):
 | `AppLayout` → `ViewerShell`, `AdminShell`, `GuestShell` | split | section 8 |
 | `Field`, `TextInput`, `TextArea`, `Select`, `Checkbox` | new | visible label, help text and error wired with `aria-describedby` and `aria-invalid`, as the current forms do |
 | `StatusNotice` | new | the inline `role="status"` notice already used after saves; no timed toasts |
-| `Banner` | new | session notices, later maintenance or backup warnings |
+| `Banner` | new | session notices; later page-level notices such as maintenance or backup warnings and the Admin Preview page of ADR-013 D9 |
 | `Icon` | new | about 20 SVG icons in a local module derived from Lucide (ISC licence, listed on the About page); decorative icons are `aria-hidden`, icon-only buttons have a Vietnamese accessible name |
 | `SectionHeader`, `Skeleton`, `ProgressBar` | new | skeletons keep the final layout dimensions |
 | `Rail` | new | horizontal row with a heading and scroll buttons; used by later screens |
@@ -322,7 +322,7 @@ otherwise.
 | Guest landing, sign-in, registration | idle, submitting, field errors, server error (section 9), success redirect, the unconfirmed sign-out banner |
 | Not found, forbidden | heading as the page title, one way back, no private data |
 | Account | as today |
-| Admin list | loading skeleton, list, empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (`aria-busy` and a loading indicator instead of dimming the rows, which would put `text-muted` at 3.14:1; Archive disabled and the View, Edit and Upload links unchanged, as today), archive dialog, success notice after save or archive, selected status filter visible |
+| Admin list | loading skeleton, list (from ADR-013 S2 the viewer page is published-only for every role, so a row's "Xem" link is offered only for published titles), empty catalogue, no match for the filter (with "Hiện tất cả"), page past the end (with "Về trang cuối"), error with retry, placeholder data while paging (`aria-busy` and a loading indicator instead of dimming the rows, which would put `text-muted` at 3.14:1; Archive disabled and the View, Edit and Upload links unchanged, as today), archive dialog, success notice after save or archive, selected status filter visible |
 | Admin form (create, edit) | loading, not found, forbidden, field errors, dirty-form guard on navigation and sign-out, saving (guard says the save is in progress), conflict (slug already used), success back to the same filtered list |
 | Admin upload | the frozen #175 states unchanged: idle, checking, sending with progress and cancel, saving to storage (cancel hidden), accepted, unknown outcome (no automatic resend), confirmed not accepted (nothing committed; manual retry), cancelled, already in progress (409), too large (413), rejected file (400), signed out, forbidden, not found. Exit guards: the in-app dialogs for navigation and, new, sign-out are tested in the sending, checking and saving phases, including a phase that settles while the dialog is open and the focus target afterwards; the browser's own page-unload prompt is tested for appearing in each pending phase after a user interaction and, by dismissing a real `beforeunload` dialog in Playwright, for keeping the upload page open |
 
