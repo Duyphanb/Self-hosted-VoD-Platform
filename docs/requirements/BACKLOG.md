@@ -1266,6 +1266,7 @@ Title suggestions (`GET /api/v1/search/suggestions`) and the search page with a 
 - Only PUBLISHED titles for every role, with 200 and an empty result when nothing visible matches; tests cover DRAFT and ARCHIVED titles for ROLE_USER and ROLE_ADMIN; franchise-name matching and its tests belong to whichever of this issue and Issue 7.3 lands later
 - No request while an IME composes; 250-350 ms debounce; stale responses dropped
 - Combobox keyboard support with `aria-activedescendant`; loading, empty, error and approximate-results states
+- A result card opens its title page; selecting a suggestion opens the selected title by its ID (tested with two titles that share a display name); Enter on the input opens the full results
 
 **Dependencies:** Issue 7.5, UI overhaul phase 1 (#200)
 
@@ -1356,10 +1357,10 @@ Implement the watch history read API per API-CONTRACT.yaml (History tag): `GET /
 **Level (ADR-013, planned):** per title. "Movie" in the criteria below means the title.
 
 **Description:**  
-Implement rating service with create/update operation per API-CONTRACT.yaml (Rating tag): `PUT /api/v1/movies/{movieId}/rating` creates or updates user's rating. Require authentication. Enforce ownership.
+Implement rating service with create/update operation per API-CONTRACT.yaml (Rating tag): `PUT /api/v1/titles/{titleId}/rating` (the path the contract carries after Issue 7.2, ADR-013) creates or updates user's rating. Require authentication. Enforce ownership.
 
 **Acceptance Criteria:**
-- Endpoint is PUT /api/v1/movies/{movieId}/rating (singular "rating", not "ratings") per API-CONTRACT, with the path as the contract stands after Issue 7.2 (ADR-013)
+- Endpoint is PUT /api/v1/titles/{titleId}/rating (singular "rating", not "ratings") per API-CONTRACT as amended by Issue 7.2 (ADR-013)
 - User can create or update their own rating for a movie
 - Rating value validated per RatingRequest schema (1-5 stars)
 - Uses the catalog visibility check (ADR-009); integration tests assert 404 for DRAFT, ARCHIVED and missing movies for ROLE_USER and ROLE_ADMIN
@@ -1367,7 +1368,7 @@ Implement rating service with create/update operation per API-CONTRACT.yaml (Rat
 - Aggregate rating calculation available (mean, count) returned in RatingResponse
 - Unit tests cover validation and service logic
 - Integration tests cover ownership enforcement
-- Note: GET endpoint for retrieving user's own rating is NOT in API-CONTRACT; MovieDetail.userRating provides this
+- Note: GET endpoint for retrieving user's own rating is NOT in API-CONTRACT; the title detail response's `userRating` provides this
 
 **Dependencies:** Issue 7.2
 
@@ -1579,7 +1580,7 @@ A separate container for decoding untrusted inputs (admin images now, VC-1 later
 ### Issue 8.18: Stream Selection and Wider Audio Support
 
 **Description:**  
-A two-stage probe (header inventory, then the unchanged strict probe on a verified selected copy), caps of 32 input streams and 4 audio tracks, DTS and TrueHD decoded to AAC stereo, PGS kept as a sidecar file, dropped tracks visible to the admin.
+A two-stage probe (header inventory, then the unchanged strict probe on a verified selected copy), caps of 32 input streams and 4 audio tracks, DTS and TrueHD decoded to AAC stereo, PGS always preserved as a `.sup` file whether or not rendering ships, dropped tracks visible to the admin.
 
 **Acceptance Criteria:**
 - Generated fixtures: web release, fansub with many streams and fonts, DTS, Blu-ray-like remux, MP4 with cover art, no usable audio fails; cap plus one overflow; memory peak with many attachments measured
@@ -1657,10 +1658,10 @@ Implement `GET /api/v1/admin/video-assets`: all video assets with status, metada
 - Each row carries its episode and title context, status, metadata and the ADR-011 D17 projection: `failureCode`, the fixed safe `failureReason` (ADR-011 D18; an unknown stored value maps to `INTERNAL_ERROR`), `queuedAt`/`startedAt`/`finishedAt` of the latest attempt, `retryEligible` and `superseded`
 - Filters by status, episode and title combine; an invalid filter or page parameter returns 400 `VALIDATION_ERROR`; total order `createdAt` descending, then `id` descending; pagination supported
 - Every state is computed per episode from the whole episode, never from a paginated subset; two episodes of one title have independent states
-- Before Issue 9.6 ships, current, newest and superseded follow the ADR-010 rule (current = newest READY); after it, rows also carry `active`, `candidate` and `retired` from the activation model, and current means the activated asset. Historical READY is not a playback promise and purged historical keys may dangle
-- Integration tests cover admin authorization and both stages
+- Current, newest and superseded follow the ADR-010 rule (current = newest READY). Historical READY is not a playback promise and purged historical keys may dangle. The activation fields (`active`, `candidate`, `retired`), their tests and the Preview and activation entry points belong to Issue 9.6
+- Integration tests cover admin authorization and the pre-activation list
 
-**Dependencies:** Sprint 8 complete; the activation fields after Issue 9.6
+**Dependencies:** Sprint 8 complete
 
 ---
 
@@ -1748,9 +1749,10 @@ READY means encoded; viewers get only the asset the admin activated. At activati
 
 **Acceptance Criteria:**
 - A replacement stays invisible to viewers until activated; progress inserts and updates take the episode lock that activation takes and carry the activation generation; race tests for a first save and a stale A→B→A save against activation
-- Preview writes no progress or history rows or requests, including on page exit; viewers and demoted admins get 404 or 403 with `no-store` on every preview path
-- The admin asset list (Issue 9.1) offers the Preview and activation entry points, so a first upload can be activated after leaving the upload page
-- The purge handoff ships in this release: purge spares active and candidate assets and sets `retired_at` before deleting a selected asset's objects; a test shows an older active asset is never purged as "not newest"
+- Preview writes no progress or history rows or requests, including on page exit
+- Route matrix: on `/hls/admin/**` a signed-in non-admin or demoted admin gets 403 before any asset lookup and a signed-out or revoked session gets 401, both with `no-store`; on the viewer HLS routes a candidate returns 404
+- This release adds to the Issue 9.1 list the `active`, `candidate` and `retired` fields with their tests, and the admin UI's Preview and activation entry points, so a first upload can be activated after leaving the upload page
+- The purge handoff ships in this release, following ADR-013: with writers stopped (activation included), the reviewed assets are rechecked against the new eligibility rules and `retired_at` is committed before any object is deleted; purge spares active and candidate assets; a test shows an older active asset is never purged as "not newest"
 - Upgrade test: a historical READY row whose objects were purged is retired and can be neither activated nor previewed
 
 **Dependencies:** Issue 7.2, Issue 9.1 (#168)
@@ -1763,7 +1765,8 @@ READY means encoded; viewers get only the asset the admin activated. At activati
 The preview player on the Issue 8.8 controls, the Marker Editor (intro, ending and chapter markers with frame-accurate time capture), chapter capture by the worker, timing import, the track inventory and subtitle candidates.
 
 **Acceptance Criteria:**
-- Marker validation and revision conflicts; markers survive a "same cut" activation and are dropped by a "different cut"; an audit row per preview open
+- Marker validation and revision conflicts; an audit row per preview open
+- Carry rules of ADR-013: on "same cut", the target's own confirmed markers win and otherwise the active asset's set is copied; on "different cut", carried markers are removed and the target's own confirmed markers stay; a test covers a target with its own markers and stale carried ones
 
 **Dependencies:** Issue 9.6, Issue 8.8, ADR-019 merged
 
@@ -1775,7 +1778,7 @@ The preview player on the Issue 8.8 controls, the Marker Editor (intro, ending a
 Skip buttons for confirmed intro and ending markers and a chapter menu; no automatic skipping.
 
 **Acceptance Criteria:**
-- Before, at, inside and after a region; paused stays paused; no markers, no skip control; a different-cut activation drops markers
+- Before, at, inside and after a region; paused stays paused; no markers, no skip control; after a different-cut activation only the new asset's own confirmed markers apply
 
 **Dependencies:** Issue 9.7
 
@@ -1784,11 +1787,11 @@ Skip buttons for confirmed intro and ending markers and a chapter menu; no autom
 ### Issue 9.9: Multi-Audio Packages
 
 **Description:**  
-Every usable audio track (up to four) packaged with the video in a second layout, the master playlist rendered from database rows, typed HLS routes and an admin track API. Readers, validation and Preview parity ship first and on their own, tested with isolated V2 fixtures. Production encodes stay V1 until Issues 9.6 and 9.10 have both shipped: before activation a newer READY asset becomes current automatically, and before Issue 9.10 a first upload in V2 would have no playable asset. Output dimensions are recorded at READY.
+Every usable audio track (up to four) packaged with the video in a second layout, the master playlist rendered from database rows, typed HLS routes and an admin track API. Readers and validation ship first and on their own, tested with isolated V2 fixtures; end-to-end Preview parity belongs to the later of that stage and Issue 9.6. Production encodes stay V1 until Issues 9.6 and 9.10 have both shipped: before activation a newer READY asset becomes current automatically, and before Issue 9.10 a first upload in V2 would have no playable asset. Output dimensions are recorded at READY.
 
 **Acceptance Criteria:**
 - Playlist escaping and route negatives; crash and failure cleanup; real Chrome plays, switches tracks and seeks; existing single-audio assets unchanged
-- While the viewer switch is off, production encodes stay V1 and the activation endpoint refuses a multi-audio asset server-side; tests cover a first upload and a replacement in that state, and the viewers' existing asset stays active
+- While the viewer switch is off, production encodes stay V1 and the activation endpoint refuses every V2-layout asset server-side, whatever its number of audio tracks; tests cover a first upload and a replacement in that state, and the viewers' existing asset stays active
 
 **Dependencies:** Issue 8.18, Issue 7.2, Issue 8.16; Issues 9.6 and 9.10 for production V2 encodes
 
@@ -2138,7 +2141,7 @@ Document VPS deployment steps for Oracle Cloud Free Tier. Include SSH setup, Doc
 - Doc includes backup and restore procedures for PostgreSQL and MinIO
 - Doc includes rollback procedure
 - Doc includes known limitations and troubleshooting
-- Exercise the media purge and orphan audit of the deployment README on isolated fixtures (synthetic DB rows, a disposable Silo): candidate and attempt queries, `mc rm --dry-run` with the trailing `/` (without it, `attempt-1` also lists `attempt-10/`), and protected current/newest-FAILED/in-flight/archive objects still present afterwards; record the evidence; this is not a production deletion
+- Exercise the media purge and orphan audit of the deployment README on isolated fixtures (synthetic DB rows, a disposable Silo): candidate and attempt queries, `mc rm --dry-run` with the trailing `/` (without it, `attempt-1` also lists `attempt-10/`), and protected current/newest-FAILED/in-flight/archive objects still present afterwards; after Issue 9.6, the rehearsal also stops writers including activation, rechecks eligibility (active and candidate assets spared) and commits `retired_at` before the dry-run deletion; record the evidence; this is not a production deletion
 - Doc stored in `docs/deployment/`
 
 **Dependencies:** Issue 10.5
@@ -2256,7 +2259,7 @@ Conditional items with no issue until their trigger:
 | Item | Trigger |
 |---|---|
 | MPEG-2 sources | real samples and a deinterlace policy |
-| VC-1 sources | the Debian fix for the open FFmpeg CVE, plus the media sandbox |
+| VC-1 sources | Debian fixes CVE-2026-125199, and the media sandbox (Issue 8.17) exists |
 | HDR-to-SDR conversion | HDR sources exist |
 | An extra 720p rendition with adaptive switching | #233 shows viewers need it |
 | Styled ASS or PGS rendering in production | Issue 10.11 recommends adoption; the adopting pull request ships the notices, the LGPL source location and the replace or relink route (ADR-019, #143) |

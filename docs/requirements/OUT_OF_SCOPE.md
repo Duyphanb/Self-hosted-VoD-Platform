@@ -44,7 +44,7 @@ Moved into scope (owner, 2026-11-25/26):
 
 - **1080p default for new encodes (conditional):** after the target-VM gate (#124, #233) passes, with preset, CRF and maxrate taken from that measurement; no upscaling; existing 720p assets stay as they are (ADR-016, planned)
 - **multi-audio:** every usable audio track of the source (up to four), packaged so the player can switch tracks (ADR-016, ADR-018, planned)
-- **wider source support:** DTS and TrueHD audio converted to AAC; MPEG-2 video once real samples and a deinterlace policy exist (conditional); VC-1 only after the open Debian fix and a media sandbox exist (conditional); PGS subtitles kept as a sidecar file, never dropped silently (ADR-016, planned)
+- **wider source support:** DTS and TrueHD audio converted to AAC; MPEG-2 video once real samples and a deinterlace policy exist (conditional); VC-1 only after Debian fixes CVE-2026-125199 and a media sandbox exists (conditional); PGS subtitles always preserved as `.sup` files, whether or not rendering ships, never dropped silently (ADR-016, planned)
 - **remux:** a spike only; copying source video into the package ships only if the spike measures a gain on the target VM (ADR-016, planned)
 - **HDR-to-SDR conversion (conditional):** a corrective conversion when HDR sources exist; native HDR output stays out
 - **an extra 720p rendition with adaptive switching (conditional):** only if #233 shows that viewers need it
