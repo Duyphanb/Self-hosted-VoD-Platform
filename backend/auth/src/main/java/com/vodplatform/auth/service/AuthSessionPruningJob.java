@@ -80,9 +80,9 @@ public class AuthSessionPruningJob {
         return tokenBatch.size();
     }
 
-    // Each batch is read first and then deleted by its exact IDs. A DELETE ... WHERE id IN (SELECT ... LIMIT n)
-    // can remove more than n rows when the plan evaluates the subquery more than once, which broke the 500-row
-    // bound per transaction (#269).
+    // Each batch is read first and then deleted by its exact IDs. PostgreSQL does not promise that
+    // DELETE ... WHERE id IN (SELECT ... LIMIT n) removes at most n rows, because the plan may evaluate the subquery
+    // more than once; CI saw one prune transaction delete 501 rows (#269).
     private void deleteTokens(List<UUID> tokenIds) {
         jdbc.sql("DELETE FROM refresh_tokens WHERE id IN (:tokenIds)").param("tokenIds", tokenIds).update();
     }
