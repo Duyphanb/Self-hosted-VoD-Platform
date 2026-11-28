@@ -31,10 +31,14 @@ info:
     Planned, not yet implemented (ADR-015, #128): search and discovery on
     titles. Each slice changes the operations it serves in its own pull
     request. SR-1 adds GET and PUT /api/v1/admin/titles/{titleId}/aliases.
-    SR-2 bounds q of /api/v1/search to 1-100 code points after trimming
+    SR-2 replaces GET /api/v1/search with POST /api/v1/search, whose JSON
+    body carries q and the filters, so the search text never travels in a
+    URL; it bounds q to 1-100 code points after trimming
     (400 VALIDATION_ERROR otherwise), adds the genre, year and type filters,
     and returns SearchHit items (a TitleSummary and matchedName) with an
-    approximate flag. SR-3 returns at most five typed title suggestions.
+    approximate flag. SR-3 replaces GET /api/v1/search/suggestions with
+    POST /api/v1/search/suggestions ({q} body) returning at most five typed
+    title suggestions.
     RC-1 adds GET /api/v1/titles/{titleId}/similar and RC-2 adds
     GET /api/v1/me/recommendations (Cache-Control no-store). Search,
     suggestions, similar titles and recommendations list only PUBLISHED
@@ -971,7 +975,9 @@ paths:
       tags: [Search]
       summary: Search movie catalog
       description: >
-        Planned (ADR-015 SR-2, not yet implemented): one SearchHit per PUBLISHED
+        Planned (ADR-015 SR-2, not yet implemented): this GET is replaced by
+        POST /api/v1/search, with q, genre, year and type in a JSON body and
+        page and size as query parameters. It returns one SearchHit per PUBLISHED
         title, for every role, including titles with nothing playable yet. q is
         trimmed and holds 1-100 code points (400 VALIDATION_ERROR when blank,
         longer, containing a control character, or longer than 300 code
@@ -1010,8 +1016,9 @@ paths:
       summary: Get search suggestions
       description: >
         MVP core helper for US-012 using persisted catalog metadata.
-        Planned (ADR-015 SR-3, not yet implemented): the q rules of
-        /api/v1/search, and at most five typed title suggestions (titleId,
+        Planned (ADR-015 SR-3, not yet implemented): replaced by
+        POST /api/v1/search/suggestions with q in a JSON body, the q rules of
+        the search operation, and at most five typed title suggestions (titleId,
         displayTitle, matchedName, contentType, partLabel, releaseYear,
         franchiseName) from the name tiers only, never genres, people or the
         typo fallback, in the search total order.

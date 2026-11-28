@@ -361,8 +361,8 @@ sequenceDiagram
 
     User->>Frontend: Type in the search box
     Frontend->>Frontend: Wait while an input method composes, then debounce 250-350 ms and abort the previous request
-    Frontend->>Nginx: GET /api/v1/search/suggestions?q={query} with Authorization
-    Note over Nginx: Access log records the path without the query string
+    Frontend->>Nginx: POST /api/v1/search/suggestions with q in the JSON body and Authorization
+    Note over Nginx: The search text is in the body, never in the URL or a log
     Nginx->>Backend: Forward request
     Backend->>Backend: Trim q, check 1-100 code points (400 otherwise), build exact, folded and compact keys
     alt no letter or digit in the query
@@ -375,7 +375,7 @@ sequenceDiagram
     Frontend->>Frontend: Drop the response if the query or the signed-in account changed
     User->>Frontend: Press Enter
     Frontend->>Frontend: Open the search page with the query in the URL fragment, never in the query string
-    Frontend->>Nginx: GET /api/v1/search?q={query}&page={page}
+    Frontend->>Nginx: POST /api/v1/search?page={page} with q and the filters in the JSON body
     Nginx->>Backend: Forward request
     Backend->>PostgreSQL: One read-only REPEATABLE READ transaction
     PostgreSQL-->>Backend: Best tier per visible title (names, franchise name, full text), filters, count, page
