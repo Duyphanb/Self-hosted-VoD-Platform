@@ -361,6 +361,8 @@ MVP uses PostgreSQL full-text search. The `movies.search_vector` column includes
 
 The `search_vector` is rebuilt by application code on any metadata change that affects searchable fields. Database triggers are deferred to avoid hidden logic during the first implementation pass. Renaming a genre or person rebuilds the vectors of the movies that reference it. Movies created before the rebuild logic exists keep `search_vector` null and must be backfilled when it is introduced.
 
+Planned ([ADR-015](adr/ADR-015.md), #128): this design is replaced before any code writes it. SR-1 drops `search_vector` and its index and adds search-owned name and document tables, rebuilt in each catalog write transaction and backfilled by a startup reconciler; see [Planned (ADR-015): search and aliases](#planned-adr-015-search-and-aliases).
+
 ## Deletion Rules
 
 - Movie delete in API means archive: set `movies.status = 'ARCHIVED'`.
@@ -435,3 +437,46 @@ erDiagram
 - The worker role keeps its grants on `encoding_jobs` and `video_assets` and writes none of these columns.
 
 **Later, owned by other decisions.** `titles.description` becomes nullable with the metadata foundation of ADR-014 (planned); `title_relations` waits for a consumer; search, metadata, subtitle, marker and image tables belong to their own ADRs and reference these tables.
+
+## Planned (ADR-015): search and aliases
+
+Planned schema of [ADR-015](adr/ADR-015.md) (#128). Nothing in this section exists yet. It builds on the renamed tables of the ADR-013 section above; each migration comes after ADR-013 S1, never edits a committed migration and regenerates the schema snapshot in its pull request.
+
+**SR-1, aliases and search tables.**
+
+- New `title_aliases` (catalog):
+
+  | Column | Type | Constraints | Notes |
+  |---|---|---|---|
+  | `id` | uuid | PK | Alias ID; kept while the alias name is unchanged |
+  | `title_id` | uuid | FK -> `titles.id` on delete cascade, not null | Title |
+  | `name` | varchar(255) | not null | Trimmed, white space collapsed, no control characters |
+  | `locale` | varchar(35) | null | Optional BCP 47 tag |
+  | `kind` | varchar(20) | not null, check | `ORIGINAL`, `LOCALIZED`, `ROMAJI`, `NATIVE`, `ENGLISH`, `SYNONYM`, `OTHER` |
+  | `created_at` | timestamptz | not null | Creation timestamp |
+
+  Constraint `ux_title_aliases_title_name UNIQUE (title_id, name)`: unique within a title, never globally.
+- New `title_search_names` (search, derived):
+
+  | Column | Type | Constraints | Notes |
+  |---|---|---|---|
+  | `id` | uuid | PK | Row ID |
+  | `title_id` | uuid | FK -> `titles.id` on delete cascade, not null in SR-1 | Title the name belongs to |
+  | `source` | varchar(20) | not null, check | `DISPLAY_TITLE`, `ALIAS` |
+  | `alias_id` | uuid | FK -> `title_aliases.id` on delete cascade, null | Set exactly when `source = 'ALIAS'` |
+  | `name` | varchar(255) | not null | Original text, returned as `matchedName` |
+  | `exact_key` | text collate `"C"` | not null | NFKC, lower case, white space collapsed; at most 300 code points |
+  | `folded_key` | text collate `"C"` | not null | Exact key with Latin diacritics folded and punctuation as spaces |
+  | `compact_key` | text collate `"C"` | not null | Folded key without spaces |
+  | `index_version` | int | not null | Version of the normalizer and builder that wrote the row |
+
+  B-tree indexes on `exact_key`, `folded_key`, `compact_key` and `title_id`.
+- New `title_search_documents` (search, derived): `title_id` uuid PK (FK -> `titles.id` on delete cascade), `document` tsvector not null, `index_version` int not null, `rebuilt_at` timestamptz not null; GIN index on `document`. Built with `pg_catalog.simple` from folded text: display title, part label (from ADR-013 S2) and aliases (weight A), genres and credited people (B), release year (C), the admin's own description (D); only the admin's own values and AniList-origin aliases are included (ADR-015 D11); provider descriptions never are.
+- `titles.search_vector` and its GIN index are dropped.
+- Every title has its rows whatever its status; visibility applies at query time. No extension is required.
+
+**S3, franchise names.** `title_search_names` gains `franchise_id uuid` (FK -> `franchises.id` on delete cascade) and the source `FRANCHISE_NAME`; `title_id` becomes nullable, with a check that exactly one of `title_id` and `franchise_id` is set. One row per franchise, joined to its titles at query time while the franchise is `PUBLISHED`.
+
+**ME-1 (ADR-014, planned).** `title_aliases` gains the provenance columns that ADR-014 defines.
+
+**Only if SR-2 adopts the typo fallback.** The `pg_trgm` extension, created by `deploy/postgres-init.sh` as the bootstrap superuser, and any trigram index on `folded_key`.
