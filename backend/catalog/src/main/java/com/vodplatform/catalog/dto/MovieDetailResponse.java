@@ -1,12 +1,12 @@
 package com.vodplatform.catalog.dto;
 
-import com.vodplatform.catalog.persistence.MaturityRating;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.vodplatform.catalog.persistence.ContentType;
+import com.vodplatform.catalog.persistence.MaturityRating;
 import com.vodplatform.catalog.persistence.MovieStatus;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * A movie detail as the API returns it ({@code MovieDetail} in the API contract): the catalog

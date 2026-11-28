@@ -39,7 +39,9 @@ public class ProgressService {
     @Transactional(readOnly = true)
     public ProgressResponse get(UUID user, UUID episodeId) {
         episodes.requireVisible(episodeId);
-        Integer duration = assets.findCurrentReadyByEpisodeId(episodeId).map(VideoAsset::getDurationSeconds).orElse(null);
+        Integer duration = assets.findCurrentReadyByEpisodeId(episodeId)
+                .map(VideoAsset::getDurationSeconds)
+                .orElse(null);
         return response(episodeId, reader.find(user, episodeId), duration);
     }
 
@@ -59,6 +61,7 @@ public class ProgressService {
     private static ProgressResponse response(UUID episodeId, Optional<StoredProgress> stored, Integer duration) {
         var row = ProgressNormalizer.normalize(stored, duration).progress()
                 .orElseGet(() -> new StoredProgress(0, null, false, null));
-        return new ProgressResponse(episodeId, row.currentSeconds(), row.durationSeconds(), row.finished(), row.lastPlayedAt());
+        return new ProgressResponse(episodeId, row.currentSeconds(), row.durationSeconds(), row.finished(),
+                row.lastPlayedAt());
     }
 }

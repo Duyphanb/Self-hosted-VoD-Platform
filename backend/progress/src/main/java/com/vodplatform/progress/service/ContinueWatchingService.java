@@ -1,7 +1,7 @@
 package com.vodplatform.progress.service;
 
-import com.vodplatform.catalog.dto.MovieSummaryResponse;
 import com.vodplatform.catalog.dto.EpisodeSummary;
+import com.vodplatform.catalog.dto.MovieSummaryResponse;
 import com.vodplatform.catalog.service.MovieService;
 import com.vodplatform.catalog.service.MovieVisibility;
 import com.vodplatform.progress.dto.ContinueWatchingItem;

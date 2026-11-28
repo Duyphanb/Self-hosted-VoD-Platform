@@ -1,7 +1,7 @@
 package com.vodplatform.catalog.dto;
 
-import com.vodplatform.catalog.persistence.MovieStatus;
 import com.vodplatform.catalog.persistence.ContentType;
+import com.vodplatform.catalog.persistence.MovieStatus;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;

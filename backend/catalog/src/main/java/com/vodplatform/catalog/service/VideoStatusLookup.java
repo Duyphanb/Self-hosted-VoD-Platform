@@ -1,10 +1,10 @@
 package com.vodplatform.catalog.service;
 
+import com.vodplatform.catalog.persistence.MovieStatus;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import com.vodplatform.catalog.persistence.MovieStatus;
 
 /**
  * Catalog-owned port for video availability (ADR-010). A movie is READY whenever a READY asset

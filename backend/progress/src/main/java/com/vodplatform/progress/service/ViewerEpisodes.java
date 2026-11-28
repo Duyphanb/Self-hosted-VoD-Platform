@@ -8,6 +8,8 @@ import com.vodplatform.catalog.service.EpisodeService;
 import com.vodplatform.catalog.service.MovieService;
 import com.vodplatform.catalog.service.MovieVisibility;
 import com.vodplatform.encoding.persistence.VideoAssetRepository;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
@@ -72,17 +74,31 @@ public class ViewerEpisodes {
                 LEFT JOIN current_episode_assets current_asset ON current_asset.episode_id = episode.id
                 LEFT JOIN playback_progress progress ON progress.episode_id = episode.id AND progress.user_id = :userId
                 WHERE episode.id IN (:episodeIds)
-                """).param("userId", userId).param("episodeIds", episodeIds).query((row, index) -> {
-                    UUID id = row.getObject("id", UUID.class);
-                    Timestamp lastPlayed = row.getTimestamp("last_played_at");
-                    Optional<StoredProgress> stored = lastPlayed == null ? Optional.empty() : Optional.of(
-                            new StoredProgress(row.getInt("current_seconds"),
-                                    row.getObject("duration_seconds", Integer.class), row.getBoolean("finished"),
-                                    lastPlayed.toInstant()));
-                    var progress = ProgressNormalizer.normalize(stored, row.getObject("current_duration", Integer.class))
-                            .progress().map(p -> new EpisodeSummary.Progress(id, p.currentSeconds(), p.durationSeconds(),
-                                    p.finished(), p.lastPlayedAt())).orElse(null);
-                    return new View(id, row.getString("video_status"), progress);
-                }).list().stream().collect(Collectors.toMap(View::episodeId, Function.identity()));
+                """)
+                .param("userId", userId)
+                .param("episodeIds", episodeIds)
+                .query((row, index) -> view(row))
+                .list()
+                .stream()
+                .collect(Collectors.toMap(View::episodeId, Function.identity()));
+    }
+
+    /** The caller's progress is normalized against the episode's current asset, as GET /progress does. */
+    private static View view(ResultSet row) throws SQLException {
+        UUID id = row.getObject("id", UUID.class);
+        Timestamp lastPlayed = row.getTimestamp("last_played_at");
+        Optional<StoredProgress> stored = Optional.empty();
+        if (lastPlayed != null) {
+            stored = Optional.of(new StoredProgress(row.getInt("current_seconds"),
+                    row.getObject("duration_seconds", Integer.class), row.getBoolean("finished"),
+                    lastPlayed.toInstant()));
+        }
+        Integer currentDuration = row.getObject("current_duration", Integer.class);
+        EpisodeSummary.Progress progress = ProgressNormalizer.normalize(stored, currentDuration)
+                .progress()
+                .map(normalized -> new EpisodeSummary.Progress(id, normalized.currentSeconds(),
+                        normalized.durationSeconds(), normalized.finished(), normalized.lastPlayedAt()))
+                .orElse(null);
+        return new View(id, row.getString("video_status"), progress);
     }
 }

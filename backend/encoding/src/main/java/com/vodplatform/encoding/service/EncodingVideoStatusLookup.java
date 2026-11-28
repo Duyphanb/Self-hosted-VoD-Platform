@@ -1,7 +1,7 @@
 package com.vodplatform.encoding.service;
 
-import com.vodplatform.catalog.service.VideoStatusLookup;
 import com.vodplatform.catalog.persistence.MovieStatus;
+import com.vodplatform.catalog.service.VideoStatusLookup;
 import com.vodplatform.encoding.persistence.VideoAssetRepository;
 import com.vodplatform.encoding.persistence.VideoAssetStatus;
 import java.util.Collection;

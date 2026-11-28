@@ -23,7 +23,8 @@ public class ProgressController {
         this.service = service;
     }
     @GetMapping
-    public ProgressResponse get(@PathVariable UUID episodeId, @AuthenticationPrincipal AuthenticatedUserPrincipal user) {
+    public ProgressResponse get(@PathVariable UUID episodeId,
+                                @AuthenticationPrincipal AuthenticatedUserPrincipal user) {
         return service.get(user.userId(), episodeId);
     }
     @PutMapping

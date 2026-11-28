@@ -274,13 +274,19 @@ public class Movie {
         return status;
     }
 
-    public ContentType getContentType() { return contentType; }
-    public String getPartLabel() { return partLabel; }
+    public ContentType getContentType() {
+        return contentType;
+    }
+
+    public String getPartLabel() {
+        return partLabel;
+    }
 
     public void setPartLabel(String partLabel) {
         this.partLabel = partLabel;
     }
 
+    /** The single episode of a {@code MOVIE} title (ADR-013 D1), or null for any other type. */
     public Episode movieEpisode() {
         return contentType == ContentType.MOVIE ? episodes.getFirst() : null;
     }

@@ -1,7 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { isCanonicalUuid } from '../../lib/uuid';
 import { useApiClient } from '../auth/AuthContext';
-import { getAdminMovie, listAdminGenres, listAdminMovies, searchPeople, type AdminMovieListQuery } from './adminMoviesApi';
+import {
+  getAdminMovie,
+  listAdminGenres,
+  listAdminMovies,
+  searchPeople,
+  type AdminMovieListQuery
+} from './adminMoviesApi';
 import { movieKeys, type MoviePage } from './moviesApi';
 
 export const adminMovieKeys = {
