@@ -1,4 +1,4 @@
-import { titlePayloadFixture } from '../../../test/titleWireFixture';
+import { filmEpisodeId, titlePayloadFixture } from '../../../test/titleWireFixture';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
@@ -111,7 +111,7 @@ describe('MovieDetailPage through AppRoutes', () => {
     }
     if (canWatch) {
       const watch = screen.getByRole('link', { name: 'Watch' });
-      expect(watch).toHaveAttribute('href', `/watch/${movieId}`);
+      expect(watch).toHaveAttribute('href', `/watch/${filmEpisodeId(movieId)}`);
       watch.focus();
       expect(watch).toHaveFocus();
       fireEvent.click(watch);
@@ -151,7 +151,7 @@ describe('MovieDetailPage through AppRoutes', () => {
       userRating: 4,
       inWatchlist: true,
       playbackProgress: {
-        episodeId: movieId,
+        episodeId: filmEpisodeId(movieId),
         currentSeconds: 754,
         durationSeconds: 5400,
         finished: false,
@@ -174,7 +174,7 @@ describe('MovieDetailPage through AppRoutes', () => {
   it('keeps zero progress and completed state when optional progress fields are absent', async () => {
     fetchMock.mockResolvedValue(jsonResponse({
       ...movieDetail(),
-      playbackProgress: { episodeId: movieId, currentSeconds: 0, finished: true }
+      playbackProgress: { episodeId: filmEpisodeId(movieId), currentSeconds: 0, finished: true }
     }));
     renderDetail();
 
@@ -281,7 +281,7 @@ describe('MovieDetailPage through AppRoutes', () => {
     expect(requestPaths()).toEqual([`/api/v1/titles/${movieId}`]);
     expect(queryClient.getQueryData(movieKeys.detail(movieId))).toMatchObject({ id: movieId });
     expect(queryClient.getQueryData(movieKeys.detail(movieId.toUpperCase()))).toBeUndefined();
-    expect(screen.getByRole('link', { name: 'Watch' })).toHaveAttribute('href', `/watch/${movieId}`);
+    expect(screen.getByRole('link', { name: 'Watch' })).toHaveAttribute('href', `/watch/${filmEpisodeId(movieId)}`);
   });
 
   it.each(['not-a-uuid', '1234', `${movieId}x`, '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e2g'])(

@@ -1,4 +1,4 @@
-import { titleFixture, titlePayloadFixture } from '../../test/titleWireFixture';
+import { filmEpisodeId, titleFixture, titlePayloadFixture } from '../../test/titleWireFixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import contract from '../../../../docs/architecture/API-CONTRACT.yaml?raw';
 import { ApiClient, type AuthenticationSnapshot } from '../../lib/api/client';
@@ -139,7 +139,7 @@ const detail: MovieDetail = {
   userRating: 4,
   inWatchlist: true,
   playbackProgress: {
-    episodeId: movie.id,
+    episodeId: filmEpisodeId(movie.id),
     currentSeconds: 754,
     durationSeconds: 5400,
     finished: false,
@@ -172,7 +172,7 @@ describe('getMovie', () => {
     expect(result).toEqual({
       ...detail,
       episode: {
-        id: movie.id, titleId: movie.id, ordinal: 1, displayLabel: '1', name: null,
+        id: filmEpisodeId(movie.id), titleId: movie.id, ordinal: 1, displayLabel: '1', name: null,
         videoStatus: null, progress: detail.playbackProgress
       }
     });
@@ -188,10 +188,10 @@ describe('getMovie', () => {
 
     fetchMock.mockResolvedValueOnce(jsonResponse({
       ...detail,
-      playbackProgress: { episodeId: movie.id, currentSeconds: 0, finished: true }
+      playbackProgress: { episodeId: filmEpisodeId(movie.id), currentSeconds: 0, finished: true }
     }));
     expect((await getMovie(apiClient(), movie.id)).playbackProgress).toEqual({
-      episodeId: movie.id,
+      episodeId: filmEpisodeId(movie.id),
       currentSeconds: 0,
       durationSeconds: null,
       finished: true,
@@ -268,7 +268,8 @@ const WRONG_PROGRESS_VALUES: Partial<Record<keyof PlaybackProgress, unknown>> = 
 function rejectedDetails(): Array<[string, unknown]> {
   const progress = detail.playbackProgress as PlaybackProgress;
   const wire = { ...titleFixture(detail), episode: {
-    id: movie.id, titleId: movie.id, ordinal: 1, displayLabel: '1', name: null, videoStatus: null, progress
+    id: filmEpisodeId(movie.id), titleId: movie.id, ordinal: 1, displayLabel: '1', name: null, videoStatus: null,
+    progress
   } };
   const withProgress = (value: unknown) => ({ ...wire, episode: { ...wire.episode, progress: value } });
   const rows: Array<[string, unknown]> = [

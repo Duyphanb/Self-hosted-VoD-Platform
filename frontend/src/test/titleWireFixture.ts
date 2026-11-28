@@ -1,8 +1,17 @@
 import type { MovieDetail, MovieSummary, PlaybackProgress } from '../features/movies/moviesApi';
 
+/**
+ * The film episode's own UUID. ADR-013 D2 gives every episode a new UUID, so a fixture that reused the title's
+ * ID would let a title ID passed where an episode ID is expected pass every test by coincidence.
+ */
+export function filmEpisodeId(titleId: string): string {
+  const firstDigit = titleId.startsWith('e') ? 'f' : 'e';
+  return firstDigit + titleId.slice(1);
+}
+
 function episode(title: MovieSummary, progress: PlaybackProgress | null) {
   return {
-    id: title.id,
+    id: filmEpisodeId(title.id),
     titleId: title.id,
     ordinal: 1,
     displayLabel: '1',

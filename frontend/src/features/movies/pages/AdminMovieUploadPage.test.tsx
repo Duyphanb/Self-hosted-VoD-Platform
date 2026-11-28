@@ -1,4 +1,4 @@
-import { titlePayloadFixture } from '../../../test/titleWireFixture';
+import { filmEpisodeId, titlePayloadFixture } from '../../../test/titleWireFixture';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -93,7 +93,7 @@ describe('AdminMovieUploadPage through the data router', () => {
     expect(observations[observations.length - 1]).toBe(1);
     expect(fetchMock.mock.calls.every(([url]) => String(url) === `/api/v1/admin/titles/${movieId}`)).toBe(true);
     expect(queryClient.getQueryData(movieKeys.adminDetail(movieId))).toBeDefined();
-    expect(FakeXhr.instances[1].url).toBe(`/api/v1/admin/episodes/${movieId}/video`);
+    expect(FakeXhr.instances[1].url).toBe(`/api/v1/admin/episodes/${filmEpisodeId(movieId)}/video`);
   });
 
   it.each(['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const)('allows upload to a %s movie', async (status) => {

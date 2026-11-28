@@ -1,4 +1,4 @@
-import { titlePayloadFixture } from '../../test/titleWireFixture';
+import { filmEpisodeId, titlePayloadFixture } from '../../test/titleWireFixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient, ApiRequestError } from '../../lib/api/client';
 import {
@@ -52,7 +52,11 @@ describe('admin movie API', () => {
       ? await createMovie(client(), payload)
       : await updateMovie(client(), movieId.toUpperCase(), payload);
     expect(result).toEqual({
-      ...movie, episode: { id: movieId, titleId: movieId, ordinal: 1, displayLabel: '1', name: null, videoStatus: null, progress: null }
+      ...movie,
+      episode: {
+        id: filmEpisodeId(movieId), titleId: movieId, ordinal: 1, displayLabel: '1', name: null, videoStatus: null,
+        progress: null
+      }
     });
     expect(path()).toBe(method === 'POST' ? '/api/v1/admin/titles' : `/api/v1/admin/titles/${movieId}`);
     expect(fetchMock.mock.calls[0][1]?.method).toBe(method);

@@ -9,7 +9,7 @@ import { AuthProvider } from '../../auth/AuthContext';
 import * as authApi from '../../auth/authApi';
 import { AUTH_GENERATION_STORAGE_KEY, createAuthSession } from '../../auth/authStorage';
 import type { MovieSummary, PlaybackProgress } from '../../movies/moviesApi';
-import { continueFixture } from '../../../test/titleWireFixture';
+import { continueFixture, filmEpisodeId } from '../../../test/titleWireFixture';
 import { progressKeys } from '../continueWatchingQueries';
 
 const FIRST_MOVIE_ID = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
@@ -84,8 +84,8 @@ describe('ContinueWatchingPage through AppRoutes', () => {
       renderPage();
 
       const cards = await findCards();
-      expect(cards[0]).toHaveAttribute('href', `/watch/${FIRST_MOVIE_ID}`);
-      expect(cards[1]).toHaveAttribute('href', `/watch/${SECOND_MOVIE_ID}`);
+      expect(cards[0]).toHaveAttribute('href', `/watch/${filmEpisodeId(FIRST_MOVIE_ID)}`);
+      expect(cards[1]).toHaveAttribute('href', `/watch/${filmEpisodeId(SECOND_MOVIE_ID)}`);
       // The poster repeats the title but is hidden, so the title is read once.
       expect(cards[0]).toHaveAccessibleName('The Long Night Resume at 12:34 48 min left');
     });
@@ -450,7 +450,7 @@ function item(movieId: string, title: string, progress: Partial<PlaybackProgress
     videoStatus: 'READY'
   };
   return continueFixture(movie, {
-    episodeId: movieId,
+    episodeId: filmEpisodeId(movieId),
     currentSeconds: 754,
     durationSeconds: 3600,
     finished: false,
