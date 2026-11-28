@@ -86,7 +86,7 @@ Planned backend modules:
 - `stream`: authenticated HLS playlist/segment proxy
 - `progress`: playback progress save and read, completion rule, continue watching, and the watch-history write
 - `library`: watchlist, watch history, rating
-- `search`: PostgreSQL full-text search and suggestions
+- `search`: PostgreSQL full-text search and suggestions; planned in [ADR-015](adr/ADR-015.md): the search normalizer, the search-owned name and document tables kept current by catalog writes, title suggestions, similar titles and the personal Home row
 - `shared`: API error model and `ApiException`, generic API exception handling, the single app-wide `Clock`, reusable validation constraints; no JPA or security; feature modules may depend on it, and it depends on no feature module
 - `common`: Spring Boot assembly module: application entry point, configuration, Flyway migration scripts, health endpoints and full-context integration tests; it depends on each implemented backend module
 
@@ -161,7 +161,7 @@ The frontend must not call PostgreSQL, Redis, RabbitMQ, MinIO, or internal Docke
 ## Constraints
 
 - No microservices split for MVP.
-- No Kafka, Elasticsearch, Kubernetes, DRM, live streaming, payments, or recommendation engine scope.
+- No Kafka, Elasticsearch, Kubernetes, DRM, live streaming, payments, or learned or collaborative recommendation engine scope; rule-based discovery rows without scores are in scope ([ADR-015](adr/ADR-015.md), owner decision of 2026-11-25).
 - No multi-quality HLS in MVP.
 - No presigned upload or presigned playback URLs in MVP.
 - No implementation code in architecture batches.
