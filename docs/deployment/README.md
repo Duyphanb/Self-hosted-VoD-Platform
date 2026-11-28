@@ -77,12 +77,17 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
 1. **Stop new uploads.**
    - Keep a copy of the deployed Nginx configuration file. Compose bind-mounts it from the host, so the change below
      outlives a restart until it is undone.
-   - Close the upload location in that file so that it answers 503.
-   - Check the configuration with `$C exec nginx nginx -t`, then reload gracefully with `$C exec nginx nginx -s reload`.
+   - Close the upload location in that file so that it answers 503. Compose mounts it as a single file, so change it by
+     overwriting its content in place (for example `cp` a prepared copy over it), never by moving or renaming a file
+     into its place: the running container keeps seeing the old file. The same applies whenever the saved copy is put
+     back below.
+   - Check the configuration the container sees with `$C exec nginx nginx -T`, then reload gracefully with
+     `$C exec nginx nginx -s reload`.
    - A new upload `POST` must now get 503, while `/api/v1/health` still returns 200.
    - Uploads already accepted finish on the previous Nginx worker generation. Wait until those worker processes have
      exited. Do not cut an accepted upload. If the drain takes longer than the window allows, abort the cutover:
-     restore the saved configuration, reload, and reopen uploads.
+     copy the saved content back in place, reload, and check that an unauthenticated upload `POST` gets the backend's
+     401 again, not 503.
 2. **Stop the edge and the backend:** `$C stop nginx backend`. No job is published any more; the worker keeps
    consuming what the broker already holds.
 3. **Drain the worker.**
@@ -102,9 +107,12 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
    - Take `pg_dump --format=custom` of the application database. With `pg_restore --create`, the dump also carries the
      database's own ACL and settings. Roles are cluster-wide and are not in it.
    - Prove that it restores:
-     - use a disposable PostgreSQL of the same image and ICU settings;
+     - use a disposable PostgreSQL of the same image and ICU settings, started without the application database: leave
+       its `POSTGRES_DB` at the default `postgres`;
      - create the owner and the runtime login roles first, as `deploy/postgres-init.sh` does;
-     - restore with `pg_restore --create --exit-on-error -d postgres` from the maintenance database;
+     - as the bootstrap superuser (`POSTGRES_USER`), run `pg_restore --create --exit-on-error -d postgres <dump>`.
+       This connects to the maintenance database and creates the archived database with its owner, ACL and settings.
+       If the application database itself is named `postgres`, connect to `template1` instead;
      - require exit code 0, a Flyway history ending at 6, the recorded row counts and the recorded database-level
        privileges.
 5. **Apply the migration alone:** `$C run --rm --no-deps flyway`.
@@ -120,16 +128,18 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
    - the runtime roles keep exactly their table grants (the privilege query in
      `deploy/tests/title-rename-migration-smoke.sh`).
 6. **Decide here,** before any new backend or worker runs.
-   - On either path, restore the saved Nginx configuration before the edge starts.
+   - On either path, copy the saved Nginx configuration back in place (as in step 1) before the edge starts.
    - **Roll forward** if step 5 passed:
      - `$C up -d --no-build --no-deps --wait backend worker frontend`;
      - then `$C up -d --no-build --no-deps --wait nginx`.
 
      `--no-deps` keeps Compose from running `postgres-init` and Flyway again after this point.
    - **Roll back** if anything in step 5 failed:
-     - drop the application database, then restore the dump with `pg_restore --create --exit-on-error -d postgres`.
-       It recreates the database with its V6 ACL and settings in the same cluster, where the roles already exist.
-       Stop on any error;
+     - as the bootstrap superuser, connected to the maintenance database (`postgres`, or `template1` if the
+       application database is named `postgres`), drop the application database, then run
+       `pg_restore --create --exit-on-error -d postgres <dump>`, the same command step 4 proved. It recreates the
+       database with its V6 owner, ACL and settings in the same cluster, where the roles already exist. Stop on any
+       error;
      - on that database, verify that the Flyway history ends at 6, that the schema matches the V6 snapshot
        (`schema-snapshot.py` from the V6 checkout), that the table grants are exact, and that the database-level
        privileges equal those recorded in step 4;
