@@ -28,19 +28,21 @@ See `BACKLOG.md` for detailed sprint backlog with issues, acceptance criteria, d
 | 4 | Upload | Validation, raw upload to MinIO, video asset status, RabbitMQ publish |
 | 5 | Worker | Queue consumer, FFprobe, FFmpeg HLS, status transitions, failure handling baseline |
 | 6 | Streaming | Playback API, HLS delivery, player integration, progress save/resume |
-| 7 | Search | PostgreSQL FTS, search suggestions, search UI |
-| 8 | User features | Watchlist, watch history, rating, profile |
-| 9 | Admin operations | Encoding dashboard, failed-job retry, status visibility |
-| 10 | Polish | Error handling, docs, Swagger/OpenAPI, Postman, VPS preparation |
+| 7 | Content model and search | Titles and episodes with optional franchises (ADR-013), search on titles with accent folding and aliases (ADR-015), UI overhaul phase 1 |
+| 8 | Library, player core and viewer UI | Watchlist and rating per title, history per episode, profile; own player controls and subtitles; viewer pages; first recommendation rows and editorial collections; media, image, player and collection designs with disk admission and the media sandbox |
+| 9 | Admin operations and media | Encoding dashboard and retry per episode, activation with Admin Preview, markers, multi-audio, backup receipts and source-file tracking, admin images, smart collections |
+| Metadata and Upload | Metadata and upload | TMDB and AniList import with review, resumable upload at the current size limit, admin trending list |
+| 10 | Polish | Error handling, docs, Swagger/OpenAPI, Postman, VPS preparation, player polish |
+| Pre-production gate | Target-VM evidence | Encode, upload and mixed-load measurements; 1080p default, larger uploads, source-file release and the image lane switched on only after their gates; backups and HTTPS |
 
 ## Implementation Principles
 
 - Build local end-to-end before deployment polish.
-- Keep worker concurrency at 1 until the encoding flow is reliable.
+- Keep one active video encode (worker concurrency and prefetch 1, one non-overlapping replica); a separately budgeted admin-image job runs beside it only after its measured gate (ADR-020, planned).
 - Freeze ERD and API contract before broad feature implementation.
 - Add tests with behavior changes.
 - Update docs when behavior, configuration, or contracts change.
-- Do not promote optional features until the MVP path is stable.
+- Promote an optional feature only by an explicit owner decision recorded in `OUT_OF_SCOPE.md`; the media path became stable with Sprint 6. Conditional items wait for their measured trigger, never for an "after MVP" label.
 
 ## Milestone Gates
 
@@ -97,6 +99,7 @@ Phase 3 - Feature Development is active.
 
 - Sprint 1 - Foundation, Sprint 2 - Auth and Sprint 3 - Movie CRUD are complete; Sprint 3 is verified in the [Sprint 3 closeout](../testing/SPRINT-3-CLOSEOUT.md). Sprint 4 - Upload has its Definition of Done verified in the [Sprint 4 closeout](../testing/SPRINT-4-CLOSEOUT.md); #167 and #118 were finished in Sprint 4 and the other non-blocking issues (#119, #121, #103, #117) moved to Sprint 5, so the milestone has no open issues left and the sprint is complete. Sprint 5 - Worker has its Definition of Done verified in the [Sprint 5 closeout](../testing/SPRINT-5-CLOSEOUT.md); #103 and #117 close with it, the A1 measurement (#124) and #190 move to the Pre-production gate, #104 moves to Sprint 6, and #121, #199 and #200 follow Sprint 6 (owner decision, 2026-11-13). Sprint 6 - Streaming has its Definition of Done verified in the [Sprint 6 closeout](../testing/SPRINT-6-CLOSEOUT.md) except the Postman item (#254); #125 closes with it, #127 moves to the Pre-production gate, and #239 (the code health audit after `v0.6.0`), #254 and #255 are in Sprint 7. The genuine VPS measurements are tracked in #124, #180 and #233 before public deployment.
 - Sprint 2 acceptance criteria and DoD were independently verified on merged `main`; see [closeout evidence](../testing/SPRINT-2-CLOSEOUT.md). The fresh-machine full-stack MinIO limitation in Issue #14 remains separate from the verified Auth/catalog prerequisites.
+- On 2026-11-25/26 the owner decided the scope and order of the remaining work ([#258](https://github.com/Duyphanb/Self-hosted-VoD-Platform/issues/258)): Sprint 7 - Content Model and Search, Sprint 8 - Library, Player Core and Viewer UI, Sprint 9 - Admin Operations and Media, then the Metadata and Upload milestone with Sprint 10 - Polish, and the Pre-production gate for target-VM evidence. Each design lands as an ADR pull request before its implementation; GitHub issues are created at each sprint start. #199 moved to Sprint 8, after the media design it depends on.
 - Resolve open P0/P1 security or repository-governance gates that explicitly block the selected feature batch before starting that batch.
 - Pre-production support, architecture, and deployment gates may remain tracked while feature development continues on the approved baseline, but must be resolved before public deployment. Priority alone does not make an issue a feature-development blocker.
 - Select the next dependency-safe implementation issue from `BACKLOG.md`.
