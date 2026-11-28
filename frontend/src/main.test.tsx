@@ -31,7 +31,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
 describe('production main entry', () => {
   beforeEach(() => {
     document.body.innerHTML = '<div id="root"></div>';
-    window.history.replaceState(null, '', '/admin/movies/new');
+    window.history.replaceState(null, '', '/admin/titles/new');
     writeAuthSession(createAuthSession({
       user: { id: '3fcf25c2-f096-4462-ae63-4ba4702a9078', email: 'admin@example.com', displayName: 'Admin', roles: ['ROLE_ADMIN'] },
       accessToken: 'access-token', expiresInSeconds: 900

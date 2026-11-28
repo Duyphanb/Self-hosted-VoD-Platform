@@ -17,6 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.exception.UploadDatabaseException;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
@@ -89,20 +90,15 @@ class VideoUploadApiIntegrationTests implements PostgresTestDatabase {
     @AfterEach
     void clean() {
         for (UUID id : movies) {
-            jdbc.update(
-                    "delete from encoding_jobs where video_asset_id in "
-                            + "(select id from video_assets where movie_id=?)",
-                    id);
-            jdbc.update("delete from video_assets where movie_id=?", id);
-            jdbc.update("delete from titles where id=?", id);
+            EpisodeFixtures.removeTitle(jdbc, id);
         }
     }
 
     private UUID movie(String status) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-                "insert into titles (id,title,slug,description,status,created_at,updated_at)"
-                        + " values (?,?,?,?,?,?,?)",
+                "insert into titles (id,title,slug,description,status,created_at,updated_at,content_type)"
+                        + " values (?,?,?,?,?,?,?,'MOVIE')",
                 id,
                 "Upload API fixture",
                 "upload-api-" + id,
@@ -110,6 +106,7 @@ class VideoUploadApiIntegrationTests implements PostgresTestDatabase {
                 status,
                 Timestamp.from(Instant.now()),
                 Timestamp.from(Instant.now()));
+        EpisodeFixtures.addFilmEpisode(jdbc, id);
         movies.add(id);
         return id;
     }
@@ -122,7 +119,7 @@ class VideoUploadApiIntegrationTests implements PostgresTestDatabase {
         var file = new MockPart("file", "untrusted-name.exe", MP4);
         file.getHeaders().setContentType(MediaType.parseMediaType(declaredType));
         var request =
-                multipart("/api/v1/admin/movies/{movieId}/video", movieId)
+                multipart("/api/v1/admin/episodes/{episodeId}/video", EpisodeFixtures.episode(jdbc, movieId))
                         .part(file)
                         .header("Authorization", admin());
         if (requestId != null) {
@@ -135,9 +132,9 @@ class VideoUploadApiIntegrationTests implements PostgresTestDatabase {
         Long count =
                 jdbc.queryForObject(
                         "select count(*) from encoding_jobs j join video_assets a on a.id=j.video_asset_id"
-                                + " where a.movie_id=? and j.status='QUEUED' and j.published_at is null",
+                                + " where a.episode_id=? and j.status='QUEUED' and j.published_at is null",
                         Long.class,
-                        movieId);
+                        EpisodeFixtures.episode(jdbc, movieId));
         return count == null ? 0 : count;
     }
 
@@ -253,7 +250,7 @@ class VideoUploadApiIntegrationTests implements PostgresTestDatabase {
         String body =
                 upload(UUID.randomUUID(), "video/mp4", "bad id/with space")
                         .andExpect(status().isNotFound())
-                        .andExpect(jsonPath("$.code").value("MOVIE_NOT_FOUND"))
+                        .andExpect(jsonPath("$.code").value("EPISODE_NOT_FOUND"))
                         .andReturn()
                         .getResponse()
                         .getContentAsString();

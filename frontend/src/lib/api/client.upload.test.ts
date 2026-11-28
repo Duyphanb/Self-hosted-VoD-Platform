@@ -19,9 +19,9 @@ describe('ApiClient upload', () => {
   it('sends once to the shared URL with authentication and upload listeners, leaving the boundary to the browser', async () => {
     const { client } = setup();
     const body = new FormData();
-    const pending = client.upload('/admin/movies/id/video', body);
+    const pending = client.upload('/admin/episodes/id/video', body);
     const xhr = onlyXhr();
-    expect(xhr.url).toBe('/api/v1/admin/movies/id/video');
+    expect(xhr.url).toBe('/api/v1/admin/episodes/id/video');
     expect(xhr.method).toBe('POST');
     expect(xhr.headers.authorization === `Bearer ${authentication.accessToken}`).toBe(true);
     expect(Object.keys(xhr.headers)).toEqual(['authorization']);

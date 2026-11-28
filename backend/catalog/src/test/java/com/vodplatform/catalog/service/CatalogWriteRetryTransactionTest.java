@@ -103,7 +103,7 @@ class CatalogWriteRetryTransactionTest {
 
     @AfterEach
     void cleanUp() {
-        for (String table : List.of("title_credits", "title_genres", "titles", "genres", "people")) {
+        for (String table : List.of("title_credits", "title_genres", "episodes", "titles", "genres", "people")) {
             jdbc.update("delete from " + table);
         }
     }
@@ -165,7 +165,7 @@ class CatalogWriteRetryTransactionTest {
         MovieRepository movies = mock(MovieRepository.class, AdditionalAnswers.delegatesTo(movieRepository));
         MovieService service = new MovieService(
                 movies, new MovieAssignmentResolver(genreRepository, people), clock, writeRetry,
-                movieIds -> java.util.Map.of());
+                org.mockito.Mockito.mock(VideoStatusLookup.class));
 
         MovieDetail created = service.create(new MovieRequestBuilder()
                 .slug("phim")
@@ -209,7 +209,7 @@ class CatalogWriteRetryTransactionTest {
         MovieRepository movies = mock(MovieRepository.class, AdditionalAnswers.delegatesTo(movieRepository));
         MovieService service = new MovieService(
                 movies, new MovieAssignmentResolver(genres, personRepository), clock, writeRetry,
-                movieIds -> java.util.Map.of());
+                org.mockito.Mockito.mock(VideoStatusLookup.class));
 
         MovieDetail updated = service.update(uuid(10), new MovieRequestBuilder()
                 .title("Phim Mới")
@@ -332,7 +332,7 @@ class CatalogWriteRetryTransactionTest {
         PersonRepository people = mock(PersonRepository.class, AdditionalAnswers.delegatesTo(personRepository));
         MovieService movieService = new MovieService(
                 movies, new MovieAssignmentResolver(genreRepository, personRepository), clock, writeRetry,
-                movieIds -> java.util.Map.of());
+                org.mockito.Mockito.mock(VideoStatusLookup.class));
 
         assertThat(catchThrowable(() -> movieService.create(new MovieRequestBuilder().slug("phim").build())))
                 .isInstanceOf(MovieSlugConflictException.class);

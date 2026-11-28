@@ -101,7 +101,7 @@ export function mapMovieFormError(error: unknown, values?: Pick<MovieFormValues,
     result.general.push('The request could not be completed. Please try again.');
     return result;
   }
-  if (error.status === 409 && error.apiError.code === 'MOVIE_SLUG_CONFLICT') {
+  if (error.status === 409 && error.apiError.code === 'TITLE_SLUG_CONFLICT') {
     result.fields.slug = 'This slug is already used';
     if (error.apiError.requestId) result.general.push(`Request ID: ${error.apiError.requestId}`);
     return result;

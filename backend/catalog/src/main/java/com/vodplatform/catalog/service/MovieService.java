@@ -7,6 +7,7 @@ import com.vodplatform.catalog.exception.CatalogValidationException;
 import com.vodplatform.catalog.exception.MovieNotFoundException;
 import com.vodplatform.catalog.exception.MovieSlugConflictException;
 import com.vodplatform.catalog.persistence.CatalogConstraints;
+import com.vodplatform.catalog.persistence.ContentType;
 import com.vodplatform.catalog.persistence.CreditAssignment;
 import com.vodplatform.catalog.persistence.Genre;
 import com.vodplatform.catalog.persistence.Movie;
@@ -104,7 +105,7 @@ public class MovieService {
      * Creates a movie with its genres and credits.
      *
      * @throws CatalogValidationException  400 {@code VALIDATION_ERROR}
-     * @throws MovieSlugConflictException  409 {@code MOVIE_SLUG_CONFLICT}
+     * @throws MovieSlugConflictException  409 {@code TITLE_SLUG_CONFLICT}
      */
     public MovieDetail create(UpsertMovieRequest request) {
         ValidatedMovie input = MovieRequestValidator.validate(request);
@@ -122,7 +123,7 @@ public class MovieService {
 
         // Insert the movie row before any new genre or person, so a concurrent duplicate slug is the
         // 409 even when the other request created the same new genre (see the class comment).
-        Movie movie = writeOrSlugConflict(() -> movieRepository.saveAndFlush(new Movie(
+        Movie candidate = new Movie(
                 UUID.randomUUID(),
                 input.title(),
                 input.slug(),
@@ -131,7 +132,9 @@ public class MovieService {
                 input.maturityRating(),
                 input.status(),
                 clock.instant()
-        )));
+        );
+        candidate.setPartLabel(input.partLabel());
+        Movie movie = writeOrSlugConflict(() -> movieRepository.saveAndFlush(candidate));
         assignGenresAndCredits(movie, input, credits);
         // A movie inserted in this transaction cannot have a video asset yet.
         return MovieMapper.toDetail(movie, null);
@@ -143,8 +146,8 @@ public class MovieService {
      * restores an archived movie.
      *
      * @throws CatalogValidationException  400 {@code VALIDATION_ERROR}
-     * @throws MovieNotFoundException      404 {@code MOVIE_NOT_FOUND}
-     * @throws MovieSlugConflictException  409 {@code MOVIE_SLUG_CONFLICT}
+     * @throws MovieNotFoundException      404 {@code TITLE_NOT_FOUND}
+     * @throws MovieSlugConflictException  409 {@code TITLE_SLUG_CONFLICT}
      */
     public MovieDetail update(UUID movieId, UpsertMovieRequest request) {
         Objects.requireNonNull(movieId, "movieId");
@@ -173,6 +176,7 @@ public class MovieService {
                 input.status(),
                 clock.instant()
         );
+        movie.setPartLabel(input.partLabel());
         // Write the movie row before any new genre or person is inserted (see the class comment);
         // genres and people are resolved only after this flush, so their queries find nothing left
         // to auto-flush.
@@ -181,7 +185,7 @@ public class MovieService {
             return movie;
         });
         assignGenresAndCredits(movie, input, credits);
-        return MovieMapper.toDetail(movie, videoStatusLookup.videoStatus(movieId));
+        return detail(movie, MovieVisibility.ANY_STATUS);
     }
 
     /**
@@ -203,12 +207,20 @@ public class MovieService {
      * {@code DRAFT} or {@code ARCHIVED} movie exists. Other modules reuse this check with
      * {@link MovieVisibility#PUBLISHED_ONLY} instead of testing the status themselves.
      *
-     * @throws MovieNotFoundException 404 {@code MOVIE_NOT_FOUND}
+     * @throws MovieNotFoundException 404 {@code TITLE_NOT_FOUND}
      */
     @Transactional(readOnly = true)
     public MovieDetail getMovie(UUID movieId, MovieVisibility visibility) {
-        Movie movie = findVisible(movieId, visibility);
-        return MovieMapper.toDetail(movie, videoStatusLookup.videoStatus(movieId));
+        return detail(findVisible(movieId, visibility), visibility);
+    }
+
+    private MovieDetail detail(Movie movie, MovieVisibility visibility) {
+        if (movie.getContentType() == ContentType.MOVIE) {
+            return MovieMapper.toDetail(movie, videoStatusLookup.videoStatus(movie.getId()));
+        }
+        var availability = videoStatusLookup.titleAvailability(List.of(movie.getId()), visibility.statuses());
+        return MovieMapper.toDetail(movie, null,
+                availability.getOrDefault(movie.getId(), VideoStatusLookup.Availability.EMPTY));
     }
 
     /** Checks catalog visibility without mapping detail or looking up video status. */
@@ -240,7 +252,7 @@ public class MovieService {
         Map<UUID, Movie> visible = movieRepository.findByIdInAndStatusIn(movieIds, visibility.statuses())
                 .stream().collect(Collectors.toMap(Movie::getId, movie -> movie));
         List<Movie> ordered = movieIds.stream().map(visible::get).filter(Objects::nonNull).toList();
-        return toSummaries(new PageImpl<>(ordered)).getContent();
+        return toSummaries(new PageImpl<>(ordered), visibility).getContent();
     }
 
     /**
@@ -260,7 +272,8 @@ public class MovieService {
     @Transactional(readOnly = true)
     public Page<MovieSummary> listPublished(String genre, Integer releaseYear, int page, int size, MovieSort sort) {
         String genreSlug = NameRequestValidator.genreFilterSlug(genre);
-        return toSummaries(movieRepository.findPublished(genreSlug, releaseYear, pageRequest(page, size, sort)));
+        return toSummaries(movieRepository.findPublished(genreSlug, releaseYear, pageRequest(page, size, sort)),
+                MovieVisibility.PUBLISHED_ONLY);
     }
 
     /**
@@ -278,7 +291,7 @@ public class MovieService {
         Page<Movie> movies = status == null
                 ? movieRepository.findAll(pageable)
                 : movieRepository.findByStatus(status, pageable);
-        return toSummaries(movies);
+        return toSummaries(movies, MovieVisibility.ANY_STATUS);
     }
 
     /**
@@ -286,7 +299,7 @@ public class MovieService {
      * then maps each movie, so the number of statements does not grow with the page size. Every
      * list of {@link MovieSummary} goes through it. An empty page reads nothing more.
      */
-    private Page<MovieSummary> toSummaries(Page<Movie> movies) {
+    private Page<MovieSummary> toSummaries(Page<Movie> movies, MovieVisibility visibility) {
         List<UUID> movieIds = movies.map(Movie::getId).getContent();
         Map<UUID, List<Genre>> genresByMovie = movies.isEmpty()
                 ? Map.of()
@@ -295,16 +308,18 @@ public class MovieService {
                                 MovieGenreAssignment::movieId,
                                 Collectors.mapping(MovieGenreAssignment::genre, Collectors.toList())
                         ));
-        Map<UUID, String> videoStatuses = movies.isEmpty() ? Map.of() : videoStatusLookup.videoStatuses(movieIds);
+        var availability = movies.isEmpty() ? Map.<UUID, VideoStatusLookup.Availability>of()
+                : videoStatusLookup.titleAvailability(movieIds, visibility.statuses());
         return movies.map(movie -> MovieMapper.toSummary(
-                movie, genresByMovie.getOrDefault(movie.getId(), List.of()), videoStatuses.get(movie.getId())));
+                movie, genresByMovie.getOrDefault(movie.getId(), List.of()),
+                availability.getOrDefault(movie.getId(), VideoStatusLookup.Availability.EMPTY)));
     }
 
     /**
      * Archives a movie in any status (soft delete). Idempotent: archiving an archived movie
      * succeeds and changes nothing.
      *
-     * @throws MovieNotFoundException 404 {@code MOVIE_NOT_FOUND}
+     * @throws MovieNotFoundException 404 {@code TITLE_NOT_FOUND}
      */
     @Transactional
     public void archive(UUID movieId) {

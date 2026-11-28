@@ -17,8 +17,8 @@ public class ProgressReader {
     }
 
     @Transactional(readOnly = true)
-    public Optional<StoredProgress> find(UUID userId, UUID movieId) {
-        return repository.findById(new PlaybackProgressId(userId, movieId))
+    public Optional<StoredProgress> find(UUID userId, UUID episodeId) {
+        return repository.findById(new PlaybackProgressId(userId, episodeId))
                 .map(row -> new StoredProgress(row.getCurrentSeconds(), row.getDurationSeconds(),
                         row.isFinished(), row.getLastPlayedAt()));
     }

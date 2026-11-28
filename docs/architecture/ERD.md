@@ -71,11 +71,12 @@ erDiagram
     genres ||--o{ title_genres : used_by
     titles ||--o{ title_credits : credited
     people ||--o{ title_credits : contributes
-    titles ||--o{ video_assets : has
+    titles ||--o{ episodes : contains
+    episodes ||--o{ video_assets : has
     video_assets ||--o{ encoding_jobs : processed_by
 
     users ||--o{ playback_progress : tracks
-    titles ||--o{ playback_progress : tracked_for
+    episodes ||--o{ playback_progress : tracked_for
     users ||--o{ watchlist_items : saves
     titles ||--o{ watchlist_items : saved_as
     users ||--o{ watch_history : watches
@@ -239,7 +240,7 @@ One new row per upload, never an upsert. Raw key: `{movieId}/{videoAssetId}.{ext
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | uuid | PK | Video asset ID |
-| `movie_id` | uuid | FK -> `titles.id` on delete cascade, not null | Owning movie |
+| `episode_id` | uuid | FK -> `episodes.id` on delete restrict, not null | Owning episode |
 | `raw_bucket` | varchar(100) | not null | MinIO raw bucket |
 | `raw_object_key` | varchar(512) | not null | Raw video object key |
 | `hls_bucket` | varchar(100) | null | MinIO HLS bucket |
@@ -256,11 +257,13 @@ One new row per upload, never an upsert. Raw key: `{movieId}/{videoAssetId}.{ext
 
 Indexes:
 
-- `ix_video_assets_movie_id` on `movie_id`
+- `ix_video_assets_episode_id` on `episode_id`
+- `ix_video_assets_episode_ready` on (`episode_id`, `created_at` DESC, `id` DESC) where `status = 'READY'`
 - `ix_video_assets_status` on `status`
 - unique `ux_video_assets_raw_object` on (`raw_bucket`, `raw_object_key`)
 - unique `ux_video_assets_hls_master` on (`hls_bucket`, `hls_master_object_key`) where `hls_master_object_key` is not null
-- unique partial `ux_video_assets_movie_in_flight` on `movie_id` where `status IN ('UPLOADED', 'QUEUED', 'PROCESSING')` (V5, Issue 4.3). Match this index name to 409 `VIDEO_UPLOAD_IN_PROGRESS`; compensate the losing request's raw object.
+- unique partial `ux_video_assets_episode_in_flight` on `episode_id` where `status IN ('UPLOADED', 'QUEUED', 'PROCESSING')` (V8). Match this index name to 409 `VIDEO_UPLOAD_IN_PROGRESS`; compensate the losing request's raw object.
+- `current_episode_assets` provides the greatest READY (`created_at`, `id`) tuple per episode.
 
 ### `encoding_jobs`
 
@@ -289,7 +292,7 @@ Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specific
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `user_id` | uuid | PK, FK -> `users.id` on delete cascade | User |
-| `movie_id` | uuid | PK, FK -> `titles.id` on delete cascade | Movie |
+| `episode_id` | uuid | PK, FK -> `episodes.id` on delete restrict | Episode |
 | `current_seconds` | int | not null, check `current_seconds >= 0` | Last saved position, clamped by the server to the current asset's duration |
 | `duration_seconds` | int | null, check `duration_seconds >= 0` | Duration of the movie's current asset when the row was saved; never the client's value |
 | `finished` | boolean | not null default false | Server-derived "counts as watched" flag: the player reported the end (the position is then stored as the duration), or the position reached 90% of the duration. It does not set the resume position |
@@ -299,7 +302,7 @@ Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specific
 
 Indexes:
 
-- `ix_playback_progress_user_last_played` on (`user_id`, `last_played_at`)
+- `ix_playback_progress_user_last_played` on (`user_id`, `last_played_at` DESC, `episode_id` DESC)
 
 The progress API writes this table directly in one transaction with `watch_history`; there is no buffer ([ADR-011 D9-D12](adr/ADR-011.md#playback-progress-d9-d14)). One row per user and movie survives a video replacement. No migration is added by this decision.
 
@@ -323,7 +326,7 @@ Constraints and indexes:
 |---|---|---|---|
 | `id` | uuid | PK | History item ID |
 | `user_id` | uuid | FK -> `users.id` on delete cascade, not null | Owner |
-| `movie_id` | uuid | FK -> `titles.id` on delete cascade, not null | Watched movie |
+| `episode_id` | uuid | FK -> `episodes.id` on delete restrict, not null | Watched episode |
 | `started_at` | timestamptz | not null | First accepted progress update |
 | `last_watched_at` | timestamptz | not null | Latest accepted progress update |
 | `completed_at` | timestamptz | null | First time a stored progress update was finished; never cleared |
@@ -331,7 +334,7 @@ Constraints and indexes:
 Indexes:
 
 - `ix_watch_history_user_last_watched` on (`user_id`, `last_watched_at`)
-- unique `ux_watch_history_user_movie` on (`user_id`, `movie_id`)
+- unique `ux_watch_history_user_episode` on (`user_id`, `episode_id`)
 
 ### `ratings`
 

@@ -45,7 +45,7 @@ describe('AppLayout auth navigation', () => {
     renderLayout();
 
     expect(await screen.findByRole('link', { name: 'Account' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Movies' })).toHaveAttribute('href', '/movies');
+    expect(screen.getByRole('link', { name: 'Movies' })).toHaveAttribute('href', '/titles');
     expect(screen.getByRole('link', { name: 'Continue watching' })).toHaveAttribute('href', '/continue-watching');
     expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument();
@@ -57,8 +57,8 @@ describe('AppLayout auth navigation', () => {
     renderLayout();
 
     // /admin until #91 adds /admin/movies and redirects /admin there.
-    expect(await screen.findByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin/movies');
-    expect(screen.getByRole('link', { name: 'Movies' })).toHaveAttribute('href', '/movies');
+    expect(await screen.findByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin/titles');
+    expect(screen.getByRole('link', { name: 'Movies' })).toHaveAttribute('href', '/titles');
   });
 
   it('sends one cookie logout and keeps a stable disabled control while logout is pending', async () => {

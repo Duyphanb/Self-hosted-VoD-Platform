@@ -18,7 +18,8 @@ record ValidatedMovie(
         MaturityRating maturityRating,
         MovieStatus status,
         List<GenreInput> genres,
-        List<CreditInput> people
+        List<CreditInput> people,
+        String partLabel
 ) {
 
     ValidatedMovie {

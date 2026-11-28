@@ -7,7 +7,7 @@ import unittest
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-UPLOAD_PATTERN = r"^/api/v1/admin/movies/[^/]+/video$"
+UPLOAD_PATTERN = r"^/api/v1/admin/episodes/[^/]+/video$"
 TOKEN = re.compile(r'''\s+|\#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[{};]|[^\s{};'"\#]+''')
 
 
@@ -107,10 +107,10 @@ class NginxUploadEdgeTests(unittest.TestCase):
         for location in select(self.server.children, "location"):
             self.assertFalse(any(argument.startswith("/api/v1/") and argument != "/api/v1/"
                                  for argument in location.arguments), location.arguments)
-        for path in ("/api/v1/admin/movies/id/video", "/api/v1/admin/movies/a-b/video"):
+        for path in ("/api/v1/admin/episodes/id/video", "/api/v1/admin/episodes/a-b/video"):
             self.assertIsNotNone(re.fullmatch(UPLOAD_PATTERN, path))
-        for path in ("/api/v1/admin/movies/id/video/", "/api/v1/admin/movies/id/videos",
-                     "/api/v1/admin/movies/a/b/video", "/api/v1/admin/movies//video",
+        for path in ("/api/v1/admin/episodes/id/video/", "/api/v1/admin/episodes/id/videos",
+                     "/api/v1/admin/episodes/a/b/video", "/api/v1/admin/episodes//video",
                      "/API/v1/admin/movies/id/video", "/hls/id/video"):
             self.assertIsNone(re.fullmatch(UPLOAD_PATTERN, path))
 

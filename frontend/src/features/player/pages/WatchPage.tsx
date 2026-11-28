@@ -9,6 +9,7 @@ import {
   useRef
 } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { secondaryButtonClass } from '../../../components/buttonStyles';
 import { ErrorState, LoadingState } from '../../../components/StateViews';
 import { ApiRequestError, AuthenticationSupersededError } from '../../../lib/api/client';
@@ -16,8 +17,7 @@ import { isCanonicalUuid } from '../../../lib/uuid';
 import { NotFoundPage } from '../../../pages/NotFoundPage';
 import { useApiClient, useAuth } from '../../auth/AuthContext';
 import { videoAvailability } from '../../movies/movieAvailability';
-import { useMovieDetail } from '../../movies/movieQueries';
-import type { MovieDetail } from '../../movies/moviesApi';
+import { getWatchedTitle, movieKeys, type MovieSummary } from '../../movies/moviesApi';
 import { fetchPlaybackInfo, type PlaybackInfo } from '../playbackApi';
 import { usePlaybackInfo } from '../playbackQueries';
 
@@ -30,8 +30,8 @@ type WatchPageState =
   | { kind: 'notFound' }
   | { kind: 'loading' }
   | { kind: 'error'; error: unknown }
-  | { kind: 'notReady'; movie: MovieDetail; label: UnavailableLabel }
-  | { kind: 'ready'; movie: MovieDetail; playbackInfo: PlaybackInfo };
+  | { kind: 'notReady'; movie: MovieSummary; label: UnavailableLabel }
+  | { kind: 'ready'; movie: MovieSummary; playbackInfo: PlaybackInfo };
 
 /** Whether each query has answered since this visit started, as opposed to holding an older cached answer. */
 interface FetchedOnThisVisit {
@@ -47,17 +47,22 @@ interface QueryResult<T> {
 
 /**
  * The watch page (Issue 6.7): the movie's title, the authenticated player at the resume position, and the
- * description. It maps the playback API per ADR-011 D7: 404 MOVIE_NOT_FOUND shows the not-found state and
+ * description. It maps the playback API per ADR-011 D7: 404 EPISODE_NOT_FOUND shows the not-found state and
  * 409 VIDEO_NOT_READY shows the viewer-facing availability label, never a failure code or message. Any
  * other error shows the error state with Retry.
  */
 export function WatchPage() {
-  const movieId = (useParams().movieId ?? '').toLowerCase();
+  const movieId = (useParams().episodeId ?? '').toLowerCase();
   // Subscribing to the session re-renders the page when the session changes, even for the same viewer:
   // the cleared queries run again and the new identity gets a new player.
   useAuth();
   const apiClient = useApiClient();
-  const movie = useMovieDetail(movieId, { refetchOnMount: 'always' });
+  const movie = useQuery({
+    queryKey: movieKeys.watchedTitle(movieId),
+    queryFn: ({ signal }) => getWatchedTitle(apiClient, movieId, signal),
+    enabled: isCanonicalUuid(movieId),
+    refetchOnMount: 'always'
+  });
   const playback = usePlaybackInfo(movieId);
   const pageRef = useRef<HTMLDivElement>(null);
   // Whether this visit already used its one automatic recheck of a 409; each new movie ID is a new visit.
@@ -124,14 +129,14 @@ export function WatchPage() {
     content = (
       <NotFoundPage
         description="The movie could not be found."
-        link={{ to: '/movies', label: 'Back to movies' }}
+        link={{ to: '/titles', label: 'Back to movies' }}
         title="Movie not found"
       />
     );
   } else if (state.kind === 'loading') {
     content = (
       <>
-        <BackLink to="/movies">Back to movies</BackLink>
+        <BackLink to="/titles">Back to movies</BackLink>
         <h1 className="text-3xl font-semibold text-white">Watch</h1>
         <LoadingState label="Loading movie…" />
       </>
@@ -139,7 +144,7 @@ export function WatchPage() {
   } else if (state.kind === 'error') {
     content = (
       <>
-        <BackLink to="/movies">Back to movies</BackLink>
+        <BackLink to="/titles">Back to movies</BackLink>
         <ErrorState
           error={state.error}
           headingLevel={1}
@@ -152,7 +157,7 @@ export function WatchPage() {
   } else if (state.kind === 'notReady') {
     content = (
       <>
-        <BackLink to={`/movies/${state.movie.id}`}>Back to movie details</BackLink>
+        <BackLink to={`/titles/${state.movie.id}`}>Back to movie details</BackLink>
         <MovieTitle movie={state.movie} />
         {/* Only a playback request started by the page or the viewer disables the button, never a reconnect. */}
         <UnavailableNotice
@@ -166,7 +171,7 @@ export function WatchPage() {
   } else {
     content = (
       <>
-        <BackLink to={`/movies/${state.movie.id}`}>Back to movie details</BackLink>
+        <BackLink to={`/titles/${state.movie.id}`}>Back to movie details</BackLink>
         <MovieTitle movie={state.movie} />
         <PlayerLoadBoundary>
           <Suspense fallback={<LoadingState label="Loading player…" />}>
@@ -209,7 +214,7 @@ export function WatchPage() {
  */
 function watchPageState(
   movieId: string,
-  movie: QueryResult<MovieDetail>,
+  movie: QueryResult<MovieSummary>,
   playback: QueryResult<PlaybackInfo>,
   fetchedOnThisVisit: FetchedOnThisVisit
 ): WatchPageState {
@@ -248,7 +253,7 @@ function realError(query: QueryResult<unknown>): unknown {
 }
 
 function isMovieNotFound(error: unknown): boolean {
-  return error instanceof ApiRequestError && error.status === 404 && error.apiError?.code === 'MOVIE_NOT_FOUND';
+  return error instanceof ApiRequestError && error.status === 404 && error.apiError?.code === 'EPISODE_NOT_FOUND';
 }
 
 function isVideoNotReady(error: unknown): boolean {
@@ -256,15 +261,15 @@ function isVideoNotReady(error: unknown): boolean {
 }
 
 /** The viewer-facing label of a movie without a playable asset (ADR-011 D7, D18). */
-function unavailableLabel(movie: MovieDetail): UnavailableLabel {
+function unavailableLabel(movie: MovieSummary): UnavailableLabel {
   return videoAvailability(movie.videoStatus).label === 'Processing' ? 'Processing' : 'Not available';
 }
 
-function MovieTitle({ movie }: { movie: MovieDetail }) {
+function MovieTitle({ movie }: { movie: MovieSummary }) {
   return <h1 className="break-words text-3xl font-semibold text-white [overflow-wrap:anywhere]">{movie.title}</h1>;
 }
 
-function MovieDescription({ movie }: { movie: MovieDetail }) {
+function MovieDescription({ movie }: { movie: MovieSummary }) {
   return (
     <section aria-labelledby="watch-description-heading" className="min-w-0">
       <h2 className="text-lg font-semibold text-white" id="watch-description-heading">Description</h2>

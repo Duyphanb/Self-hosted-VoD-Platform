@@ -29,7 +29,7 @@ export const DEFAULT_MOVIE_LIST_PARAMS: MovieListParams = {
   page: 1
 };
 
-/** Reads `/movies?genre=&year=&sort=&page=`; a missing or invalid value falls back to its default. */
+/** Reads `/titles?genre=&year=&sort=&page=`; a missing or invalid value falls back to its default. */
 export function parseMovieListParams(search: URLSearchParams): MovieListParams {
   return {
     genre: parseGenre(search.get('genre')),

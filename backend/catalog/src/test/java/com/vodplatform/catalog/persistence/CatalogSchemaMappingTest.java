@@ -22,7 +22,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.ContextConfiguration;
 
 /**
- * Checks the entity-generated H2 schema against the Flyway V1 catalog tables. PostgreSQL parity is
+ * Checks the entity-generated H2 schema against the Flyway catalog tables. PostgreSQL parity is
  * enforced at runtime by {@code spring.jpa.hibernate.ddl-auto=validate} in the Compose backend.
  */
 @DataJpaTest
@@ -49,11 +49,11 @@ class CatalogSchemaMappingTest {
                 .map(EntityType::getJavaType)
                 .collect(Collectors.toSet());
 
-        assertThat(entityTypes).containsExactlyInAnyOrder(Movie.class, Genre.class, Person.class, MovieCredit.class);
+        assertThat(entityTypes).containsExactlyInAnyOrder(Movie.class, Episode.class, Genre.class, Person.class, MovieCredit.class);
     }
 
     @Test
-    void columnsMatchTheV1CatalogTablesWithoutTheSearchVector() {
+    void columnsMatchTheCatalogTablesWithoutTheSearchVector() {
         List<Object[]> rows = nativeRows("""
                 select lower(table_name), lower(column_name), data_type, character_maximum_length, is_nullable
                 from information_schema.columns
@@ -74,6 +74,17 @@ class CatalogSchemaMappingTest {
                 "titles.status enum NOT NULL",
                 "titles.created_at timestamptz NOT NULL",
                 "titles.updated_at timestamptz NOT NULL",
+                "titles.content_type enum NOT NULL",
+                "titles.part_label varchar(100) NULL",
+                "episodes.id uuid NOT NULL",
+                "episodes.title_id uuid NOT NULL",
+                "episodes.ordinal int NOT NULL",
+                "episodes.display_label varchar(50) NULL",
+                "episodes.name varchar(255) NULL",
+                "episodes.synopsis text NULL",
+                "episodes.status enum NOT NULL",
+                "episodes.created_at timestamptz NOT NULL",
+                "episodes.updated_at timestamptz NOT NULL",
                 "genres.id uuid NOT NULL",
                 "genres.name varchar(100) NOT NULL",
                 "genres.slug varchar(120) NOT NULL",
@@ -90,9 +101,10 @@ class CatalogSchemaMappingTest {
     }
 
     @Test
-    void primaryKeysMatchV1() {
+    void primaryKeysMatchCatalogSchema() {
         assertThat(constraintColumns("PRIMARY KEY")).containsExactlyInAnyOrderEntriesOf(Map.of(
                 "titles", Set.of("id"),
+                "episodes", Set.of("id"),
                 "genres", Set.of("id"),
                 "people", Set.of("id"),
                 "title_genres", Set.of("title_id", "genre_id"),
@@ -101,7 +113,7 @@ class CatalogSchemaMappingTest {
     }
 
     @Test
-    void uniqueConstraintsUseTheV1Names() {
+    void uniqueConstraintsUseTheFlywayNames() {
         List<Object[]> rows = nativeRows("""
                 select lower(tc.table_name), lower(tc.constraint_name), lower(kcu.column_name)
                 from information_schema.table_constraints tc
@@ -115,6 +127,8 @@ class CatalogSchemaMappingTest {
 
         assertThat(uniqueConstraints).containsExactlyInAnyOrder(
                 "titles.ux_titles_slug(slug)",
+                "episodes.ux_episodes_title_ordinal(title_id)",
+                "episodes.ux_episodes_title_ordinal(ordinal)",
                 "genres.ux_genres_name(name)",
                 "genres.ux_genres_slug(slug)",
                 "people.ux_people_slug(slug)"

@@ -1,3 +1,4 @@
+import { titleFixture, titlePayloadFixture } from '../../test/titleWireFixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import contract from '../../../../docs/architecture/API-CONTRACT.yaml?raw';
 import { ApiClient, type AuthenticationSnapshot } from '../../lib/api/client';
@@ -22,7 +23,7 @@ const movie: MovieSummary = {
   posterUrl: null,
   genres: ['Drama', 'Thriller'],
   averageRating: null,
-  status: 'PUBLISHED',
+  status: 'PUBLISHED', contentType: 'MOVIE',
   videoStatus: null
 };
 
@@ -54,7 +55,7 @@ describe('listMovies', () => {
 
     const [input, init] = fetchMock.mock.calls[0];
     const url = new URL(String(input), 'http://localhost');
-    expect(url.pathname).toBe('/api/v1/movies');
+    expect(url.pathname).toBe('/api/v1/titles');
     expect(Object.fromEntries(url.searchParams)).toEqual({
       page: '2',
       size: '20',
@@ -77,7 +78,7 @@ describe('listMovies', () => {
   });
 
   it.each(rejectedResponses())('rejects a response with %s', async (_label, body) => {
-    fetchMock.mockResolvedValue(jsonResponse(body));
+    fetchMock.mockResolvedValue(rawJsonResponse(body));
 
     await expect(listMovies(apiClient(), {
       page: 0,
@@ -89,7 +90,7 @@ describe('listMovies', () => {
   });
 
   it('has a wrong-type value for every required field of the contract', () => {
-    expect(Object.keys(WRONG_SUMMARY_VALUES).sort()).toEqual([...contractRequired('MovieSummary')].sort());
+    expect(Object.keys(WRONG_SUMMARY_VALUES).sort()).toEqual([...contractRequired('TitleSummary')].sort());
     expect(contractRequired('PageMeta')).toEqual(['page', 'size', 'totalElements', 'totalPages']);
   });
 
@@ -106,7 +107,7 @@ describe('listMovies', () => {
     fetchMock.mockResolvedValue(jsonResponse({
       items: [
         { ...movie, status: 'SCHEDULED', videoStatus: 'TRANSCODING_V2' },
-        { ...movie, status: 'ARCHIVED', videoStatus: 'READY' }
+        { ...movie, status: 'ARCHIVED', contentType: 'MOVIE', videoStatus: 'READY' }
       ],
       page: { ...pageMeta, totalElements: 2 }
     }));
@@ -129,6 +130,7 @@ describe('listMovies', () => {
 
 const detail: MovieDetail = {
   ...movie,
+  episode: null,
   maturityRating: 'T16',
   people: [
     { personId: '0b8f3a52-6a3e-4d0c-9a4b-3f2e1d0c9b8a', name: 'Trần Anh Hùng', role: 'DIRECTOR' },
@@ -137,7 +139,7 @@ const detail: MovieDetail = {
   userRating: 4,
   inWatchlist: true,
   playbackProgress: {
-    movieId: movie.id,
+    episodeId: movie.id,
     currentSeconds: 754,
     durationSeconds: 5400,
     finished: false,
@@ -164,10 +166,16 @@ describe('getMovie', () => {
     const result = await getMovie(apiClient(), movie.id);
 
     const [input, init] = fetchMock.mock.calls[0];
-    expect(new URL(String(input), 'http://localhost').pathname).toBe(`/api/v1/movies/${movie.id}`);
+    expect(new URL(String(input), 'http://localhost').pathname).toBe(`/api/v1/titles/${movie.id}`);
     expect(init?.method ?? 'GET').toBe('GET');
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer access-token');
-    expect(result).toEqual(detail);
+    expect(result).toEqual({
+      ...detail,
+      episode: {
+        id: movie.id, titleId: movie.id, ordinal: 1, displayLabel: '1', name: null,
+        videoStatus: null, progress: detail.playbackProgress
+      }
+    });
   });
 
   it('reads an omitted or null playbackProgress, and omitted progress fields, as absent', async () => {
@@ -180,10 +188,10 @@ describe('getMovie', () => {
 
     fetchMock.mockResolvedValueOnce(jsonResponse({
       ...detail,
-      playbackProgress: { movieId: movie.id, currentSeconds: 0, finished: true }
+      playbackProgress: { episodeId: movie.id, currentSeconds: 0, finished: true }
     }));
     expect((await getMovie(apiClient(), movie.id)).playbackProgress).toEqual({
-      movieId: movie.id,
+      episodeId: movie.id,
       currentSeconds: 0,
       durationSeconds: null,
       finished: true,
@@ -213,7 +221,7 @@ describe('getMovie', () => {
   });
 
   it.each(rejectedDetails())('rejects a detail response with %s', async (_label, body) => {
-    fetchMock.mockResolvedValue(jsonResponse(body));
+    fetchMock.mockResolvedValue(rawJsonResponse(body));
 
     const request = getMovie(apiClient(), movie.id);
 
@@ -222,7 +230,7 @@ describe('getMovie', () => {
   });
 
   it('has a wrong-type value for every required field of the contract', () => {
-    expect(Object.keys(WRONG_DETAIL_VALUES).sort()).toEqual(contractAllOfRequired('MovieDetail').sort());
+    expect(Object.keys(WRONG_DETAIL_VALUES).sort()).toEqual(contractAllOfRequired('TitleDetail').sort());
     expect(Object.keys(WRONG_CREDIT_VALUES).sort()).toEqual(contractRequired('MovieCredit').sort());
     expect(Object.keys(WRONG_PROGRESS_VALUES).sort()).toEqual(contractRequired('ProgressResponse').sort());
   });
@@ -252,53 +260,58 @@ const WRONG_CREDIT_VALUES: Partial<Record<keyof MovieCredit, unknown>> = {
 };
 
 const WRONG_PROGRESS_VALUES: Partial<Record<keyof PlaybackProgress, unknown>> = {
-  movieId: 'not-a-uuid',
+  episodeId: 'not-a-uuid',
   currentSeconds: -1,
   finished: 'no'
 };
 
 function rejectedDetails(): Array<[string, unknown]> {
   const progress = detail.playbackProgress as PlaybackProgress;
+  const wire = { ...titleFixture(detail), episode: {
+    id: movie.id, titleId: movie.id, ordinal: 1, displayLabel: '1', name: null, videoStatus: null, progress
+  } };
+  const withProgress = (value: unknown) => ({ ...wire, episode: { ...wire.episode, progress: value } });
   const rows: Array<[string, unknown]> = [
-    ['a body that is not an object', [detail]],
-    ['a summary field of the wrong type', { ...detail, title: 1 }],
-    ['an upper-case id', { ...detail, id: movie.id.toUpperCase() }],
-    ['a rating below 1', { ...detail, userRating: 0 }],
-    ['a rating above 5', { ...detail, userRating: 6 }],
-    ['a fractional rating', { ...detail, userRating: 4.5 }],
-    ['a credit that is not an object', { ...detail, people: ['Trần Anh Hùng'] }],
-    ['a credit with a non-canonical personId', { ...detail, people: [{ ...detail.people[0], personId: '../admin' }] }],
-    ['progress that is not an object', { ...detail, playbackProgress: 754 }],
-    ['a fractional progress position', { ...detail, playbackProgress: { ...progress, currentSeconds: 1.5 } }],
-    ['a string progress duration', { ...detail, playbackProgress: { ...progress, durationSeconds: '5400' } }],
-    ['a numeric lastPlayedAt', { ...detail, playbackProgress: { ...progress, lastPlayedAt: 5 } }]
+    ['a body that is not an object', [wire]],
+    ['a summary field of the wrong type', { ...wire, title: 1 }],
+    ['an upper-case id', { ...wire, id: movie.id.toUpperCase() }],
+    ['a rating below 1', { ...wire, userRating: 0 }],
+    ['a rating above 5', { ...wire, userRating: 6 }],
+    ['a fractional rating', { ...wire, userRating: 4.5 }],
+    ['a credit that is not an object', { ...wire, people: ['Trần Anh Hùng'] }],
+    ['a credit with a non-canonical personId', { ...wire, people: [{ ...detail.people[0], personId: '../admin' }] }],
+    ['a missing film episode', { ...wire, episode: undefined }],
+    ['progress belonging to another episode', withProgress({ ...progress, episodeId: detail.people[0].personId })],
+    ['progress that is not an object', withProgress(754)],
+    ['a fractional progress position', withProgress({ ...progress, currentSeconds: 1.5 })],
+    ['a string progress duration', withProgress({ ...progress, durationSeconds: '5400' })],
+    ['a numeric lastPlayedAt', withProgress({ ...progress, lastPlayedAt: 5 })]
   ];
-  for (const field of contractAllOfRequired('MovieDetail')) {
-    const { [field]: _omitted, ...withoutField } = detail as unknown as Record<string, unknown>;
-    rows.push([`MovieDetail.${field} missing`, withoutField]);
-    rows.push([`MovieDetail.${field} of the wrong type`, { ...detail, [field]: WRONG_DETAIL_VALUES[field as keyof MovieDetail] }]);
+  for (const field of contractAllOfRequired('TitleDetail')) {
+    const { [field]: _omitted, ...withoutField } = wire as Record<string, unknown>;
+    rows.push([`TitleDetail.${field} missing`, withoutField]);
+    rows.push([`TitleDetail.${field} of the wrong type`, { ...wire, [field]: WRONG_DETAIL_VALUES[field as keyof MovieDetail] }]);
   }
   for (const field of contractRequired('MovieCredit')) {
     const { [field]: _omitted, ...withoutField } = detail.people[0] as unknown as Record<string, unknown>;
-    rows.push([`MovieCredit.${field} missing`, { ...detail, people: [withoutField] }]);
+    rows.push([`MovieCredit.${field} missing`, { ...wire, people: [withoutField] }]);
     rows.push([
       `MovieCredit.${field} of the wrong type`,
-      { ...detail, people: [{ ...detail.people[0], [field]: WRONG_CREDIT_VALUES[field as keyof MovieCredit] }] }
+      { ...wire, people: [{ ...detail.people[0], [field]: WRONG_CREDIT_VALUES[field as keyof MovieCredit] }] }
     ]);
   }
   for (const field of contractRequired('ProgressResponse')) {
     const { [field]: _omitted, ...withoutField } = progress as unknown as Record<string, unknown>;
-    rows.push([`ProgressResponse.${field} missing`, { ...detail, playbackProgress: withoutField }]);
+    rows.push([`ProgressResponse.${field} missing`, withProgress(withoutField)]);
     rows.push([
       `ProgressResponse.${field} of the wrong type`,
-      { ...detail, playbackProgress: { ...progress, [field]: WRONG_PROGRESS_VALUES[field as keyof PlaybackProgress] } }
+      withProgress({ ...progress, [field]: WRONG_PROGRESS_VALUES[field as keyof PlaybackProgress] })
     ]);
   }
   return rows;
 }
 
-// A value of the wrong type for each required MovieSummary field of API-CONTRACT.yaml.
-const WRONG_SUMMARY_VALUES: Record<keyof MovieSummary, unknown> = {
+const WRONG_SUMMARY_VALUES: Record<string, unknown> = {
   id: 42,
   title: null,
   slug: 7,
@@ -308,28 +321,34 @@ const WRONG_SUMMARY_VALUES: Record<keyof MovieSummary, unknown> = {
   genres: 'Drama',
   averageRating: '4.5',
   status: 1,
-  videoStatus: false
+  contentType: 123,
+  partLabel: 42,
+  episodeCount: -1,
+  playableEpisodeCount: '1',
+  availability: false
 };
 
 function rejectedResponses(): Array<[string, unknown]> {
+  const wire = titleFixture(movie);
   const rows: Array<[string, unknown]> = [
-    ['a body that is not an object', [movie]],
-    ['a missing page', { items: [movie] }],
+    ['a body that is not an object', [wire]],
+    ['a missing page', { items: [wire] }],
     ['items that are not an array', { items: null, page: pageMeta }],
     ['an item that is not an object', { items: ['movie'], page: pageMeta }],
-    ['genres that are not strings', { items: [{ ...movie, genres: [1] }], page: pageMeta }],
-    ['a fractional release year', { items: [{ ...movie, releaseYear: 1999.5 }], page: pageMeta }]
+    ['genres that are not strings', { items: [{ ...wire, genres: [1] }], page: pageMeta }],
+    ['a fractional release year', { items: [{ ...wire, releaseYear: 1999.5 }], page: pageMeta }],
+    ['too many playable episodes', { items: [{ ...wire, episodeCount: 1, playableEpisodeCount: 2 }], page: pageMeta }]
   ];
-  for (const field of contractRequired('MovieSummary')) {
-    const { [field]: _omitted, ...withoutField } = movie as unknown as Record<string, unknown>;
-    rows.push([`MovieSummary.${field} missing`, { items: [withoutField], page: pageMeta }]);
+  for (const field of contractRequired('TitleSummary')) {
+    const { [field]: _omitted, ...withoutField } = wire as Record<string, unknown>;
+    rows.push([`TitleSummary.${field} missing`, { items: [withoutField], page: pageMeta }]);
     rows.push([
-      `MovieSummary.${field} of the wrong type`,
-      { items: [{ ...movie, [field]: WRONG_SUMMARY_VALUES[field as keyof MovieSummary] }], page: pageMeta }
+      `TitleSummary.${field} of the wrong type`,
+      { items: [{ ...wire, [field]: WRONG_SUMMARY_VALUES[field] }], page: pageMeta }
     ]);
   }
-  for (const id of ['not-a-uuid', '../admin', '6F1C0F55-2D4A-4B64-9A43-1D0F3C7B8E21', `${movie.id}/edit`, `${movie.id}?x`, '']) {
-    rows.push([`a non-canonical id ${JSON.stringify(id)}`, { items: [{ ...movie, id }], page: pageMeta }]);
+  for (const id of ['not-a-uuid', '../admin', movie.id.toUpperCase(), `${movie.id}/edit`, `${movie.id}?x`, '']) {
+    rows.push([`a non-canonical id ${JSON.stringify(id)}`, { items: [{ ...wire, id }], page: pageMeta }]);
   }
   for (const field of contractRequired('PageMeta')) {
     const { [field]: _omitted, ...withoutField } = pageMeta as Record<string, number>;
@@ -374,6 +393,10 @@ function apiClient(): ApiClient {
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
+  return rawJsonResponse(titlePayloadFixture(body), status);
+}
+
+function rawJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' }

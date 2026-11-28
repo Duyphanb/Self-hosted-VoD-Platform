@@ -20,7 +20,7 @@ describe('admin movie video upload API', () => {
     const file = new File(['synthetic'], 'Original.MOV', { type: 'video/mp4' });
     const pending = uploadMovieVideo(client(), movieId.toUpperCase(), file, 'video/quicktime');
     const xhr = FakeXhr.instances[0];
-    expect(xhr.url).toBe(`/api/v1/admin/movies/${movieId}/video`);
+    expect(xhr.url).toBe(`/api/v1/admin/episodes/${movieId}/video`);
     expect(xhr.method).toBe('POST');
     const body = xhr.body as FormData;
     expect([...body.keys()]).toEqual(['file']);

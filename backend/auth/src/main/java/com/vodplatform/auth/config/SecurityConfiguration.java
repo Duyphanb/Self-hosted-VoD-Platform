@@ -63,18 +63,10 @@ public class SecurityConfiguration {
 
     /**
      * Admin operations are authorized by URL before argument resolution and validation run, so a
-     * non-admin caller gets 403 even for an invalid body or a missing target. The terminal {@code *}
-     * matches one segment, including an empty one: {@code PUT /api/v1/movies/} also requires admin,
-     * while deeper paths such as {@code /api/v1/movies/{movieId}/progress} (user sub-resources) and
-     * {@code /api/v1/movies/{movieId}/} do not match this rule. Method-level {@code @PreAuthorize}
-     * remains the second layer.
+     * non-admin caller gets 403 even for an invalid body or a missing target.
+     * Method-level {@code @PreAuthorize} remains the second layer.
      */
-    static final RequestMatcher ADMIN_ENDPOINTS = new OrRequestMatcher(
-            PathPatternRequestMatcher.pathPattern("/api/v1/admin/**"),
-            post("/api/v1/movies"),
-            put("/api/v1/movies/*"),
-            delete("/api/v1/movies/*")
-    );
+    static final RequestMatcher ADMIN_ENDPOINTS = PathPatternRequestMatcher.pathPattern("/api/v1/admin/**");
 
     @Bean
     @Order(1)
@@ -152,15 +144,4 @@ public class SecurityConfiguration {
         return PathPatternRequestMatcher.pathPattern(HttpMethod.GET, pattern);
     }
 
-    private static RequestMatcher post(String pattern) {
-        return PathPatternRequestMatcher.pathPattern(HttpMethod.POST, pattern);
-    }
-
-    private static RequestMatcher put(String pattern) {
-        return PathPatternRequestMatcher.pathPattern(HttpMethod.PUT, pattern);
-    }
-
-    private static RequestMatcher delete(String pattern) {
-        return PathPatternRequestMatcher.pathPattern(HttpMethod.DELETE, pattern);
-    }
 }

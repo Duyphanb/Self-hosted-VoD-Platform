@@ -65,13 +65,18 @@ class VideoUploadServiceTest {
 
     private final EncodingJobService jobs = mock(EncodingJobService.class);
 
-    private final UUID movie = UUID.randomUUID();
+    private final UUID episodeId = UUID.randomUUID();
+    private final UUID titleId = UUID.randomUUID();
 
     private final VideoUploadService service = service(UploadProperties.TYPES);
 
     private final byte[] iso = {0, 0, 0, 8, 'f', 't', 'y', 'p'};
 
     private final byte[] ebml = {0x1a, 0x45, (byte) 0xdf, (byte) 0xa3};
+
+    VideoUploadServiceTest() {
+        org.mockito.Mockito.when(jobs.precheck(episodeId)).thenReturn(titleId);
+    }
 
     private VideoUploadService service(Set<String> types) {
         return new VideoUploadService(
@@ -95,7 +100,7 @@ class VideoUploadServiceTest {
     void streamsKnownLengthUsesTrustedExtensionAndCommitsBeforePublishing(String type)
             throws Exception {
         byte[] bytes = type.contains("mp4") || type.contains("quicktime") ? iso : ebml;
-        var result = service.upload(movie, file(type, bytes), Optional.empty());
+        var result = service.upload(episodeId, file(type, bytes), Optional.empty());
         assertThat(result.status()).isEqualTo("QUEUED");
         String ext =
                 switch (type) {
@@ -105,17 +110,17 @@ class VideoUploadServiceTest {
                     default -> "mkv";
                 };
         var order = inOrder(jobs, storage);
-        order.verify(jobs).precheck(movie);
+        order.verify(jobs).precheck(episodeId);
         order.verify(storage)
                 .put(
                         eq("vod-raw"),
-                        eq(movie + "/" + result.videoAssetId() + "." + ext),
+                        eq(titleId + "/" + result.videoAssetId() + "." + ext),
                         any(InputStream.class),
                         eq((long) bytes.length),
                         eq(type));
         order.verify(jobs)
                 .commitNewUpload(
-                        eq(movie),
+                        eq(episodeId),
                         eq(result.videoAssetId()),
                         any(UUID.class),
                         eq("vod-raw"),
@@ -194,7 +199,7 @@ class VideoUploadServiceTest {
             VideoUploadService target, MockMultipartFile file, HttpStatus status, String code) {
         ApiException failure =
                 catchThrowableOfType(
-                        ApiException.class, () -> target.upload(movie, file, Optional.empty()));
+                        ApiException.class, () -> target.upload(episodeId, file, Optional.empty()));
         assertThat(failure).isNotNull();
         assertThat(failure.getStatus()).isEqualTo(status);
         assertThat(failure.getCode()).isEqualTo(code);
@@ -207,11 +212,11 @@ class VideoUploadServiceTest {
         doThrow(new IOException("untrusted-secret"))
                 .when(storage)
                 .put(anyString(), anyString(), any(), anyLong(), anyString());
-        assertThatThrownBy(() -> service.upload(movie, file("video/mp4", iso), Optional.empty()))
+        assertThatThrownBy(() -> service.upload(episodeId, file("video/mp4", iso), Optional.empty()))
                 .isInstanceOf(UploadStorageException.class)
                 .hasMessage("Upload storage operation failed")
                 .hasNoCause();
-        verify(storage).delete(eq("vod-raw"), matches(movie + "/[0-9a-f-]+\\.mp4"));
+        verify(storage).delete(eq("vod-raw"), matches(titleId + "/[0-9a-f-]+\\.mp4"));
         verify(jobs, never()).commitNewUpload(any(), any(), any(), anyString(), anyString());
     }
 
@@ -220,14 +225,14 @@ class VideoUploadServiceTest {
         doThrow(new UploadDatabaseException())
                 .when(jobs)
                 .commitNewUpload(any(), any(), any(), anyString(), anyString());
-        assertThatThrownBy(() -> service.upload(movie, file("video/mp4", iso), Optional.empty()))
+        assertThatThrownBy(() -> service.upload(episodeId, file("video/mp4", iso), Optional.empty()))
                 .isInstanceOf(UploadDatabaseException.class);
         verify(storage).delete(anyString(), anyString());
         reset(storage);
         doThrow(new UploadCommitUnknownException())
                 .when(jobs)
                 .commitNewUpload(any(), any(), any(), anyString(), anyString());
-        assertThatThrownBy(() -> service.upload(movie, file("video/mp4", iso), Optional.empty()))
+        assertThatThrownBy(() -> service.upload(episodeId, file("video/mp4", iso), Optional.empty()))
                 .isInstanceOf(UploadCommitUnknownException.class);
         verify(storage, never()).delete(anyString(), anyString());
     }
@@ -252,7 +257,7 @@ class VideoUploadServiceTest {
             assertThatThrownBy(
                             () ->
                                     service.upload(
-                                            movie,
+                                            episodeId,
                                             file("video/mp4", iso),
                                             Optional.of("safe-id_123")))
                     .isInstanceOf(VideoUploadInProgressException.class);
@@ -261,7 +266,7 @@ class VideoUploadServiceTest {
             org.mockito.ArgumentCaptor<UUID> job = org.mockito.ArgumentCaptor.forClass(UUID.class);
             verify(jobs)
                     .commitNewUpload(
-                            eq(movie), asset.capture(), job.capture(), eq("vod-raw"), anyString());
+                            eq(episodeId), asset.capture(), job.capture(), eq("vod-raw"), anyString());
             List<ILoggingEvent> warnings =
                     capture.list.stream().filter(event -> event.getLevel() == Level.WARN).toList();
             assertThat(warnings).hasSize(1);
@@ -269,8 +274,8 @@ class VideoUploadServiceTest {
             assertThat(event.getFormattedMessage())
                     .isEqualTo(
                             (deleteFails ? "upload compensation failed" : "upload compensated")
-                                    + " movieId="
-                                    + movie
+                                    + " episodeId="
+                                    + episodeId
                                     + " videoAssetId="
                                     + asset.getValue()
                                     + " encodingJobId="
@@ -311,7 +316,7 @@ class VideoUploadServiceTest {
         capture.start();
         logger.addAppender(capture);
         try {
-            var result = service.upload(movie, file("video/mp4", iso), Optional.of(requestId));
+            var result = service.upload(episodeId, file("video/mp4", iso), Optional.of(requestId));
             var message = ArgumentCaptor.forClass(EncodingJobMessage.class);
             verify(jobs)
                     .publish(
@@ -319,8 +324,8 @@ class VideoUploadServiceTest {
                             eq(accepted ? Optional.of(requestId) : Optional.empty()));
             assertThat(message.getValue().videoAssetId()).isEqualTo(result.videoAssetId());
             String ids =
-                    " movieId="
-                            + movie
+                    " episodeId="
+                            + episodeId
                             + " videoAssetId="
                             + result.videoAssetId()
                             + " encodingJobId="
@@ -339,7 +344,7 @@ class VideoUploadServiceTest {
                                 .doesNotContain(
                                         "vod-raw",
                                         "secret-do-not-use.txt",
-                                        movie + "/" + result.videoAssetId() + ".mp4");
+                                        episodeId + "/" + result.videoAssetId() + ".mp4");
                         assertThat(event.getThrowableProxy()).isNull();
                     });
         } finally {
@@ -352,9 +357,9 @@ class VideoUploadServiceTest {
     void precheckConflictAndMissingMovieNeverPut() {
         for (RuntimeException failure :
                 List.of(new VideoUploadInProgressException(), new MovieNotFoundException())) {
-            doThrow(failure).when(jobs).precheck(movie);
+            doThrow(failure).when(jobs).precheck(episodeId);
             assertThatThrownBy(
-                            () -> service.upload(movie, file("video/mp4", iso), Optional.empty()))
+                            () -> service.upload(episodeId, file("video/mp4", iso), Optional.empty()))
                     .isSameAs(failure);
         }
         verifyNoInteractions(storage);
@@ -396,7 +401,7 @@ class VideoUploadServiceTest {
                         };
                     }
                 };
-        service.upload(movie, file, Optional.empty());
+        service.upload(episodeId, file, Optional.empty());
         assertThat(closed.get()).isEqualTo(2);
         verify(storage).put(eq("vod-raw"), endsWith(".mp4"), any(), eq(8L), eq("video/mp4"));
     }

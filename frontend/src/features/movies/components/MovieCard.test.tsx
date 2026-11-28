@@ -13,7 +13,7 @@ const movie: MovieSummary = {
   posterUrl: null,
   genres: ['Science Fiction', 'Documentary', 'Drama'],
   averageRating: null,
-  status: 'PUBLISHED',
+  status: 'PUBLISHED', contentType: 'MOVIE',
   videoStatus: null
 };
 
@@ -22,7 +22,7 @@ describe('MovieCard', () => {
     renderCard(movie);
 
     const link = screen.getByRole('link');
-    expect(link).toHaveAttribute('href', `/movies/${movie.id}`);
+    expect(link).toHaveAttribute('href', `/titles/${movie.id}`);
     expect(within(link).getByRole('heading', { level: 2, name: 'The Long Night' })).toBeInTheDocument();
     expect(within(link).getByText('2019', { selector: 'p' })).toBeInTheDocument();
     // Wraps onto a second line instead of cutting off the second genre.
@@ -33,7 +33,7 @@ describe('MovieCard', () => {
   it('encodes the id as a single path segment', () => {
     renderCard({ ...movie, id: '../admin?x=1#y' });
 
-    expect(screen.getByRole('link')).toHaveAttribute('href', '/movies/..%2Fadmin%3Fx%3D1%23y');
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/titles/..%2Fadmin%3Fx%3D1%23y');
   });
 
   it('leaves out a missing year and an empty genre list', () => {

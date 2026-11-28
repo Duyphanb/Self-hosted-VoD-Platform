@@ -10,7 +10,7 @@ describe('decodeContinueWatching', () => {
 
     expect(items.map((decoded) => decoded.movie.id)).toEqual([SECOND_MOVIE_ID, FIRST_MOVIE_ID]);
     expect(items[0].progress).toEqual({
-      movieId: SECOND_MOVIE_ID,
+      episodeId: SECOND_MOVIE_ID,
       currentSeconds: 754,
       durationSeconds: 3600,
       finished: false,
@@ -25,7 +25,7 @@ describe('decodeContinueWatching', () => {
   it('accepts an unknown duration, which the contract allows', () => {
     const [decoded] = decodeContinueWatching([item(FIRST_MOVIE_ID, { durationSeconds: null })]);
 
-    expect(decoded.progress.durationSeconds).toBeNull();
+    expect(decoded.progress?.durationSeconds).toBeNull();
   });
 
   it('rejects a page object instead of an array', () => {
@@ -33,13 +33,14 @@ describe('decodeContinueWatching', () => {
   });
 
   it('rejects an item without progress', () => {
-    const { movie } = item(FIRST_MOVIE_ID);
+    const { title, episode } = item(FIRST_MOVIE_ID);
 
-    expect(() => decodeContinueWatching([{ movie }])).toThrow(InvalidContinueWatchingResponseError);
+    expect(() => decodeContinueWatching([{ kind: 'RESUME', title, episode }]))
+      .toThrow(InvalidContinueWatchingResponseError);
   });
 
   it('rejects an item whose movie is invalid', () => {
-    const invalid = { ...item(FIRST_MOVIE_ID), movie: { id: FIRST_MOVIE_ID } };
+    const invalid = { ...item(FIRST_MOVIE_ID), title: { id: FIRST_MOVIE_ID } };
 
     expect(() => decodeContinueWatching([invalid])).toThrow(InvalidContinueWatchingResponseError);
   });
@@ -52,8 +53,17 @@ describe('decodeContinueWatching', () => {
 });
 
 function item(movieId: string, progressOverrides: Record<string, unknown> = {}) {
+  const progress = {
+    episodeId: movieId,
+    currentSeconds: 754,
+    durationSeconds: 3600,
+    finished: false,
+    lastPlayedAt: '2026-11-22T10:00:00Z',
+    ...progressOverrides
+  };
   return {
-    movie: {
+    kind: 'RESUME',
+    title: {
       id: movieId,
       title: 'The Long Night',
       slug: 'the-long-night',
@@ -63,15 +73,14 @@ function item(movieId: string, progressOverrides: Record<string, unknown> = {}) 
       genres: ['Drama'],
       averageRating: null,
       status: 'PUBLISHED',
-      videoStatus: 'READY'
+      contentType: 'MOVIE',
+      partLabel: null,
+      episodeCount: 1,
+      playableEpisodeCount: 1,
+      availability: 'PLAYABLE'
     },
-    progress: {
-      movieId,
-      currentSeconds: 754,
-      durationSeconds: 3600,
-      finished: false,
-      lastPlayedAt: '2026-11-22T10:00:00Z',
-      ...progressOverrides
-    }
+    episode: { id: movieId, titleId: movieId, ordinal: 1, displayLabel: '1', name: null,
+      videoStatus: 'READY', progress },
+    progress
   };
 }

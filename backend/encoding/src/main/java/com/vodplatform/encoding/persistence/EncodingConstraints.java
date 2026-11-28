@@ -8,7 +8,7 @@ public final class EncodingConstraints {
 
     public static final String VIDEO_ASSETS_RAW_OBJECT = "ux_video_assets_raw_object";
     public static final String VIDEO_ASSETS_HLS_MASTER = "ux_video_assets_hls_master";
-    public static final String VIDEO_ASSETS_MOVIE_IN_FLIGHT = "ux_video_assets_movie_in_flight";
+    public static final String VIDEO_ASSETS_EPISODE_IN_FLIGHT = "ux_video_assets_episode_in_flight";
     public static final String ENCODING_JOBS_ASSET_ATTEMPT = "ux_encoding_jobs_asset_attempt";
 
     private EncodingConstraints() {

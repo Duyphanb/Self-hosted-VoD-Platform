@@ -1,3 +1,4 @@
+import { titlePayloadFixture } from '../../../test/titleWireFixture';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
@@ -71,14 +72,14 @@ describe('MovieListPage', () => {
       cards.forEach((card, index) => {
         const links = within(card).getAllByRole('link');
         expect(links).toHaveLength(1);
-        expect(links[0]).toHaveAttribute('href', `/movies/${movieSummary(index + 1).id}`);
+        expect(links[0]).toHaveAttribute('href', `/titles/${movieSummary(index + 1).id}`);
         expect(within(links[0]).getByRole('heading', { level: 2 })).toBeInTheDocument();
         expect(links[0].querySelectorAll('a, button, input, select, textarea, [tabindex]')).toHaveLength(0);
       });
 
       expect(apiQueries()).toEqual([{ page: '0', size: '20', sort: 'latest' }]);
       const [input, init] = fetchMock.mock.calls[0];
-      expect(new URL(String(input), 'http://localhost').pathname).toBe('/api/v1/movies');
+      expect(new URL(String(input), 'http://localhost').pathname).toBe('/api/v1/titles');
       expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer access-token');
 
       expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
@@ -101,7 +102,7 @@ describe('MovieListPage', () => {
 
     it('restores genre, year, sort and page from the URL', async () => {
       serveMovies(() => moviePage([movieSummary(41)], { page: 2, totalElements: 81, totalPages: 5 }));
-      renderMovieList(['/movies?genre=Drama&year=2019&sort=title&page=3']);
+      renderMovieList(['/titles?genre=Drama&year=2019&sort=title&page=3']);
 
       await screen.findByRole('heading', { level: 2, name: 'Movie 41' });
       expect(apiQueries()).toEqual([{ page: '2', size: '20', genre: 'Drama', year: '2019', sort: 'title' }]);
@@ -116,7 +117,7 @@ describe('MovieListPage', () => {
 
     it('never sends a genre from the URL whose slug is empty', async () => {
       serveMovies(() => moviePage([movieSummary(1)]));
-      renderMovieList(['/movies?genre=!!!&sort=title']);
+      renderMovieList(['/titles?genre=!!!&sort=title']);
 
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
       expect(apiQueries()).toEqual([{ page: '0', size: '20', sort: 'title' }]);
@@ -136,7 +137,7 @@ describe('MovieListPage', () => {
       expect(screen.getByText('<b>Bold</b> · <a href="javascript:alert(3)">Link</a>')).toBeInTheDocument();
       expect(container.querySelector('img, script, b')).toBeNull();
       const anchors = [...container.querySelectorAll('a')];
-      expect(anchors.map((anchor) => anchor.getAttribute('href'))).toEqual([`/movies/${movieSummary(1).id}`]);
+      expect(anchors.map((anchor) => anchor.getAttribute('href'))).toEqual([`/titles/${movieSummary(1).id}`]);
       expect((window as Window & { __xss?: number }).__xss).toBeUndefined();
     });
   });
@@ -154,13 +155,13 @@ describe('MovieListPage', () => {
 
       expect(await screen.findByRole('heading', { level: 2, name: 'Movie 2' })).toBeInTheDocument();
       expect(lastApiQuery()).toEqual({ page: '1', size: '20', sort: 'latest' });
-      expect(currentLocation()).toBe('/movies?page=2');
+      expect(currentLocation()).toBe('/titles?page=2');
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
       expect(listHeading()).toHaveFocus();
       expect(liveRegion()).toHaveTextContent('45 movies, page 2 of 3');
 
       fireEvent.click(screen.getByRole('button', { name: 'History back' }));
-      await waitFor(() => expect(currentLocation()).toBe('/movies'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles'));
       expect(await screen.findByRole('heading', { level: 2, name: 'Movie 1' })).toBeInTheDocument();
     });
 
@@ -193,7 +194,7 @@ describe('MovieListPage', () => {
       serveMovies((query) => (query.page === '2'
         ? held.respond(query, moviePage([movieSummary(41)], { page: 2, totalElements: 41, totalPages: 3 }))
         : moviePage([], { page: Number(query.page), totalElements: 41, totalPages: 3 })));
-      renderMovieList(['/elsewhere', '/movies?page=9']);
+      renderMovieList(['/elsewhere', '/titles?page=9']);
 
       expect(await screen.findByRole('heading', { level: 2, name: "This page doesn't exist" })).toBeInTheDocument();
       expect(screen.getByText('This list ends at page 3.')).toBeInTheDocument();
@@ -203,7 +204,7 @@ describe('MovieListPage', () => {
       goToLastPage.focus();
       fireEvent.click(goToLastPage);
 
-      await waitFor(() => expect(currentLocation()).toBe('/movies?page=3'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles?page=3'));
       expect(listHeading()).toHaveFocus();
       // The empty result of page 9 is not kept on screen while page 3 loads.
       await waitFor(() => expect(held.count()).toBe(1));
@@ -228,14 +229,14 @@ describe('MovieListPage', () => {
         totalElements: 81,
         totalPages: 5
       }));
-      renderMovieList(['/elsewhere', '/movies?sort=title&page=3']);
+      renderMovieList(['/elsewhere', '/titles?sort=title&page=3']);
 
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
       const genre = screen.getByLabelText('Genre');
       fireEvent.change(genre, { target: { value: '  Drama ' } });
       fireEvent.keyDown(genre, { key: 'Enter' });
 
-      await waitFor(() => expect(currentLocation()).toBe('/movies?genre=Drama&sort=title'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles?genre=Drama&sort=title'));
       await waitFor(() => expect(lastApiQuery()).toEqual({
         page: '0',
         size: '20',
@@ -250,7 +251,7 @@ describe('MovieListPage', () => {
 
     it('applies a typed genre with Apply, not while typing or when the field loses focus', async () => {
       serveMovies(() => moviePage([movieSummary(1)]));
-      renderMovieList(['/movies?page=2']);
+      renderMovieList(['/titles?page=2']);
 
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
       const genre = screen.getByLabelText('Genre');
@@ -260,12 +261,12 @@ describe('MovieListPage', () => {
       const apply = screen.getByRole('button', { name: 'Apply' });
       apply.focus();
       await settle();
-      expect(currentLocation()).toBe('/movies?page=2');
+      expect(currentLocation()).toBe('/titles?page=2');
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
       fireEvent.click(apply);
 
-      await waitFor(() => expect(currentLocation()).toBe('/movies?genre=Drama'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles?genre=Drama'));
       await waitFor(() => expect(lastApiQuery()).toEqual({ page: '0', size: '20', genre: 'Drama', sort: 'latest' }));
       expect(apiQueries().some((query) => query.genre === 'Dra')).toBe(false);
     });
@@ -286,13 +287,13 @@ describe('MovieListPage', () => {
 
       fireEvent.click(card);
 
-      await waitFor(() => expect(currentLocation()).toBe(`/movies/${movieSummary(2).id}`));
+      await waitFor(() => expect(currentLocation()).toBe(`/titles/${movieSummary(2).id}`));
       expect(apiQueries().some((query) => query.genre !== undefined)).toBe(false);
     });
 
     it('clears the filters from the empty result while another genre is still being typed', async () => {
       serveMovies((query) => (query.genre ? moviePage([]) : moviePage([movieSummary(1)])));
-      renderMovieList(['/movies?genre=Western']);
+      renderMovieList(['/titles?genre=Western']);
 
       const heading = await screen.findByRole('heading', { level: 2, name: 'No movies match these filters' });
       const genre = screen.getByLabelText('Genre');
@@ -305,7 +306,7 @@ describe('MovieListPage', () => {
 
       fireEvent.click(clear);
 
-      await waitFor(() => expect(currentLocation()).toBe('/movies'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles'));
       expect(await screen.findByRole('heading', { level: 2, name: 'Movie 1' })).toBeInTheDocument();
       // The form is rebuilt by the clear, so the field is looked up again.
       expect(screen.getByLabelText('Genre')).toHaveValue('');
@@ -314,7 +315,7 @@ describe('MovieListPage', () => {
 
     it('drops a year typed but never applied when the empty result clears the filters', async () => {
       serveMovies((query) => (query.genre ? moviePage([]) : moviePage([movieSummary(1)])));
-      renderMovieList(['/movies?genre=Western']);
+      renderMovieList(['/titles?genre=Western']);
 
       const heading = await screen.findByRole('heading', { level: 2, name: 'No movies match these filters' });
       fireEvent.change(screen.getByLabelText('Year'), { target: { value: '20x' } });
@@ -322,14 +323,14 @@ describe('MovieListPage', () => {
       fireEvent.change(screen.getByLabelText('Year'), { target: { value: '2000' } });
       fireEvent.click(within(heading.parentElement as HTMLElement).getByRole('button', { name: 'Clear filters' }));
 
-      await waitFor(() => expect(currentLocation()).toBe('/movies'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles'));
       expect(screen.getByLabelText('Year')).toHaveValue('');
       expect(screen.getByLabelText('Genre')).toHaveValue('');
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
       // A later sort change must not bring the discarded year back.
       fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'title' } });
-      await waitFor(() => expect(currentLocation()).toBe('/movies?sort=title'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles?sort=title'));
       await waitFor(() => expect(lastApiQuery()).toEqual({ page: '0', size: '20', sort: 'title' }));
       expect(apiQueries().some((query) => query.year !== undefined)).toBe(false);
     });
@@ -369,7 +370,7 @@ describe('MovieListPage', () => {
       await settle();
 
       expect(screen.getByRole('alert')).toHaveTextContent('Enter a genre with at least one Latin letter (a–z) or digit.');
-      expect(currentLocation()).toBe('/movies');
+      expect(currentLocation()).toBe('/titles');
       expect(apiQueries()).toEqual([{ page: '0', size: '20', sort: 'latest' }]);
     });
 
@@ -379,12 +380,12 @@ describe('MovieListPage', () => {
         totalElements: 45,
         totalPages: 3
       }));
-      renderMovieList(['/movies?page=2']);
+      renderMovieList(['/titles?page=2']);
 
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
       fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'title' } });
 
-      await waitFor(() => expect(currentLocation()).toBe('/movies?sort=title'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles?sort=title'));
       await waitFor(() => expect(lastApiQuery()).toEqual({ page: '0', size: '20', sort: 'title' }));
     });
 
@@ -400,12 +401,12 @@ describe('MovieListPage', () => {
       expect(screen.getByText('Enter a year from 1888 to 2100.')).toBeInTheDocument();
       expect(year).toHaveAttribute('aria-invalid', 'true');
       expect(year).toHaveAccessibleDescription('Enter a year from 1888 to 2100.');
-      expect(currentLocation()).toBe('/movies');
+      expect(currentLocation()).toBe('/titles');
 
       fireEvent.change(year, { target: { value: '1999' } });
       fireEvent.keyDown(year, { key: 'Enter' });
 
-      await waitFor(() => expect(currentLocation()).toBe('/movies?year=1999'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles?year=1999'));
       expect(year).toHaveAttribute('aria-invalid', 'false');
       await waitFor(() => expect(lastApiQuery()).toEqual({
         page: '0',
@@ -417,14 +418,14 @@ describe('MovieListPage', () => {
 
     it('clears genre and year from the toolbar, keeps the sort and focuses Genre', async () => {
       serveMovies(() => moviePage([movieSummary(1)], { totalElements: 45, totalPages: 3 }));
-      renderMovieList(['/movies?genre=Drama&year=2019&sort=title&page=2']);
+      renderMovieList(['/titles?genre=Drama&year=2019&sort=title&page=2']);
 
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
       const clear = screen.getByRole('button', { name: 'Clear filters' });
       clear.focus();
       fireEvent.click(clear);
 
-      await waitFor(() => expect(currentLocation()).toBe('/movies?sort=title'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles?sort=title'));
       expect(screen.getByLabelText('Genre')).toHaveValue('');
       expect(screen.getByLabelText('Year')).toHaveValue('');
       expect(screen.getByRole('button', { name: 'Clear filters' })).toBeDisabled();
@@ -433,7 +434,7 @@ describe('MovieListPage', () => {
 
     it('updates the filter fields when history changes the URL', async () => {
       serveMovies(() => moviePage([movieSummary(1)]));
-      renderMovieList(['/movies?genre=Drama&year=2001', '/movies?genre=Comedy']);
+      renderMovieList(['/titles?genre=Drama&year=2001', '/titles?genre=Comedy']);
 
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
       expect(screen.getByLabelText('Genre')).toHaveValue('Comedy');
@@ -480,7 +481,7 @@ describe('MovieListPage', () => {
       serveMovies((query) => (query.genre
         ? moviePage([])
         : held.respond(query, moviePage([movieSummary(1)]))));
-      renderMovieList(['/movies?genre=Western&sort=title&page=2']);
+      renderMovieList(['/titles?genre=Western&sort=title&page=2']);
 
       const heading = await screen.findByRole('heading', { level: 2, name: 'No movies match these filters' });
       expect(liveRegion()).toHaveTextContent('0 movies');
@@ -488,7 +489,7 @@ describe('MovieListPage', () => {
       clear.focus();
       fireEvent.click(clear);
 
-      await waitFor(() => expect(currentLocation()).toBe('/movies?sort=title'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles?sort=title'));
       expect(listHeading()).toHaveFocus();
       // The previous empty result is not shown while the unfiltered list loads.
       await waitFor(() => expect(held.count()).toBe(1));
@@ -534,10 +535,10 @@ describe('MovieListPage', () => {
   describe('filters rejected with 400', () => {
     it('clears only the filter the API names and keeps the other one', async () => {
       serveMovies((query) => (query.genre ? validationError(['genre']) : moviePage([movieSummary(1)])));
-      renderMovieList(['/movies?genre=Western&year=2000&sort=title&page=2']);
+      renderMovieList(['/titles?genre=Western&year=2000&sort=title&page=2']);
 
       expect(await screen.findByRole('heading', { level: 2, name: 'Movie 1' })).toBeInTheDocument();
-      expect(currentLocation()).toBe('/movies?year=2000&sort=title');
+      expect(currentLocation()).toBe('/titles?year=2000&sort=title');
       expect(screen.getByRole('alert')).toHaveTextContent(FILTERS_CLEARED);
       expect(apiQueries()).toEqual([
         { page: '1', size: '20', genre: 'Western', year: '2000', sort: 'title' },
@@ -551,18 +552,18 @@ describe('MovieListPage', () => {
 
     it('clears genre and year when the error names no field', async () => {
       serveMovies((query) => (query.genre || query.year ? validationError([]) : moviePage([movieSummary(1)])));
-      renderMovieList(['/movies?genre=Western&year=2000&sort=title&page=2']);
+      renderMovieList(['/titles?genre=Western&year=2000&sort=title&page=2']);
 
       expect(await screen.findByRole('heading', { level: 2, name: 'Movie 1' })).toBeInTheDocument();
-      expect(currentLocation()).toBe('/movies?sort=title');
+      expect(currentLocation()).toBe('/titles?sort=title');
       expect(screen.getByRole('alert')).toHaveTextContent(FILTERS_CLEARED);
       expect(screen.getByLabelText('Genre')).toHaveValue('');
       expect(screen.getByLabelText('Year')).toHaveValue('');
     });
 
     it.each([
-      ['names only another field', '/movies?genre=Western', ['page']],
-      ['arrives without any filter', '/movies?sort=title&page=2', []]
+      ['names only another field', '/titles?genre=Western', ['page']],
+      ['arrives without any filter', '/titles?sort=title&page=2', []]
     ])('shows the error when a 400 %s', async (_label, entry, fields) => {
       serveMovies(() => validationError(fields));
       renderMovieList([entry]);
@@ -583,7 +584,7 @@ describe('MovieListPage', () => {
           totalElements: 45,
           totalPages: 3
         })));
-      const { unmount } = renderMovieList(['/movies?genre=Western']);
+      const { unmount } = renderMovieList(['/titles?genre=Western']);
 
       expect(await screen.findByRole('alert')).toHaveTextContent(FILTERS_CLEARED);
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
@@ -593,18 +594,18 @@ describe('MovieListPage', () => {
       expect(screen.queryByText(FILTERS_CLEARED)).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: 'History back' }));
-      await waitFor(() => expect(currentLocation()).toBe('/movies'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles'));
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
       expect(screen.queryByText(FILTERS_CLEARED)).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: 'History forward' }));
-      await waitFor(() => expect(currentLocation()).toBe('/movies?page=2'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles?page=2'));
       fireEvent.click(screen.getByRole('button', { name: 'History back' }));
-      await waitFor(() => expect(currentLocation()).toBe('/movies'));
+      await waitFor(() => expect(currentLocation()).toBe('/titles'));
       expect(screen.queryByText(FILTERS_CLEARED)).not.toBeInTheDocument();
 
       unmount();
-      renderMovieList(['/movies']);
+      renderMovieList(['/titles']);
       await screen.findByRole('heading', { level: 2, name: 'Movie 1' });
       expect(screen.queryByText(FILTERS_CLEARED)).not.toBeInTheDocument();
     });
@@ -684,7 +685,7 @@ describe('MovieListPage', () => {
   });
 });
 
-function renderMovieList(initialEntries: string[] = ['/movies']) {
+function renderMovieList(initialEntries: string[] = ['/titles']) {
   persistSession(regularUser);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
@@ -698,7 +699,7 @@ function renderMovieList(initialEntries: string[] = ['/movies']) {
           <LocationProbe />
           <Routes>
             <Route element={<ProtectedRoute />}>
-              <Route path="/movies" element={<MovieListPage />} />
+              <Route path="/titles" element={<MovieListPage />} />
             </Route>
             <Route path="*" element={<p>Somewhere else</p>} />
           </Routes>
@@ -818,7 +819,7 @@ function movieSummary(index: number, overrides: Partial<MovieSummary> = {}): Mov
     posterUrl: null,
     genres: ['Drama'],
     averageRating: null,
-    status: 'PUBLISHED',
+    status: 'PUBLISHED', contentType: 'MOVIE',
     videoStatus: null,
     ...overrides
   };
@@ -850,7 +851,7 @@ function validationError(fields: string[]): Response {
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
+  return new Response(JSON.stringify(titlePayloadFixture(body)), {
     status,
     headers: { 'Content-Type': 'application/json' }
   });

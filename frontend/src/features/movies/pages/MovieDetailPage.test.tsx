@@ -1,3 +1,4 @@
+import { titlePayloadFixture } from '../../../test/titleWireFixture';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
@@ -77,11 +78,11 @@ describe('MovieDetailPage through AppRoutes', () => {
         .toBeTruthy();
     }
     const [input, init] = fetchMock.mock.calls[0];
-    expect(new URL(String(input), 'http://localhost').pathname).toBe(`/api/v1/movies/${movieId}`);
+    expect(new URL(String(input), 'http://localhost').pathname).toBe(`/api/v1/titles/${movieId}`);
     expect(init?.method ?? 'GET').toBe('GET');
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer access-token');
     expect(init?.signal).toBeInstanceOf(AbortSignal);
-    expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/movies');
+    expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/titles');
   });
 
   const availabilityCases = [
@@ -110,7 +111,7 @@ describe('MovieDetailPage through AppRoutes', () => {
     }
     if (canWatch) {
       const watch = screen.getByRole('link', { name: 'Watch' });
-      expect(watch).toHaveAttribute('href', `/movies/${movieId}/watch`);
+      expect(watch).toHaveAttribute('href', `/watch/${movieId}`);
       watch.focus();
       expect(watch).toHaveFocus();
       fireEvent.click(watch);
@@ -150,7 +151,7 @@ describe('MovieDetailPage through AppRoutes', () => {
       userRating: 4,
       inWatchlist: true,
       playbackProgress: {
-        movieId,
+        episodeId: movieId,
         currentSeconds: 754,
         durationSeconds: 5400,
         finished: false,
@@ -173,7 +174,7 @@ describe('MovieDetailPage through AppRoutes', () => {
   it('keeps zero progress and completed state when optional progress fields are absent', async () => {
     fetchMock.mockResolvedValue(jsonResponse({
       ...movieDetail(),
-      playbackProgress: { movieId, currentSeconds: 0, finished: true }
+      playbackProgress: { episodeId: movieId, currentSeconds: 0, finished: true }
     }));
     renderDetail();
 
@@ -246,7 +247,7 @@ describe('MovieDetailPage through AppRoutes', () => {
     expect(fieldValue('Slug')).toHaveTextContent('the-long-night');
     expect(fieldValue('Video status')).toHaveTextContent('FAILED');
     expect(within(panel).getByRole('link', { name: 'Edit movie' }))
-      .toHaveAttribute('href', `/admin/movies/${movieId}/edit`);
+      .toHaveAttribute('href', `/admin/titles/${movieId}/edit`);
     expect(screen.getByText(/not visible to viewers/i)).toBeInTheDocument();
   });
 
@@ -274,22 +275,22 @@ describe('MovieDetailPage through AppRoutes', () => {
 
   it('normalizes an upper-case UUID for the request and query cache', async () => {
     fetchMock.mockResolvedValue(jsonResponse(movieDetail({ videoStatus: 'READY' })));
-    const { queryClient } = renderDetail({ path: `/movies/${movieId.toUpperCase()}` });
+    const { queryClient } = renderDetail({ path: `/titles/${movieId.toUpperCase()}` });
 
     await screen.findByRole('heading', { level: 1, name: 'The Long Night' });
-    expect(requestPaths()).toEqual([`/api/v1/movies/${movieId}`]);
+    expect(requestPaths()).toEqual([`/api/v1/titles/${movieId}`]);
     expect(queryClient.getQueryData(movieKeys.detail(movieId))).toMatchObject({ id: movieId });
     expect(queryClient.getQueryData(movieKeys.detail(movieId.toUpperCase()))).toBeUndefined();
-    expect(screen.getByRole('link', { name: 'Watch' })).toHaveAttribute('href', `/movies/${movieId}/watch`);
+    expect(screen.getByRole('link', { name: 'Watch' })).toHaveAttribute('href', `/watch/${movieId}`);
   });
 
   it.each(['not-a-uuid', '1234', `${movieId}x`, '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e2g'])(
     'shows movie not found without a request for invalid id %s', async (id) => {
-      renderDetail({ path: `/movies/${id}` });
+      renderDetail({ path: `/titles/${id}` });
 
       expect(await screen.findByRole('heading', { level: 1, name: 'Movie not found' })).toBeInTheDocument();
       expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-      expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/movies');
+      expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/titles');
       expect(fetchMock).not.toHaveBeenCalled();
       expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     }
@@ -303,7 +304,7 @@ describe('MovieDetailPage through AppRoutes', () => {
     renderDetail({ queryClient: createQueryClient() });
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Movie not found' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/movies');
+    expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/titles');
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -406,7 +407,7 @@ describe('MovieDetailPage through AppRoutes', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next movie' }));
     await waitFor(() => expect(requestPaths()).toEqual([
-      `/api/v1/movies/${movieId}`, `/api/v1/movies/${nextMovieId}`
+      `/api/v1/titles/${movieId}`, `/api/v1/titles/${nextMovieId}`
     ]));
     expect(screen.queryByRole('heading', { name: 'The Long Night' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Watch' })).not.toBeInTheDocument();
@@ -441,10 +442,10 @@ describe('MovieDetailPage through AppRoutes', () => {
   });
 
   it('requires sign-in before fetching a detail route and preserves the intended URL', async () => {
-    renderDetail({ user: null, path: `/movies/${movieId}?source=catalog#cast` });
+    renderDetail({ user: null, path: `/titles/${movieId}?source=catalog#cast` });
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeInTheDocument();
-    expect(screen.getByTestId('location-state')).toHaveTextContent(`/movies/${movieId}?source=catalog#cast`);
+    expect(screen.getByTestId('location-state')).toHaveTextContent(`/titles/${movieId}?source=catalog#cast`);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -462,7 +463,7 @@ describe('MovieDetailPage through AppRoutes', () => {
     await waitFor(() => expect(requestPaths()).toHaveLength(3));
     expect(await screen.findByRole('heading', { level: 1, name: 'The Long Night' })).toBeInTheDocument();
     expect(requestPaths()).toEqual([
-      `/api/v1/movies/${movieId}`, '/api/v1/auth/refresh', `/api/v1/movies/${movieId}`
+      `/api/v1/titles/${movieId}`, '/api/v1/auth/refresh', `/api/v1/titles/${movieId}`
     ]);
     expect(authorizationOf(2)).toBe('Bearer rotated-access-token');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -531,7 +532,7 @@ describe('MovieDetailPage through AppRoutes', () => {
 });
 
 function renderDetail({
-  path = `/movies/${movieId}`,
+  path = `/titles/${movieId}`,
   user = regularUser,
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }: { path?: string; user?: UserProfile | null; queryClient?: QueryClient } = {}) {
@@ -559,7 +560,7 @@ function LocationProbe() {
   return (
     <>
       <span className="sr-only" data-testid="location-state">{JSON.stringify(location.state)}</span>
-      <button onClick={() => navigate(`/movies/${nextMovieId}`)} type="button">Next movie</button>
+      <button onClick={() => navigate(`/titles/${nextMovieId}`)} type="button">Next movie</button>
     </>
   );
 }
@@ -589,7 +590,7 @@ function movieDetail(overrides: Partial<MovieDetail> = {}): MovieDetail {
     posterUrl: null,
     genres: ['Drama', 'Thriller'],
     averageRating: null,
-    status: 'PUBLISHED',
+    status: 'PUBLISHED', contentType: 'MOVIE',
     videoStatus: null,
     maturityRating: 'T16',
     people: [
@@ -599,7 +600,7 @@ function movieDetail(overrides: Partial<MovieDetail> = {}): MovieDetail {
     ],
     userRating: null,
     inWatchlist: false,
-    playbackProgress: null,
+    playbackProgress: null, episode: null,
     ...overrides
   };
 }
@@ -640,5 +641,5 @@ function apiError(status: number, code: string, message: string, requestId?: str
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(titlePayloadFixture(body)), { status, headers: { 'Content-Type': 'application/json' } });
 }

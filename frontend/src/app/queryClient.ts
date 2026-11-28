@@ -5,7 +5,7 @@ const MAX_QUERY_RETRIES = 1;
 
 /**
  * Retries a failed query once, except for answers that a retry cannot change: a 4xx such as
- * 404 MOVIE_NOT_FOUND or 403 shows at once, and a request whose session was replaced stays silent.
+ * 404 TITLE_NOT_FOUND or 403 shows at once, and a request whose session was replaced stays silent.
  */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
   if (failureCount >= MAX_QUERY_RETRIES) {

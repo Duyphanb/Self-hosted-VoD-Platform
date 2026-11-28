@@ -1,3 +1,4 @@
+import { titlePayloadFixture } from '../../test/titleWireFixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient, ApiRequestError } from '../../lib/api/client';
 import {
@@ -15,7 +16,7 @@ const payload: UpsertMovieRequest = {
   genres: ['Drama'], people: [{ personId, role: 'DIRECTOR' }], status: 'DRAFT'
 };
 const movie: MovieDetail = {
-  ...payload, id: movieId, people: [{ personId, role: 'DIRECTOR', name: 'Director' }],
+  ...payload, contentType: 'MOVIE', episode: null, id: movieId, people: [{ personId, role: 'DIRECTOR', name: 'Director' }],
   posterUrl: null, averageRating: null, videoStatus: null, userRating: null, inWatchlist: false, playbackProgress: null
 };
 const fetchMock = vi.fn<typeof fetch>();
@@ -32,7 +33,7 @@ describe('admin movie API', () => {
     const signal = new AbortController().signal;
     const result = await listAdminMovies(client(), { page: 0, size: 20, status: null, sort: 'latest' }, signal);
     expect(result.items[0].status).toBe('DRAFT');
-    expect(path()).toBe('/api/v1/admin/movies');
+    expect(path()).toBe('/api/v1/admin/titles');
     expect(Object.fromEntries(url().searchParams)).toEqual({ page: '0', size: '20', sort: 'latest' });
     expect(fetchMock.mock.calls[0][1]?.signal).toBe(signal);
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token');
@@ -50,17 +51,19 @@ describe('admin movie API', () => {
     const result = method === 'POST'
       ? await createMovie(client(), payload)
       : await updateMovie(client(), movieId.toUpperCase(), payload);
-    expect(result).toEqual(movie);
-    expect(path()).toBe(method === 'POST' ? '/api/v1/movies' : `/api/v1/movies/${movieId}`);
+    expect(result).toEqual({
+      ...movie, episode: { id: movieId, titleId: movieId, ordinal: 1, displayLabel: '1', name: null, videoStatus: null, progress: null }
+    });
+    expect(path()).toBe(method === 'POST' ? '/api/v1/admin/titles' : `/api/v1/admin/titles/${movieId}`);
     expect(fetchMock.mock.calls[0][1]?.method).toBe(method);
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual(payload);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual(method === 'POST' ? { ...payload, contentType: 'MOVIE' } : payload);
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Content-Type')).toBe('application/json');
   });
 
   it('archives with DELETE and accepts the empty 204 response', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     await expect(archiveMovie(client(), movieId.toUpperCase())).resolves.toBeUndefined();
-    expect(path()).toBe(`/api/v1/movies/${movieId}`);
+    expect(path()).toBe(`/api/v1/admin/titles/${movieId}`);
     expect(fetchMock.mock.calls[0][1]?.method).toBe('DELETE');
     expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined();
   });
@@ -123,5 +126,5 @@ function client(): ApiClient {
 function url(): URL { return new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost'); }
 function path(): string { return url().pathname; }
 function json(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(titlePayloadFixture(value)), { status, headers: { 'Content-Type': 'application/json' } });
 }

@@ -66,7 +66,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 class SessionSecurityIntegrationTests extends CookieAuthFixture implements PostgresTestDatabase {
 
     private static final String PROFILE = "/api/v1/users/me";
-    private static final String ADMIN = "/api/v1/admin/movies";
+    private static final String ADMIN = "/api/v1/admin/titles";
     private static final String HLS = "/hls/video-assets/00000000-0000-0000-0000-000000000001/master.m3u8";
 
     @Autowired JwtEncoder encoder;
@@ -152,7 +152,7 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         jdbc.update("delete from user_roles where user_id=? and role_id=(select id from roles where name='ROLE_ADMIN')",
                 user);
         mvc.perform(get(ADMIN).header("Authorization", authorization)).andExpect(status().isForbidden());
-        mvc.perform(post("/api/v1/movies").header("Authorization", authorization)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/admin/titles").header("Authorization", authorization)).andExpect(status().isForbidden());
         verify(reader, times(3)).read(sessionId(), true);
         verify(reader, times(1)).readAsync(sessionId(), false);
     }
@@ -164,7 +164,7 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         jdbc.update("insert into user_roles (user_id, role_id) select ?, id from roles where name='ROLE_ADMIN'", user);
         mvc.perform(get(PROFILE).header("Authorization", userAuthorization)).andExpect(status().isOk());
         mvc.perform(get(ADMIN).header("Authorization", userAuthorization)).andExpect(status().isForbidden());
-        mvc.perform(post("/api/v1/movies").header("Authorization", userAuthorization))
+        mvc.perform(post("/api/v1/admin/titles").header("Authorization", userAuthorization))
                 .andExpect(status().isForbidden());
     }
 

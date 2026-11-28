@@ -87,16 +87,16 @@ export function AdminMovieListPage() {
           <tbody className="grid gap-4 md:table-row-group">
             {query.data.items.map((movie) => (
               <tr className="grid gap-3 rounded-lg border border-slate-700 bg-slate-900 p-4 md:table-row" key={movie.id}>
-                <td className="min-w-0 break-words md:p-3"><Link className="font-semibold text-sky-300 underline" state={{ returnTo }} to={`/admin/movies/${movie.id}/edit`}>{movie.title}</Link></td>
+                <td className="min-w-0 break-words md:p-3"><Link className="font-semibold text-sky-300 underline" state={{ returnTo }} to={`/admin/titles/${movie.id}/edit`}>{movie.title}</Link></td>
                 <td className="md:p-3"><span className="text-slate-400 md:hidden">Year: </span>{movie.releaseYear ?? 'Not specified'}</td>
                 <td className="break-words md:p-3"><span className="text-slate-400 md:hidden">Genres: </span>{movie.genres.join(' · ') || 'No genres listed'}</td>
                 <td className="md:p-3"><span className="text-slate-400 md:hidden">Status: </span><MovieStatusBadge status={movie.status} /></td>
                 <td className="md:p-3"><span className="text-slate-400 md:hidden">Video: </span><VideoStatusBadge status={movie.videoStatus} /></td>
                 <td className="md:p-3">
                   <div className="flex flex-wrap items-center gap-3">
-                    <Link aria-label={`View ${movie.title}`} className="text-sky-300 underline" to={`/movies/${movie.id}`}>View</Link>
-                    <Link aria-label={`Edit ${movie.title}`} className="text-sky-300 underline" state={{ returnTo }} to={`/admin/movies/${movie.id}/edit`}>Edit</Link>
-                    <Link aria-label={`Upload video for ${movie.title}`} className="text-sky-300 underline" state={{ returnTo }} to={`/admin/movies/${movie.id}/video`}>Upload video</Link>
+                    <Link aria-label={`View ${movie.title}`} className="text-sky-300 underline" to={`/titles/${movie.id}`}>View</Link>
+                    <Link aria-label={`Edit ${movie.title}`} className="text-sky-300 underline" state={{ returnTo }} to={`/admin/titles/${movie.id}/edit`}>Edit</Link>
+                    <Link aria-label={`Upload video for ${movie.title}`} className="text-sky-300 underline" state={{ returnTo }} to={`/admin/titles/${movie.id}/video`}>Upload video</Link>
                     {movie.status !== 'ARCHIVED' ? (
                       <button
                         aria-label={`Archive ${movie.title}`}
@@ -130,7 +130,7 @@ export function AdminMovieListPage() {
     <section aria-labelledby="admin-movies-heading" className="grid gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-3xl font-semibold text-white focus:outline-none" id="admin-movies-heading" ref={headingRef} tabIndex={-1}>Movies</h1>
-        <Link className={primaryButtonClass} state={{ returnTo }} to="/admin/movies/new">New movie</Link>
+        <Link className={primaryButtonClass} state={{ returnTo }} to="/admin/titles/new">New movie</Link>
       </div>
       <p aria-atomic="true" aria-label="Movie updates" className={notice ? 'rounded-md border border-emerald-700 bg-emerald-950/50 p-3 text-sm text-emerald-200' : 'sr-only'} role="status">{statusText}</p>
       <div className="flex flex-wrap items-center justify-between gap-4">

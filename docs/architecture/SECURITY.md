@@ -73,12 +73,12 @@ Roles:
 Backend enforcement:
 
 - Public endpoints: register, login, refresh.
-- Authenticated user endpoints: profile, movies, playback, HLS, progress, watchlist, history, rating, search.
-- Admin endpoints: movie mutation, admin movie listing, genre and people management, upload, video asset listing, encoding retry.
+- Authenticated user endpoints include profile, titles, episodes, playback, HLS and progress.
+- Admin endpoints include title management, genre and people management, upload and video asset listing.
 
-Admin endpoints are enforced by URL authorization rules (`/api/v1/admin/**`, `POST /api/v1/movies`, and `PUT`/`DELETE /api/v1/movies/{movieId}`; user sub-resources such as `/api/v1/movies/{movieId}/progress` are not admin endpoints) before request validation runs, with method-level `@PreAuthorize` as a second layer. A `ROLE_USER` request to an admin endpoint returns 403 even when its body is invalid or the target does not exist. A multipart body sent to any operation other than `POST /api/v1/admin/movies/{movieId}/video`, including other methods on that path, is rejected with 400 `MALFORMED_REQUEST` before authentication; the upload operation authorizes from headers before its multipart body is parsed.
+URL authorization for `/api/v1/admin/**` runs before body validation, with method-level `@PreAuthorize` as a second layer. A `ROLE_USER` request returns 403 even when its body is invalid or the target is missing. Multipart requests outside `POST /api/v1/admin/episodes/{episodeId}/video` return 400 `MALFORMED_REQUEST` before authentication. The upload operation authorizes from headers before parsing multipart.
 
-Planned ([ADR-013](adr/ADR-013.md), #244): with S2 the catalog writes move under `/api/v1/admin/titles`, so the URL rules become `/api/v1/admin/**` alone, and the multipart exception moves to `POST /api/v1/admin/episodes/{episodeId}/video`. The old upload path is not kept: the previous SPA build checks the movie before sending a body, so an upload whose check starts after the cutover stops before the removed path. A stale tab whose check succeeded before it gets `400 MALFORMED_REQUEST` (body within the 1 MiB edge limit) or `413` and nothing is stored; reloading recovers ([ADR-013 D13](adr/ADR-013.md#d13-migration-cutover-and-rollback)). With S5, `/hls/admin/**` joins the admin URL rules ([Admin Preview routes](#planned-admin-preview-routes-adr-013)).
+During the fenced cutover, an open V7 tab that starts its title check after the switch receives 404 and stops the upload. If its title check completed before the switch, the legacy upload request is subject to the default 1 MiB edge limit and returns 400 or 413 without storing an object. Reloading gets the current SPA. [ADR-013 D13](adr/ADR-013.md#d13-migration-cutover-and-rollback)
 
 Frontend route guards are UX only. Backend authorization is the security boundary.
 
@@ -94,24 +94,12 @@ User-owned data must always be scoped by authenticated user ID:
 
 Users must not read or modify another user's records.
 
-## Movie Visibility
+## Title and Episode Visibility
 
-Movie visibility is the catalog access rule referenced by playback and HLS checks. See [ADR-009](adr/ADR-009.md).
-
-- A caller without `ROLE_ADMIN` can see only `PUBLISHED` movies.
-- Except for the admin operations listed below, every endpoint that takes a `movieId`, read or write (detail, playback, HLS, progress, rating, watchlist), returns the same 404 for a `DRAFT` or `ARCHIVED` movie as for a missing movie. The response must not reveal that the movie exists.
-- User-facing lists (movies, search, suggestions, watchlist, history, continue watching) contain only `PUBLISHED` movies, for every role.
-- `ROLE_ADMIN` sees and manages every status on `GET`, `PUT`, and `DELETE /api/v1/movies/{movieId}` and under `/api/v1/admin/**`; these are the only exceptions to the 404 rule. For admins, playback, HLS, progress, rating, and watchlist on non-published movies still return 404 unless a later decision changes this rule.
-- The catalog module owns one visibility check that other modules reuse; modules must not re-implement the status rule.
-
-### Planned: content visibility (ADR-013)
-
-[ADR-013 D3](adr/ADR-013.md#d3-visibility-at-three-levels) replaces this section's movie rule when its slices land (titles and episodes in S2, franchises in S3):
-
-- An episode is visible when it and its title are `PUBLISHED`; a title when it is `PUBLISHED`. A franchise's status gates only its own page, strip, references in title responses and name in search, never its titles. The episode of a `MOVIE` title is always `PUBLISHED` and follows its title.
-- Every viewer endpoint that takes a franchise, title or episode ID returns the same 404 for a hidden item as for a missing one, and lists and counts contain only visible items, for every role.
-- The admin exceptions are exactly `/api/v1/admin/**` and, from S5, `/hls/admin/**`. `GET /api/v1/titles/{titleId}` is published-only for every role.
-- The catalog module keeps one visibility check for all three levels.
+- Viewer routes and aggregates include only `PUBLISHED` titles for every role. A viewer episode must also be `PUBLISHED`. For a `MOVIE` the single episode is `PUBLISHED` and follows title visibility.
+- Title and episode viewer requests return the same 404 for hidden and missing records. Playback, authenticated HLS and progress apply the same visibility checks for every role.
+- Admin reads and writes on `/api/v1/admin/**` can address unpublished titles. The catalog module defines the visibility rule shared by the viewer flows.
+- S3 adds franchise visibility and S5 adds the separate `/hls/admin/**` preview authorization. [ADR-013 D3](adr/ADR-013.md#d3-visibility-at-three-levels)
 
 ### Planned: search and discovery (ADR-015)
 

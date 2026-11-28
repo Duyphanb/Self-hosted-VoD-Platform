@@ -327,6 +327,7 @@ class WorkerOrchestrationIntegrationTests {
 
     private Job seed(Path fixture, int attempt) throws Exception {
         UUID movie = UUID.randomUUID();
+        UUID episode = UUID.randomUUID();
         UUID asset = UUID.randomUUID();
         String rawKey = "s5w7/" + asset + ".mp4";
         try (var stream = Files.newInputStream(fixture)) {
@@ -337,13 +338,17 @@ class WorkerOrchestrationIntegrationTests {
         try (var connection = database.getConnection()) {
             connection.setAutoCommit(false);
             update(connection, """
-                    INSERT INTO titles(id, title, slug, description, status, created_at, updated_at)
-                    VALUES (?, 'Fixture', ?, 'Fixture', 'DRAFT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    INSERT INTO titles(id, title, slug, description, status, created_at, updated_at, content_type)
+                    VALUES (?, 'Fixture', ?, 'Fixture', 'DRAFT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'MOVIE')
                     """, movie, "s5w7-" + movie);
             update(connection, """
-                    INSERT INTO video_assets(id, movie_id, raw_bucket, raw_object_key, status, created_at, updated_at)
+                    INSERT INTO episodes(id, title_id, ordinal, display_label, status, created_at, updated_at)
+                    VALUES (?, ?, 1, '1', 'PUBLISHED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, episode, movie);
+            update(connection, """
+                    INSERT INTO video_assets(id, episode_id, raw_bucket, raw_object_key, status, created_at, updated_at)
                     VALUES (?, ?, ?, ?, 'QUEUED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, asset, movie, RAW, rawKey);
+                    """, asset, episode, RAW, rawKey);
             insert(connection, job, "QUEUED");
             connection.commit();
         }

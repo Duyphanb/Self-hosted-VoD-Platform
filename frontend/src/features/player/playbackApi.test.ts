@@ -8,7 +8,8 @@ const OTHER_ASSET_ID = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 describe('decodePlaybackInfo', () => {
   it('accepts the playback info of the API contract', () => {
     expect(decodePlaybackInfo(playback())).toEqual({
-      movieId: MOVIE_ID,
+      episodeId: MOVIE_ID,
+      titleId: MOVIE_ID,
       videoAssetId: ASSET_ID,
       hlsManifestUrl: `/hls/video-assets/${ASSET_ID}/master.m3u8`,
       resumeSeconds: 754,
@@ -25,7 +26,7 @@ describe('decodePlaybackInfo', () => {
   it.each([
     ['another origin', `https://media.example.net/hls/video-assets/${ASSET_ID}/master.m3u8`],
     ['a protocol-relative URL', `//media.example.net/hls/video-assets/${ASSET_ID}/master.m3u8`],
-    ['another path', `/api/v1/movies/${MOVIE_ID}`],
+    ['another path', `/api/v1/titles/${MOVIE_ID}`],
     ['the playlist of another asset', `/hls/video-assets/${OTHER_ASSET_ID}/master.m3u8`]
   ])('rejects a manifest URL on %s, so the bearer token never leaves the HLS proxy', (_name, hlsManifestUrl) => {
     expect(decodePlaybackInfo({ ...playback(), hlsManifestUrl })).toBeNull();
@@ -34,7 +35,7 @@ describe('decodePlaybackInfo', () => {
   it.each([
     ['a negative resume position', { resumeSeconds: -1 }],
     ['a fractional resume position', { resumeSeconds: 1.5 }],
-    ['a movie ID that is not a UUID', { movieId: 'movie-1' }]
+    ['a movie ID that is not a UUID', { episodeId: 'movie-1' }]
   ])('rejects %s', (_name, override) => {
     expect(decodePlaybackInfo({ ...playback(), ...override })).toBeNull();
   });
@@ -42,7 +43,8 @@ describe('decodePlaybackInfo', () => {
 
 function playback() {
   return {
-    movieId: MOVIE_ID,
+    episodeId: MOVIE_ID,
+    titleId: MOVIE_ID,
     videoAssetId: ASSET_ID,
     status: 'READY',
     hlsManifestUrl: `/hls/video-assets/${ASSET_ID}/master.m3u8`,

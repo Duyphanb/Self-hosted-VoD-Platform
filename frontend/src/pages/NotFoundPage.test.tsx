@@ -17,14 +17,14 @@ describe('NotFoundPage', () => {
     renderPage(
       <NotFoundPage
         description="It may have been removed."
-        link={{ to: '/movies', label: 'Back to movies' }}
+        link={{ to: '/titles', label: 'Back to movies' }}
         title="Movie not found"
       />
     );
 
     expect(screen.getByRole('heading', { level: 1, name: 'Movie not found' })).toBeInTheDocument();
     expect(screen.getByText('It may have been removed.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/movies');
+    expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/titles');
     expect(screen.queryByText('Page not found')).not.toBeInTheDocument();
   });
 });

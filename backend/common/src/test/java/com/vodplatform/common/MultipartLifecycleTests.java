@@ -16,6 +16,7 @@ import com.vodplatform.auth.persistence.AuthSessionRepository;
 import com.vodplatform.common.contract.ApiContract;
 import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import com.vodplatform.common.web.MultipartRouteFilter;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
 import com.vodplatform.encoding.messaging.PublishOutcome;
@@ -100,7 +101,8 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
 
     private static final UUID MOVIE = UUID.fromString("6f1d2a4e-8c3b-4a5f-9e7d-1b2c3d4e5f60");
 
-    private static final String UPLOAD = "/api/v1/admin/movies/" + MOVIE + "/video";
+    private static final UUID EPISODE = UUID.fromString("db1dba50-be0b-4a4c-9c56-f933a85be310");
+    private static final String UPLOAD = "/api/v1/admin/episodes/" + EPISODE + "/video";
 
     private static final String PARAMETER_PROBE = "X-Test-Read-Parameters";
 
@@ -159,8 +161,8 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
         Integer movies = jdbc.queryForObject("select count(*) from titles where id=?", Integer.class, MOVIE);
         if (movies == null || movies == 0) {
             jdbc.update(
-                    "insert into titles (id,title,slug,description,status,created_at,updated_at)"
-                            + " values (?,?,?,?,?,?,?)",
+                    "insert into titles (id,title,slug,description,status,created_at,updated_at,content_type)"
+                            + " values (?,?,?,?,?,?,?,'MOVIE')",
                     MOVIE,
                     "Multipart fixture",
                     "multipart-" + MOVIE,
@@ -168,6 +170,10 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
                     "DRAFT",
                     Timestamp.from(Instant.now()),
                     Timestamp.from(Instant.now()));
+            jdbc.update("""
+                    insert into episodes (id,title_id,ordinal,display_label,status,created_at,updated_at)
+                    values (?, ?, 1, '1', 'PUBLISHED', now(), now())
+                    """, EPISODE, MOVIE);
         }
         when(publisher.confirmTimeout()).thenReturn(Duration.ofSeconds(5));
         when(publisher.publish(any(), any())).thenReturn(new PublishOutcome.Confirmed());
@@ -190,13 +196,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
 
     @AfterEach
     void removeUploads() {
-        jdbc.update(
-                "delete from encoding_jobs where video_asset_id in "
-                        + "(select id from video_assets where movie_id=?)",
-                MOVIE);
-        jdbc.update("delete from video_assets where movie_id=?", MOVIE);
-        // The database outlives this class's context: leave no movie for other classes' lists.
-        jdbc.update("delete from titles where id=?", MOVIE);
+        EpisodeFixtures.removeTitle(jdbc, MOVIE);
     }
 
     private String bearer(String role) {
@@ -444,7 +444,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
         }
         Integer assets =
                 jdbc.queryForObject(
-                        "select count(*) from video_assets where movie_id=?", Integer.class, MOVIE);
+                        "select count(*) from video_assets where episode_id=?", Integer.class, EPISODE);
         assertThat(assets).isZero();
     }
 
@@ -486,15 +486,15 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
 
     @Test
     void missingMovieIsNotFoundAfterValidationAndCleanedUp() throws Exception {
-        String path = "/api/v1/admin/movies/" + UUID.randomUUID() + "/video";
-        var error = contractError(path, upload(path, "upload.missing_1", body(20)), 404, "MOVIE_NOT_FOUND");
+        String path = "/api/v1/admin/episodes/" + UUID.randomUUID() + "/video";
+        var error = contractError(path, upload(path, "upload.missing_1", body(20)), 404, "EPISODE_NOT_FOUND");
         assertThat(error.get("requestId").asString()).isEqualTo("upload.missing_1");
         assertEmpty();
     }
 
     @Test
     void invalidMovieIdIsRejectedBeforeParsing() throws Exception {
-        String path = "/api/v1/admin/movies/not-a-uuid/video";
+        String path = "/api/v1/admin/episodes/not-a-uuid/video";
         assertNoSpool(
                 () -> {
                     var error =
@@ -564,7 +564,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
     @ParameterizedTest
     @ValueSource(strings = {"anonymous", "ROLE_USER"})
     void wellFormedUnauthorizedUploadIsRejectedBeforeAnySpooling(String role) throws Exception {
-        for (String path : List.of(UPLOAD, "/api/v1/admin/movies/" + UUID.randomUUID() + "/video")) {
+        for (String path : List.of(UPLOAD, "/api/v1/admin/episodes/" + UUID.randomUUID() + "/video")) {
             var builder =
                     request(path)
                             .header("Content-Type", CONTENT_TYPE)

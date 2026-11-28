@@ -65,6 +65,9 @@ function barWidthPercent(): number {
 
 function renderCard(progress: Pick<PlaybackProgress, 'currentSeconds' | 'durationSeconds'>) {
   const item: ContinueWatchingItem = {
+    kind: 'RESUME',
+    episode: { id: MOVIE_ID, titleId: MOVIE_ID, ordinal: 1, displayLabel: '1', name: null,
+      videoStatus: 'READY', progress: null },
     movie: {
       id: MOVIE_ID,
       title: 'The Long Night',
@@ -74,11 +77,11 @@ function renderCard(progress: Pick<PlaybackProgress, 'currentSeconds' | 'duratio
       posterUrl: null,
       genres: ['Drama'],
       averageRating: null,
-      status: 'PUBLISHED',
+      status: 'PUBLISHED', contentType: 'MOVIE',
       videoStatus: 'READY'
     },
     progress: {
-      movieId: MOVIE_ID,
+      episodeId: MOVIE_ID,
       finished: false,
       lastPlayedAt: '2026-11-22T10:00:00Z',
       ...progress

@@ -263,7 +263,7 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies",
+          "raw": "{{baseUrl}}/api/v1/admin/titles",
           "host": [
             "{{baseUrl}}"
           ],
@@ -271,7 +271,7 @@
             "api",
             "v1",
             "admin",
-            "movies"
+            "titles"
           ]
         }
       }
@@ -750,14 +750,15 @@
           }
         ],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies",
+          "raw": "{{baseUrl}}/api/v1/admin/titles",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies"
+            "admin",
+            "titles"
           ]
         },
         "body": {
@@ -783,8 +784,8 @@
               "  pm.response.to.have.status(404);",
               "});",
               "",
-              "pm.test('Error code is MOVIE_NOT_FOUND', () => {",
-              "  pm.expect(pm.response.json().code).to.equal('MOVIE_NOT_FOUND');",
+              "pm.test('Error code is TITLE_NOT_FOUND', () => {",
+              "  pm.expect(pm.response.json().code).to.equal('TITLE_NOT_FOUND');",
               "});"
             ]
           }
@@ -804,14 +805,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies/{{movieId}}",
+          "raw": "{{baseUrl}}/api/v1/titles/{{movieId}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies",
+            "titles",
             "{{movieId}}"
           ]
         }
@@ -850,14 +851,15 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies/{{movieId}}",
+          "raw": "{{baseUrl}}/api/v1/admin/titles/{{movieId}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies",
+            "admin",
+            "titles",
             "{{movieId}}"
           ]
         }
@@ -898,14 +900,15 @@
           }
         ],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies",
+          "raw": "{{baseUrl}}/api/v1/admin/titles",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies"
+            "admin",
+            "titles"
           ]
         },
         "body": {
@@ -958,14 +961,15 @@
           }
         ],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies/{{movieId}}",
+          "raw": "{{baseUrl}}/api/v1/admin/titles/{{movieId}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies",
+            "admin",
+            "titles",
             "{{movieId}}"
           ]
         },
@@ -1015,14 +1019,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies/{{movieId}}",
+          "raw": "{{baseUrl}}/api/v1/titles/{{movieId}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies",
+            "titles",
             "{{movieId}}"
           ]
         }
@@ -1063,14 +1067,15 @@
           }
         ],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies",
+          "raw": "{{baseUrl}}/api/v1/admin/titles",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies"
+            "admin",
+            "titles"
           ]
         },
         "body": {
@@ -1119,14 +1124,15 @@
           }
         ],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies",
+          "raw": "{{baseUrl}}/api/v1/admin/titles",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies"
+            "admin",
+            "titles"
           ]
         },
         "body": {
@@ -1175,14 +1181,15 @@
           }
         ],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies",
+          "raw": "{{baseUrl}}/api/v1/admin/titles",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies"
+            "admin",
+            "titles"
           ]
         },
         "body": {
@@ -1234,14 +1241,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies?genre={{genreSlug}}&sort=title&size=20",
+          "raw": "{{baseUrl}}/api/v1/titles?genre={{genreSlug}}&sort=title&size=20",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies"
+            "titles"
           ],
           "query": [
             {
@@ -1295,14 +1302,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies?genre={{genreSlug}}&sort=title&size=1&page=1",
+          "raw": "{{baseUrl}}/api/v1/titles?genre={{genreSlug}}&sort=title&size=1&page=1",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies"
+            "titles"
           ],
           "query": [
             {
@@ -1360,14 +1367,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies?genre={{genreSlug}}&sort=title&size=1&page=9",
+          "raw": "{{baseUrl}}/api/v1/titles?genre={{genreSlug}}&sort=title&size=1&page=9",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies"
+            "titles"
           ],
           "query": [
             {
@@ -1419,14 +1426,15 @@
         "method": "DELETE",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies/{{movieId}}",
+          "raw": "{{baseUrl}}/api/v1/admin/titles/{{movieId}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies",
+            "admin",
+            "titles",
             "{{movieId}}"
           ]
         }
@@ -1444,8 +1452,8 @@
               "  pm.response.to.have.status(404);",
               "});",
               "",
-              "pm.test('Error code is MOVIE_NOT_FOUND', () => {",
-              "  pm.expect(pm.response.json().code).to.equal('MOVIE_NOT_FOUND');",
+              "pm.test('Error code is TITLE_NOT_FOUND', () => {",
+              "  pm.expect(pm.response.json().code).to.equal('TITLE_NOT_FOUND');",
               "});"
             ]
           }
@@ -1465,14 +1473,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies/{{movieId}}",
+          "raw": "{{baseUrl}}/api/v1/titles/{{movieId}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies",
+            "titles",
             "{{movieId}}"
           ]
         }
@@ -1513,14 +1521,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies?genre={{genreSlug}}&sort=title&size=20",
+          "raw": "{{baseUrl}}/api/v1/titles?genre={{genreSlug}}&sort=title&size=20",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies"
+            "titles"
           ],
           "query": [
             {
@@ -1577,7 +1585,7 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies?status=ARCHIVED&size=100",
+          "raw": "{{baseUrl}}/api/v1/admin/titles?status=ARCHIVED&size=100",
           "host": [
             "{{baseUrl}}"
           ],
@@ -1585,7 +1593,7 @@
             "api",
             "v1",
             "admin",
-            "movies"
+            "titles"
           ],
           "query": [
             {
@@ -1629,7 +1637,7 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies",
+          "raw": "{{baseUrl}}/api/v1/admin/titles",
           "host": [
             "{{baseUrl}}"
           ],
@@ -1637,7 +1645,7 @@
             "api",
             "v1",
             "admin",
-            "movies"
+            "titles"
           ]
         }
       }
@@ -1681,14 +1689,15 @@
           }
         ],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies/{{movieId}}",
+          "raw": "{{baseUrl}}/api/v1/admin/titles/{{movieId}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies",
+            "admin",
+            "titles",
             "{{movieId}}"
           ]
         },
@@ -1715,8 +1724,8 @@
               "  pm.response.to.have.status(404);",
               "});",
               "",
-              "pm.test('Error code is MOVIE_NOT_FOUND', () => {",
-              "  pm.expect(pm.response.json().code).to.equal('MOVIE_NOT_FOUND');",
+              "pm.test('Error code is TITLE_NOT_FOUND', () => {",
+              "  pm.expect(pm.response.json().code).to.equal('TITLE_NOT_FOUND');",
               "});"
             ]
           }
@@ -1736,14 +1745,14 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/movies/{{movieId}}",
+          "raw": "{{baseUrl}}/api/v1/titles/{{movieId}}",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "movies",
+            "titles",
             "{{movieId}}"
           ]
         }

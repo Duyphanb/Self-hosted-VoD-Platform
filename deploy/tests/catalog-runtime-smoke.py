@@ -24,10 +24,11 @@ import uuid
 # The developer's own local stack (name: in deploy/docker-compose.yml) is never a smoke target.
 LOCAL_STACK_PROJECT = "vod-platform"
 DEPLOYMENT_README = Path(__file__).resolve().parents[2] / "docs" / "deployment" / "README.md"
-MOVIES = "/api/v1/movies"
+VIEWER_TITLES = "/api/v1/titles"
+ADMIN_TITLES = "/api/v1/admin/titles"
 SUMMARY_KEYS = {"id", "title", "slug", "description", "releaseYear", "posterUrl", "genres", "averageRating",
-                "status", "videoStatus"}
-DETAIL_KEYS = SUMMARY_KEYS | {"maturityRating", "people", "userRating", "inWatchlist"}
+                "status", "contentType", "partLabel", "episodeCount", "playableEpisodeCount", "availability"}
+DETAIL_KEYS = SUMMARY_KEYS | {"maturityRating", "people", "userRating", "inWatchlist", "episode"}
 CONTROL = "must not contain control characters"
 SLUG_PATTERN = 'must match "^[a-z0-9]+(-[a-z0-9]+)*$"'
 AMBIGUOUS_NAME = "is required because more than one person has this name"
@@ -108,8 +109,8 @@ def main():
         return body
 
     def create(body, token):
-        status, created = call(MOVIES, body, token)
-        assert status == 201 and set(created) == DETAIL_KEYS, "Create did not return a MovieDetail"
+        status, created = call(ADMIN_TITLES, body, token)
+        assert status == 201 and set(created) == DETAIL_KEYS, "Create did not return a TitleDetail"
         return created
 
     def is_api_error(response, status, code, field_errors=None):
@@ -139,16 +140,16 @@ def main():
     missing_id = str(uuid.uuid4())
     for token in (viewer, candidate):
         for method, path, body, raw in [
-            ("POST", MOVIES, movie("smoke-forbidden"), None),
-            ("POST", MOVIES, movie("smoke-forbidden", title="Nul\x00title"), None),
-            ("POST", MOVIES, None, b"{"),
-            ("PUT", f"{MOVIES}/{missing_id}", movie("smoke-forbidden"), None),
-            ("PUT", f"{MOVIES}/not-a-uuid", {}, None),
-            ("DELETE", f"{MOVIES}/{missing_id}", None, None),
-            ("DELETE", f"{MOVIES}/not-a-uuid", None, None),
+            ("POST", ADMIN_TITLES, movie("smoke-forbidden"), None),
+            ("POST", ADMIN_TITLES, movie("smoke-forbidden", title="Nul\x00title"), None),
+            ("POST", ADMIN_TITLES, None, b"{"),
+            ("PUT", f"{ADMIN_TITLES}/{missing_id}", movie("smoke-forbidden"), None),
+            ("PUT", f"{ADMIN_TITLES}/not-a-uuid", {}, None),
+            ("DELETE", f"{ADMIN_TITLES}/{missing_id}", None, None),
+            ("DELETE", f"{ADMIN_TITLES}/not-a-uuid", None, None),
         ]:
             assert is_api_error(call(path, body, token, method, raw), 403, "FORBIDDEN"), f"{method} must be 403"
-    assert is_api_error(call(MOVIES, movie("smoke-anonymous")), 401, "UNAUTHORIZED")
+    assert is_api_error(call(ADMIN_TITLES, movie("smoke-anonymous")), 401, "UNAUTHORIZED")
     assert sql("SELECT count(*) FROM titles;") == "0"
     print("PASS ROLE_USER gets 403 on admin movie writes, even with NUL, malformed or missing targets")
 
@@ -165,7 +166,7 @@ def main():
     assert sql(f"SELECT auth_epoch FROM users WHERE lower(email) = lower('{admin_email}');") == "1"
     assert sql("SELECT count(*) FROM user_roles ur JOIN users u ON u.id = ur.user_id JOIN roles r ON r.id = ur.role_id "
                f"WHERE r.name = 'ROLE_ADMIN' AND lower(u.email) = '{viewer_email}';") == "0"
-    assert is_api_error(call(MOVIES, movie("smoke-forbidden"), candidate), 401, "UNAUTHORIZED")
+    assert is_api_error(call(ADMIN_TITLES, movie("smoke-forbidden"), candidate), 401, "UNAUTHORIZED")
     assert call("/api/v1/auth/refresh", cookie=candidate_session.refresh_cookie)[0] == 401
     admin = login(admin_email)["accessToken"]
     assert "ROLE_ADMIN" in call("/api/v1/users/me", token=admin)[1]["roles"]
@@ -178,10 +179,14 @@ def main():
     assert [(person["name"], person["role"]) for person in published["people"]] == [
         ("Victor Vũ", "DIRECTOR"), ("Kaity Nguyễn", "ACTOR")]
     published_id = str(uuid.UUID(published["id"]))
+    episode = published["episode"]
+    assert uuid.UUID(episode["id"]) != uuid.UUID(published_id)
+    assert episode["titleId"] == published_id and episode["ordinal"] == 1
+    assert published["contentType"] == "MOVIE" and published["episodeCount"] == 1
     draft = create(movie("smoke-draft", status="DRAFT"), admin)
     draft_id = str(uuid.UUID(draft["id"]))
     assert sql(f"SELECT status FROM titles WHERE id = '{published_id}';") == "PUBLISHED"
-    print("PASS admin creates movies with genres and credits (201 MovieDetail)")
+    print("PASS admin creates movies with genres and credits (201 TitleDetail)")
 
     # ---- NUL and other control characters ----
     for field, body, message in [
@@ -193,28 +198,28 @@ def main():
         ("people[0].name", movie("smoke-nul", people=[{"name": "Nul\x00Name", "role": "ACTOR"}]), CONTROL),
         ("slug", movie("smoke\x00nul", title="Smoke slug with NUL"), SLUG_PATTERN),
     ]:
-        for method, path in (("POST", MOVIES), ("PUT", f"{MOVIES}/{published_id}")):
+        for method, path in (("POST", ADMIN_TITLES), ("PUT", f"{ADMIN_TITLES}/{published_id}")):
             assert is_api_error(call(path, body, admin, method), 400, "VALIDATION_ERROR",
                                 [{"field": field, "message": message}]), f"{method} with NUL in {field} must be 400"
     for raw in (b"{", json.dumps(movie("smoke-nul", releaseYear=2019.5)).encode()):
-        assert is_api_error(call(MOVIES, token=admin, raw=raw), 400, "MALFORMED_REQUEST")
+        assert is_api_error(call(ADMIN_TITLES, token=admin, raw=raw), 400, "MALFORMED_REQUEST")
     # An enum ordinal is never read as a constant: status 1 or "1" would otherwise publish the movie.
     for body in (movie("smoke-nul", status=1), movie("smoke-nul", status="1"), movie("smoke-nul", maturityRating=0),
                  movie("smoke-nul", people=[{"name": "Smoke Ordinal", "role": "1"}])):
-        for method, path in (("POST", MOVIES), ("PUT", f"{MOVIES}/{published_id}")):
+        for method, path in (("POST", ADMIN_TITLES), ("PUT", f"{ADMIN_TITLES}/{published_id}")):
             assert is_api_error(call(path, body, admin, method), 400, "MALFORMED_REQUEST"), \
                 f"{method} with an enum ordinal must be 400 MALFORMED_REQUEST"
     assert sql("SELECT count(*) FROM titles;") == "2"
     assert sql("SELECT count(*) FROM genres;") == "3" and sql("SELECT count(*) FROM people;") == "2"
-    assert call(f"{MOVIES}/{published_id}", token=admin)[1] == published, "A rejected PUT changed the movie"
+    assert call(f"{ADMIN_TITLES}/{published_id}", token=admin)[1] == published, "A rejected PUT changed the movie"
     print("PASS NUL and control characters return 400 VALIDATION_ERROR and store nothing")
 
     # ---- visibility, archive and restore ----
-    status, not_found = call(f"{MOVIES}/{missing_id}", token=viewer)
-    assert is_api_error((status, not_found), 404, "MOVIE_NOT_FOUND")
+    status, not_found = call(f"{VIEWER_TITLES}/{missing_id}", token=viewer)
+    assert is_api_error((status, not_found), 404, "TITLE_NOT_FOUND")
 
     def hidden_like_missing(movie_id, token):
-        status, error = call(f"{MOVIES}/{movie_id}", token=token)
+        status, error = call(f"{VIEWER_TITLES}/{movie_id}", token=token)
         return status == 404 and without_timestamp(error) == without_timestamp(not_found)
 
     def list_ids(path, token):
@@ -222,51 +227,51 @@ def main():
         assert status == 200
         return [item["id"] for item in page["items"]], {item["status"] for item in page["items"]}
 
-    assert call(f"{MOVIES}/{published_id}", token=viewer) == (200, published)
-    assert hidden_like_missing(draft_id, viewer)
-    assert call(f"{MOVIES}/{draft_id}", token=admin) == (200, draft)
+    assert call(f"{VIEWER_TITLES}/{published_id}", token=viewer) == (200, published)
+    assert all(hidden_like_missing(draft_id, token) for token in (viewer, admin))
+    assert call(f"{ADMIN_TITLES}/{draft_id}", token=admin) == (200, draft)
     for token in (viewer, admin):
-        assert list_ids(f"{MOVIES}?size=100", token) == ([published_id], {"PUBLISHED"})
-    assert set(list_ids("/api/v1/admin/movies?size=100", admin)[0]) == {published_id, draft_id}
+        assert list_ids(f"{VIEWER_TITLES}?size=100", token) == ([published_id], {"PUBLISHED"})
+    assert set(list_ids("/api/v1/admin/titles?size=100", admin)[0]) == {published_id, draft_id}
 
     for _ in range(2):
-        status, _, content = request(f"{MOVIES}/{published_id}", token=admin, method="DELETE")
+        status, _, content = request(f"{ADMIN_TITLES}/{published_id}", token=admin, method="DELETE")
         assert status == 204 and content == b"", "Archive must return 204 without a body, also when repeated"
     assert sql(f"SELECT status FROM titles WHERE id = '{published_id}';") == "ARCHIVED"
     assert sql(f"SELECT (SELECT count(*) FROM title_genres WHERE title_id = '{published_id}') || ',' || "
                f"(SELECT count(*) FROM title_credits WHERE title_id = '{published_id}');") == "2,2"
     assert hidden_like_missing(published_id, viewer)
-    assert call(f"{MOVIES}/{published_id}", token=admin) == (200, dict(published, status="ARCHIVED"))
+    assert call(f"{ADMIN_TITLES}/{published_id}", token=admin) == (200, dict(published, status="ARCHIVED"))
     for token in (viewer, admin):
-        assert list_ids(f"{MOVIES}?size=100", token) == ([], set())
-    assert list_ids("/api/v1/admin/movies?status=ARCHIVED", admin)[0] == [published_id]
+        assert list_ids(f"{VIEWER_TITLES}?size=100", token) == ([], set())
+    assert list_ids("/api/v1/admin/titles?status=ARCHIVED", admin)[0] == [published_id]
 
-    status, restored = call(f"{MOVIES}/{published_id}", movie("smoke-published", genres=["Hài"]), admin, "PUT")
+    status, restored = call(f"{ADMIN_TITLES}/{published_id}", movie("smoke-published", genres=["Hài"]), admin, "PUT")
     assert status == 200 and restored["status"] == "PUBLISHED" and restored["genres"] == ["Hài"]
-    assert call(f"{MOVIES}/{published_id}", token=viewer) == (200, restored)
-    status, archived_by_put = call(f"{MOVIES}/{draft_id}", movie("smoke-draft", status="ARCHIVED"), admin, "PUT")
+    assert call(f"{VIEWER_TITLES}/{published_id}", token=viewer) == (200, restored)
+    status, archived_by_put = call(f"{ADMIN_TITLES}/{draft_id}", movie("smoke-draft", status="ARCHIVED"), admin, "PUT")
     assert status == 200 and archived_by_put["status"] == "ARCHIVED" and hidden_like_missing(draft_id, viewer)
-    assert is_api_error(call(f"{MOVIES}/{missing_id}", movie("smoke-missing"), admin, "PUT"), 404, "MOVIE_NOT_FOUND")
-    assert is_api_error(call(f"{MOVIES}/{missing_id}", token=admin, method="DELETE"), 404, "MOVIE_NOT_FOUND")
+    assert is_api_error(call(f"{ADMIN_TITLES}/{missing_id}", movie("smoke-missing"), admin, "PUT"), 404, "TITLE_NOT_FOUND")
+    assert is_api_error(call(f"{ADMIN_TITLES}/{missing_id}", token=admin, method="DELETE"), 404, "TITLE_NOT_FOUND")
     print("PASS admin versus user visibility, idempotent soft archive and restore")
 
     # ---- slug conflicts, including writes racing on ux_titles_slug ----
-    assert is_api_error(call(MOVIES, movie("smoke-published"), admin), 409, "MOVIE_SLUG_CONFLICT")
-    assert is_api_error(call(f"{MOVIES}/{draft_id}", movie("smoke-published"), admin, "PUT"), 409, "MOVIE_SLUG_CONFLICT")
+    assert is_api_error(call(ADMIN_TITLES, movie("smoke-published"), admin), 409, "TITLE_SLUG_CONFLICT")
+    assert is_api_error(call(f"{ADMIN_TITLES}/{draft_id}", movie("smoke-published"), admin, "PUT"), 409, "TITLE_SLUG_CONFLICT")
     for round_number in range(3):
         slug = f"smoke-race-{round_number}"
         # Each request also brings the same new genre and person, so the loser must fail on the slug.
         body = movie(slug, genres=[f"Race Genre {round_number}"],
                      people=[{"name": f"Race Person {round_number}", "role": "ACTOR"}])
-        statuses = sorted(status for status, _ in concurrent([lambda: call(MOVIES, body, admin)] * 4))
+        statuses = sorted(status for status, _ in concurrent([lambda: call(ADMIN_TITLES, body, admin)] * 4))
         assert statuses == [201, 409, 409, 409], f"Concurrent creates returned {statuses}"
         assert sql(f"SELECT count(*) FROM titles WHERE slug = '{slug}';") == "1"
         left, right = (create(movie(f"smoke-race-{round_number}-{side}"), admin)["id"] for side in ("left", "right"))
         target = movie(f"smoke-race-{round_number}-target")
         statuses = sorted(status for status, _ in concurrent(
-            [lambda movie_id=movie_id: call(f"{MOVIES}/{movie_id}", target, admin, "PUT") for movie_id in (left, right)]))
+            [lambda movie_id=movie_id: call(f"{ADMIN_TITLES}/{movie_id}", target, admin, "PUT") for movie_id in (left, right)]))
         assert statuses == [200, 409], f"Concurrent updates to one new slug returned {statuses}"
-    print("PASS slug conflicts return 409 MOVIE_SLUG_CONFLICT, including concurrent creates and updates")
+    print("PASS slug conflicts return 409 TITLE_SLUG_CONFLICT, including concurrent creates and updates")
 
     # ---- concurrent PUTs never return 500 ----
     def assert_no_server_error(responses, allowed):
@@ -289,9 +294,9 @@ def main():
                         genres=genres[index:] + genres[:index],
                         people=[{"name": name, "role": "ACTOR"} for name in people[index:] + people[:index]])
                   for index in range(8 if round_number else 6)]
-        responses = concurrent([lambda body=body: call(f"{MOVIES}/{published_id}", body, admin, "PUT") for body in bodies])
+        responses = concurrent([lambda body=body: call(f"{ADMIN_TITLES}/{published_id}", body, admin, "PUT") for body in bodies])
         assert_no_server_error(responses, {200})
-        final = call(f"{MOVIES}/{published_id}", token=admin)[1]
+        final = call(f"{ADMIN_TITLES}/{published_id}", token=admin)[1]
         assert final in [body for _, body in responses], "The stored movie is not one of the written versions"
         assert sql(f"SELECT count(*) FROM title_genres WHERE title_id = '{published_id}';") == str(len(final["genres"]))
         assert sql(f"SELECT count(*) FROM title_credits WHERE title_id = '{published_id}';") == str(len(final["people"]))
@@ -302,7 +307,7 @@ def main():
         genres = [f"Parallel Genre {round_number}-{index}" for index in range(3)]
         people = [f"Parallel Person {round_number}-{index}" for index in range(3)]
         responses = concurrent([
-            lambda index=index, movie_id=movie_id: call(f"{MOVIES}/{movie_id}", movie(
+            lambda index=index, movie_id=movie_id: call(f"{ADMIN_TITLES}/{movie_id}", movie(
                 f"smoke-parallel-{index}", genres=genres[index % 3:] + genres[:index % 3],
                 people=[{"name": name, "role": "ACTOR"} for name in reversed(people[index % 3:] + people[:index % 3])]),
                 admin, "PUT")
@@ -324,11 +329,11 @@ def main():
         assert status == 201
         genre_id = source["id"]
         responses = concurrent([
-            lambda: call(f"{MOVIES}/{published_id}", movie("smoke-published", genres=[old_genre, new_genre], people=[
+            lambda: call(f"{ADMIN_TITLES}/{published_id}", movie("smoke-published", genres=[old_genre, new_genre], people=[
                 {"personId": person_id, "role": "DIRECTOR"}, {"name": new_person, "role": "ACTOR"}]), admin, "PUT"),
-            lambda: call(f"{MOVIES}/{draft_id}", movie("smoke-draft", status="DRAFT", genres=[new_genre, old_genre],
+            lambda: call(f"{ADMIN_TITLES}/{draft_id}", movie("smoke-draft", status="DRAFT", genres=[new_genre, old_genre],
                          people=[{"personId": person_id, "role": "ACTOR"}]), admin, "PUT"),
-            lambda: call(f"{MOVIES}/{published_id}", token=admin, method="DELETE"),
+            lambda: call(f"{ADMIN_TITLES}/{published_id}", token=admin, method="DELETE"),
             lambda: call(f"/api/v1/admin/genres/{genre_id}", {"name": new_genre}, admin, "PUT"),
             lambda: call(f"/api/v1/admin/people/{person_id}", {"name": new_person}, admin, "PUT"),
         ])
@@ -338,7 +343,7 @@ def main():
         # The rename loses with 409 when a movie write created the genre name first.
         assert genre_rename[0] == 200 or is_api_error(genre_rename, 409, "GENRE_CONFLICT"), \
             f"Genre rename returned {genre_rename[0]}"
-        final_status = call(f"{MOVIES}/{published_id}", token=admin)[1]["status"]
+        final_status = call(f"{ADMIN_TITLES}/{published_id}", token=admin)[1]["status"]
         assert final_status in ("PUBLISHED", "ARCHIVED")
         assert sql(f"SELECT status FROM titles WHERE id = '{published_id}';") == final_status
         assert sql(f"SELECT count(*) FROM genres WHERE slug = 'rename-genre-{round_number}';") == "1"

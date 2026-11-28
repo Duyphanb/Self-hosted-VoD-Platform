@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useReducer, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiRequestError, AuthenticationSupersededError } from '../../lib/api/client';
 import { useApiClient } from '../auth/AuthContext';
-import { uploadMovieVideo } from './adminMoviesApi';
-import { getMovie, movieKeys } from './moviesApi';
+import { getAdminMovie, uploadMovieVideo } from './adminMoviesApi';
+import { movieKeys } from './moviesApi';
 import { checkVideoFile, classifyUploadFailure, uploadPercent, type UploadFailure } from './videoUpload';
 
 type UploadPhase = 'idle' | 'checking' | 'sending' | 'saving' | 'terminal';
@@ -84,9 +84,16 @@ export function useVideoUpload(movieId: string) {
     statusRef.current?.focus();
     dispatch({ type: 'phase', phase: 'checking' });
     try {
+      let episodeId: string;
       try {
-        // Do not use the display query/cache: every click must check current access.
-        await getMovie(apiClient, movieId, controller.signal);
+        // Every click checks current admin access before constructing the multipart body.
+        const title = await getAdminMovie(apiClient, movieId, controller.signal);
+        if (!title.episode) {
+          finish({ kind: 'notSent', message: 'This title has no episode. The file was not sent.',
+            requestId: null, serverMessage: null });
+          return;
+        }
+        episodeId = title.episode.id;
       } catch (error) {
         if (!mounted.current) return;
         if (error instanceof AuthenticationSupersededError) finish(classifyUploadFailure(error));
@@ -103,7 +110,7 @@ export function useVideoUpload(movieId: string) {
       phase.current = 'sending';
       dispatch({ type: 'phase', phase: 'sending', percent: 0 });
       try {
-        const result = await uploadMovieVideo(apiClient, movieId, state.file, checked.declaredType, {
+        const result = await uploadMovieVideo(apiClient, episodeId, state.file, checked.declaredType, {
           signal: controller.signal,
           onProgress: (loaded, total) => {
             if (mounted.current && phase.current === 'sending') dispatch({ type: 'phase', phase: 'sending', percent: uploadPercent(loaded, total) });

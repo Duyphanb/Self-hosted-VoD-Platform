@@ -18,28 +18,29 @@ import tools.jackson.databind.node.ObjectNode;
  * The movie response schemas of the contract (Issue #153): {@code MovieSummary} and
  * {@code MovieDetail} require every field the API always emits, keep their nullable fields
  * nullable, and bound {@code releaseYear}, {@code averageRating} and {@code userRating} to their
- * input domains. Summaries are checked as items of {@code GET /api/v1/movies} and details as
- * {@code GET /api/v1/movies/{movieId}}; each failing case changes one field of a body that
+ * input domains. Summaries are checked as items of {@code GET /api/v1/titles} and details as
+ * {@code GET /api/v1/titles/{movieId}}; each failing case changes one field of a body that
  * otherwise conforms.
  */
 class MovieResponseSchemaTests {
 
     private static final String MOVIE_ID = "0b6c1f7e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
     private static final String PERSON_ID = "6f1d2a4e-8c3b-4a5f-9e7d-1b2c3d4e5f60";
-    private static final String LIST_PATH = "/api/v1/movies";
+    private static final String LIST_PATH = "/api/v1/titles";
     private static final String DETAIL_PATH = LIST_PATH + "/" + MOVIE_ID;
     private static final String ITEM = "$.items[0]";
     private static final ObjectMapper MAPPER = JsonMapperFactory.getInstance();
 
     private static final List<String> SUMMARY_KEYS = List.of(
             "id", "title", "slug", "description", "releaseYear", "posterUrl", "genres", "averageRating", "status",
-            "videoStatus");
+            "contentType", "partLabel", "episodeCount", "playableEpisodeCount", "availability");
     private static final List<String> DETAIL_ONLY_KEYS = List.of("maturityRating", "people", "userRating", "inWatchlist");
 
     private static final String SUMMARY = """
             {"id": "%s", "title": "Spirited Away", "slug": "spirited-away", "description": "A girl.",
              "releaseYear": 2001, "posterUrl": "https://cdn.example.com/poster.jpg", "genres": ["Animation"],
-             "averageRating": 4.5, "status": "PUBLISHED", "videoStatus": "READY"}
+             "averageRating": 4.5, "status": "PUBLISHED", "contentType": "MOVIE", "partLabel": "Part 1",
+             "episodeCount": 1, "playableEpisodeCount": 1, "availability": "PLAYABLE"}
             """.formatted(MOVIE_ID);
     private static final String DETAIL_ONLY = """
             {"maturityRating": "P", "people": [{"personId": "%s", "name": "Hayao Miyazaki", "role": "DIRECTOR"}],
@@ -78,7 +79,7 @@ class MovieResponseSchemaTests {
             movie.putNull("posterUrl");
             movie.putArray("genres");
             movie.putNull("averageRating");
-            movie.putNull("videoStatus");
+            movie.putNull("partLabel");
         };
         assertThat(listViolations(nullSummaryFields)).isEmpty();
         assertThat(detailViolations(nullSummaryFields.andThen(movie -> {
@@ -93,7 +94,8 @@ class MovieResponseSchemaTests {
     void requiredFieldsThatAreNotNullableRejectNull() {
         // A null enum value can fail both the type and the enum keyword, so every violation is
         // checked for its location instead of expecting exactly one.
-        for (String key : List.of("id", "title", "slug", "description", "genres", "status")) {
+        for (String key : List.of("id", "title", "slug", "description", "genres", "status",
+                "contentType", "episodeCount", "playableEpisodeCount", "availability")) {
             assertThat(listViolations(item -> item.putNull(key))).as(key)
                     .isNotEmpty().allSatisfy(violation -> assertThat(violation).startsWith(ITEM + "." + key));
         }

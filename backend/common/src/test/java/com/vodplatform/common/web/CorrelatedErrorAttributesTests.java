@@ -34,7 +34,7 @@ class CorrelatedErrorAttributesTests {
         request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, status);
         request.setAttribute(
                 RequestDispatcher.ERROR_REQUEST_URI,
-                "/api/v1/admin/movies/6f1d2a4e-8c3b-4a5f-9e7d-1b2c3d4e5f60/video");
+                "/api/v1/admin/episodes/6f1d2a4e-8c3b-4a5f-9e7d-1b2c3d4e5f60/video");
         if (correlated) {
             request.addHeader(RequestIds.HEADER, "upload.page_1");
             RequestIds.resolve(request);

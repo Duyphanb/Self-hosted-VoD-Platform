@@ -1,7 +1,6 @@
 package com.vodplatform.playback.service;
 
-import com.vodplatform.catalog.service.MovieService;
-import com.vodplatform.catalog.service.MovieVisibility;
+import com.vodplatform.catalog.service.EpisodeService;
 import com.vodplatform.encoding.exception.VideoNotReadyException;
 import com.vodplatform.encoding.persistence.VideoAsset;
 import com.vodplatform.encoding.persistence.VideoAssetRepository;
@@ -20,23 +19,23 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class PlaybackService {
 
-    private final MovieService movies;
+    private final EpisodeService episodes;
     private final VideoAssetRepository assets;
     private final ProgressReader progress;
 
-    public PlaybackService(MovieService movies, VideoAssetRepository assets, ProgressReader progress) {
-        this.movies = movies;
+    public PlaybackService(EpisodeService episodes, VideoAssetRepository assets, ProgressReader progress) {
+        this.episodes = episodes;
         this.assets = assets;
         this.progress = progress;
     }
 
     @Transactional(readOnly = true)
-    public PlaybackInfo getPlayback(UUID movieId, UUID userId) {
-        movies.requireVisible(movieId, MovieVisibility.PUBLISHED_ONLY);
-        VideoAsset asset = assets.findCurrentReadyByMovieId(movieId).orElseThrow(VideoNotReadyException::new);
-        int resume = ProgressNormalizer.normalize(progress.find(userId, movieId), asset.getDurationSeconds())
+    public PlaybackInfo getPlayback(UUID episodeId, UUID userId) {
+        UUID titleId = episodes.requireVisible(episodeId).getTitle().getId();
+        VideoAsset asset = assets.findCurrentReadyByEpisodeId(episodeId).orElseThrow(VideoNotReadyException::new);
+        int resume = ProgressNormalizer.normalize(progress.find(userId, episodeId), asset.getDurationSeconds())
                 .resumeSeconds();
-        return new PlaybackInfo(movieId, asset.getId(), VideoAssetStatus.READY.name(),
+        return new PlaybackInfo(episodeId, titleId, asset.getId(), VideoAssetStatus.READY.name(),
                 "/hls/video-assets/" + asset.getId() + "/master.m3u8", asset.getDurationSeconds(), resume);
     }
 }

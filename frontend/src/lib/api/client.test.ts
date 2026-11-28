@@ -53,7 +53,7 @@ describe('ApiClient', () => {
     });
 
     await Promise.all([
-      client.request('/movies', { authenticated: true }),
+      client.request('/titles', { authenticated: true }),
       client.request('/users/me', { authenticated: true })
     ]);
 
@@ -88,7 +88,7 @@ describe('ApiClient', () => {
       onAuthenticationFailure: vi.fn()
     });
 
-    const firstRequest = client.request('/movies', { authenticated: true });
+    const firstRequest = client.request('/titles', { authenticated: true });
     const delayedRequest = client.request('/users/me', { authenticated: true });
     await firstRequest;
     resolveDelayedResponse?.(jsonResponse({ code: 'UNAUTHORIZED' }, 401));

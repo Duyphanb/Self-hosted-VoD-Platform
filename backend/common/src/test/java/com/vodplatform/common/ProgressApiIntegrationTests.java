@@ -10,6 +10,7 @@ import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.common.support.MovieVisibilityRule;
 import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import com.vodplatform.progress.dto.ProgressRequest;
 import com.vodplatform.progress.persistence.WatchHistoryWriter;
 import com.vodplatform.progress.service.ProgressService;
@@ -65,7 +66,7 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
     }
     @AfterEach void cleanup() {
         for (UUID id : movieIds) {
-            jdbc.update("delete from titles where id = ?", id);
+            EpisodeFixtures.removeTitle(jdbc, id);
         }
         for(UUID id:userIds) jdbc.update("delete from users where id=?",id);
     }
@@ -73,16 +74,16 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
     @Test void exactEmptyAndSavedResponsesUseAssetDurationAndMicroseconds() throws Exception {
         mvc.perform(get(path(movie)).header("Authorization",token)).andExpect(status().isOk())
             .andExpect(content().json("""
-                {"movieId":"%s","currentSeconds":0,"durationSeconds":null,"finished":false,"lastPlayedAt":null}
+                {"episodeId":"%s","currentSeconds":0,"durationSeconds":null,"finished":false,"lastPlayedAt":null}
                 """.formatted(movie),JsonCompareMode.STRICT));
         var saved=save(movie,asset,40,false,token);
         saved.andExpect(status().isOk()).andExpect(content().json("""
-                {"movieId":"%s","currentSeconds":40,"durationSeconds":100,"finished":false,
+                {"episodeId":"%s","currentSeconds":40,"durationSeconds":100,"finished":false,
                  "lastPlayedAt":"2026-11-01T00:00:00.123456Z"}
                 """.formatted(movie),JsonCompareMode.STRICT));
         assertThat(progress(user,movie).get("duration_seconds")).isEqualTo(100);
         assertThat(time(progress(user,movie),"last_played_at")).isEqualTo(T0.truncatedTo(ChronoUnit.MICROS));
-        assertThat(jdbc.queryForObject("select count(*) from watch_history where user_id=? and movie_id=?",Integer.class,user,movie)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from watch_history where user_id=? and episode_id=?",Integer.class,user,movie)).isEqualTo(1);
     }
 
     @Test void validationAndAuthenticationPrecedeWrites() throws Exception {
@@ -116,14 +117,14 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
         UUID visibleAsset=asset(f.published(),"READY",100,0);
         for(UUID hidden:f.hidden()) {
             asset(hidden,"READY",100,0);
-            jdbc.update("insert into playback_progress(user_id,movie_id,current_seconds,finished,last_played_at,created_at,updated_at) values(?,?,20,false,?,?,?)",
+            jdbc.update("insert into playback_progress(user_id,episode_id,current_seconds,finished,last_played_at,created_at,updated_at) values(?,?,20,false,?,?,?)",
                 user,hidden,Timestamp.from(T0),Timestamp.from(T0),Timestamp.from(T0));
         }
         String auth=token(user,role);
-        var before=jdbc.queryForList("select * from playback_progress where user_id=? order by movie_id",user);
-        MovieVisibilityRule.assertHiddenLikeMissing(f,id -> mvc.perform(get(path(id)).header("Authorization",auth)));
-        MovieVisibilityRule.assertHiddenLikeMissing(f,id -> save(id,visibleAsset,30,false,auth));
-        assertThat(jdbc.queryForList("select * from playback_progress where user_id=? order by movie_id",user)).isEqualTo(before);
+        var before=jdbc.queryForList("select * from playback_progress where user_id=? order by episode_id",user);
+        MovieVisibilityRule.assertHiddenEpisodeLikeMissing(f,id -> mvc.perform(get(path(id)).header("Authorization",auth)));
+        MovieVisibilityRule.assertHiddenEpisodeLikeMissing(f,id -> save(id,visibleAsset,30,false,auth));
+        assertThat(jdbc.queryForList("select * from playback_progress where user_id=? order by episode_id",user)).isEqualTo(before);
         assertThat(historyCount()).isZero();
         mvc.perform(get(path(f.published())).header("Authorization",auth)).andExpect(status().isOk());
         save(f.published(),visibleAsset,30,false,auth).andExpect(status().isOk());
@@ -177,7 +178,7 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
         var putResult=save(movie,asset,999,false,token).andReturn();
         var getResult=mvc.perform(get(path(movie)).header("Authorization",token)).andReturn();
         assertThat(mapper.readTree(putResult.getResponse().getContentAsString())).isEqualTo(mapper.readTree(getResult.getResponse().getContentAsString()));
-        jdbc.update("delete from video_assets where movie_id=?",movie);
+        jdbc.update("delete from video_assets where episode_id=?",movie);
         mvc.perform(get(path(movie)).header("Authorization",token)).andExpect(jsonPath("$.currentSeconds").value(50));
     }
 
@@ -255,14 +256,14 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
 
             Instant created = existing ? T0.truncatedTo(ChronoUnit.MICROS) : holderTime;
             assertThat(progress(user,movie)).containsExactlyInAnyOrderEntriesOf(Map.of(
-                    "user_id",user, "movie_id",movie, "current_seconds",finalPosition, "duration_seconds",100,
+                    "user_id",user, "episode_id",movie, "current_seconds",finalPosition, "duration_seconds",100,
                     "finished",holderLater, "last_played_at",Timestamp.from(finalTime),
                     "created_at",Timestamp.from(created), "updated_at",Timestamp.from(finalTime)));
             var historyRow = history(user,movie);
             assertThat(historyRow.get("id")).isInstanceOf(UUID.class);
             if (existing) assertThat(historyRow.get("id")).isEqualTo(originalHistoryId);
             assertThat(historyRow).containsExactlyInAnyOrderEntriesOf(Map.of(
-                    "id",historyRow.get("id"), "user_id",user, "movie_id",movie,
+                    "id",historyRow.get("id"), "user_id",user, "episode_id",movie,
                     "started_at",Timestamp.from(created), "last_watched_at",Timestamp.from(finalTime),
                     "completed_at",Timestamp.from(holderTime)));
             verify(history,times((existing ? 1 : 0) + (holderLater ? 1 : 2))).record(any(),any(),anyBoolean(),any());
@@ -309,7 +310,7 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
 
     private String progressJson(int position, boolean finished, Instant time) {
         return """
-                {"movieId":"%s","currentSeconds":%d,"durationSeconds":100,"finished":%s,"lastPlayedAt":"%s"}
+                {"episodeId":"%s","currentSeconds":%d,"durationSeconds":100,"finished":%s,"lastPlayedAt":"%s"}
                 """.formatted(movie,position,finished,time);
     }
 
@@ -317,9 +318,12 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
         return mvc.perform(put(path(id)).header("Authorization",auth).contentType(MediaType.APPLICATION_JSON).content(body(video,position,finished)));
     }
     private String body(UUID id,int position,boolean finished) {return "{\"videoAssetId\":\""+id+"\",\"currentSeconds\":"+position+",\"durationSeconds\":999,\"finished\":"+finished+"}";}
-    private static String path(Object id) {return "/api/v1/movies/"+id+"/progress";}
-    private Map<String,Object> progress(UUID u,UUID m) {return jdbc.queryForMap("select * from playback_progress where user_id=? and movie_id=?",u,m);}
-    private Map<String,Object> history(UUID u,UUID m) {return jdbc.queryForMap("select * from watch_history where user_id=? and movie_id=?",u,m);}
+    private String path(Object id) {
+        Object episode = id instanceof UUID uuid ? EpisodeFixtures.episode(jdbc, uuid) : id;
+        return "/api/v1/episodes/" + episode + "/progress";
+    }
+    private Map<String,Object> progress(UUID u,UUID m) {return jdbc.queryForMap("select * from playback_progress where user_id=? and episode_id=?",u,m);}
+    private Map<String,Object> history(UUID u,UUID m) {return jdbc.queryForMap("select * from watch_history where user_id=? and episode_id=?",u,m);}
     private Instant time(Map<String,Object> row,String col) {return ((Timestamp)row.get(col)).toInstant();}
     private int progressCount() {return jdbc.queryForObject("select count(*) from playback_progress where user_id=?",Integer.class,user);}
     private int historyCount() {return jdbc.queryForObject("select count(*) from watch_history where user_id=?",Integer.class,user);}
@@ -328,12 +332,12 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
         UUID id = UUID.randomUUID();
         movieIds.add(id);
         jdbc.update("""
-                insert into titles (id, title, slug, description, status, created_at, updated_at)
-                values (?, 'Progress fixture', ?, 'Progress fixture', 'PUBLISHED', ?, ?)
+                insert into titles (id, title, slug, description, status, created_at, updated_at, content_type)
+                values (?, 'Progress fixture', ?, 'Progress fixture', 'PUBLISHED', ?, ?, 'MOVIE')
                 """, id, "progress-" + id, Timestamp.from(T0), Timestamp.from(T0));
-        return id;
+        return EpisodeFixtures.addFilmEpisode(jdbc, id);
     }
-    private UUID asset(UUID movie,String state,Integer duration,int second) {UUID id=UUID.randomUUID();jdbc.update("insert into video_assets(id,movie_id,raw_bucket,raw_object_key,status,duration_seconds,created_at,updated_at) values(?,?,'fixture',?,?,?,?,?)",id,movie,id.toString(),state,duration,Timestamp.from(T0.plusSeconds(second)),Timestamp.from(T0));return id;}
+    private UUID asset(UUID movie,String state,Integer duration,int second) {UUID id=UUID.randomUUID();jdbc.update("insert into video_assets(id,episode_id,raw_bucket,raw_object_key,status,duration_seconds,created_at,updated_at) values(?,?,'fixture',?,?,?,?,?)",id,EpisodeFixtures.episode(jdbc, movie),id.toString(),state,duration,Timestamp.from(T0.plusSeconds(second)),Timestamp.from(T0));return id;}
     private String token(UUID user, String role) {
         return "Bearer " + bearerSessions.tokenFor(user, "progress@example.test", role);
     }

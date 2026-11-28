@@ -1,10 +1,10 @@
 package com.vodplatform.progress.service;
 
 import com.vodplatform.catalog.dto.MovieSummaryResponse;
+import com.vodplatform.catalog.dto.EpisodeSummary;
 import com.vodplatform.catalog.service.MovieService;
 import com.vodplatform.catalog.service.MovieVisibility;
 import com.vodplatform.progress.dto.ContinueWatchingItem;
-import com.vodplatform.progress.dto.ProgressResponse;
 import com.vodplatform.progress.persistence.ContinueWatchingReader;
 import java.util.List;
 import java.util.Map;
@@ -29,16 +29,18 @@ public class ContinueWatchingService {
     public List<ContinueWatchingItem> get(UUID userId) {
         var selected = reader.find(userId, MovieVisibility.PUBLISHED_ONLY);
         Map<UUID, MovieSummaryResponse> summaries = catalog.summaries(
-                        selected.stream().map(ContinueWatchingReader.Selection::movieId).toList(),
+                        selected.stream().map(ContinueWatchingReader.Selection::titleId).toList(),
                         MovieVisibility.PUBLISHED_ONLY).stream()
                 .collect(Collectors.toMap(summary -> summary.id(), MovieSummaryResponse::of));
         // Rechecking catalog visibility can remove a movie hidden after the selection snapshot.
-        return selected.stream().filter(row -> summaries.containsKey(row.movieId())).map(row -> {
-            StoredProgress normalized = ProgressNormalizer.normalize(
-                    Optional.of(row.progress()), row.currentDuration()).progress().orElseThrow();
-            return new ContinueWatchingItem(summaries.get(row.movieId()), new ProgressResponse(
-                    row.movieId(), normalized.currentSeconds(), normalized.durationSeconds(),
-                    normalized.finished(), normalized.lastPlayedAt()));
+        return selected.stream().filter(row -> summaries.containsKey(row.titleId())).map(row -> {
+            EpisodeSummary.Progress progress = ProgressNormalizer.normalize(Optional.ofNullable(row.progress()),
+                    row.currentDuration()).progress().map(p -> new EpisodeSummary.Progress(row.episodeId(),
+                    p.currentSeconds(), p.durationSeconds(), p.finished(), p.lastPlayedAt())).orElse(null);
+            var episode = new EpisodeSummary(row.episodeId(), row.titleId(), row.ordinal(), row.displayLabel(),
+                    row.name(), "READY", progress);
+            var kind = row.advance() ? ContinueWatchingItem.Kind.NEXT_EPISODE : ContinueWatchingItem.Kind.RESUME;
+            return new ContinueWatchingItem(kind, summaries.get(row.titleId()), episode, progress);
         }).toList();
     }
 }

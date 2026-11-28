@@ -17,7 +17,7 @@ export interface HlsPlayerProps {
   playbackInfo: PlaybackInfo;
   /**
    * Fetches the playback info again after an HLS 404 or a progress 409 VIDEO_ASSET_NOT_CURRENT
-   * (ADR-011 D7, D13). It rejects with the API error, such as 404 MOVIE_NOT_FOUND or 409 VIDEO_NOT_READY.
+   * (ADR-011 D7, D13). It rejects with the API error, such as 404 EPISODE_NOT_FOUND or 409 VIDEO_NOT_READY.
    */
   reloadPlaybackInfo(): Promise<PlaybackInfo>;
 }

@@ -146,6 +146,7 @@ class CreationOrderPostgresTest {
         String pattern = slugPattern();
         jdbc.update("delete from title_credits where title_id in (select id from titles where slug like ?)", pattern);
         jdbc.update("delete from title_genres where title_id in (select id from titles where slug like ?)", pattern);
+        jdbc.update("delete from episodes where title_id in (select id from titles where slug like ?)", pattern);
         jdbc.update("delete from titles where slug like ?", pattern);
         jdbc.update("delete from people where slug like ?", pattern);
         jdbc.update("delete from genres where slug like ?", pattern);
@@ -432,7 +433,7 @@ class CreationOrderPostgresTest {
     private MovieService movieService(GenreRepository genres, PersonRepository people, CatalogWriteRetry writeRetry) {
         return new MovieService(
                 movieRepository, new MovieAssignmentResolver(genres, people), Clock.systemUTC(), writeRetry,
-                movieIds -> java.util.Map.of());
+                org.mockito.Mockito.mock(VideoStatusLookup.class));
     }
 
     /**

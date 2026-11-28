@@ -104,46 +104,46 @@ class AdminUrlAuthorizationIntegrationTests implements PostgresTestDatabase {
     static Stream<ProbeRequest> adminOperationsWithInvalidInput() {
         return Stream.of(
                 new ProbeRequest(HttpMethod.POST, "/api/v1/admin/probe", INVALID_BODY),
-                new ProbeRequest(HttpMethod.POST, "/api/v1/movies", INVALID_BODY),
-                new ProbeRequest(HttpMethod.PUT, "/api/v1/movies/" + MOVIE_ID, INVALID_BODY),
-                new ProbeRequest(HttpMethod.PUT, "/api/v1/movies/not-a-uuid", INVALID_BODY),
-                new ProbeRequest(HttpMethod.DELETE, "/api/v1/movies/not-a-uuid", null)
+                new ProbeRequest(HttpMethod.POST, "/api/v1/admin/titles", INVALID_BODY),
+                new ProbeRequest(HttpMethod.PUT, "/api/v1/admin/titles/" + MOVIE_ID, INVALID_BODY),
+                new ProbeRequest(HttpMethod.PUT, "/api/v1/admin/titles/not-a-uuid", INVALID_BODY),
+                new ProbeRequest(HttpMethod.DELETE, "/api/v1/admin/titles/not-a-uuid", null)
         );
     }
 
     static Stream<Arguments> adminOperationsWithInvalidInputAndTheirFieldErrors() {
         return Stream.of(
                 Arguments.of(new ProbeRequest(HttpMethod.POST, "/api/v1/admin/probe", INVALID_BODY), TITLE_REQUIRED),
-                Arguments.of(new ProbeRequest(HttpMethod.POST, "/api/v1/movies", INVALID_BODY), TITLE_REQUIRED),
-                Arguments.of(new ProbeRequest(HttpMethod.PUT, "/api/v1/movies/" + MOVIE_ID, INVALID_BODY), TITLE_REQUIRED),
-                Arguments.of(new ProbeRequest(HttpMethod.PUT, "/api/v1/movies/not-a-uuid", VALID_BODY), MOVIE_ID_NOT_UUID),
-                Arguments.of(new ProbeRequest(HttpMethod.DELETE, "/api/v1/movies/not-a-uuid", null), MOVIE_ID_NOT_UUID)
+                Arguments.of(new ProbeRequest(HttpMethod.POST, "/api/v1/admin/titles", INVALID_BODY), TITLE_REQUIRED),
+                Arguments.of(new ProbeRequest(HttpMethod.PUT, "/api/v1/admin/titles/" + MOVIE_ID, INVALID_BODY), TITLE_REQUIRED),
+                Arguments.of(new ProbeRequest(HttpMethod.PUT, "/api/v1/admin/titles/not-a-uuid", VALID_BODY), MOVIE_ID_NOT_UUID),
+                Arguments.of(new ProbeRequest(HttpMethod.DELETE, "/api/v1/admin/titles/not-a-uuid", null), MOVIE_ID_NOT_UUID)
         );
     }
 
     static Stream<ProbeRequest> adminOperationsWithValidInput() {
         return Stream.of(
                 new ProbeRequest(HttpMethod.POST, "/api/v1/admin/probe", VALID_BODY),
-                new ProbeRequest(HttpMethod.POST, "/api/v1/movies", VALID_BODY),
-                new ProbeRequest(HttpMethod.PUT, "/api/v1/movies/" + MOVIE_ID, VALID_BODY),
-                new ProbeRequest(HttpMethod.DELETE, "/api/v1/movies/" + MOVIE_ID, null)
+                new ProbeRequest(HttpMethod.POST, "/api/v1/admin/titles", VALID_BODY),
+                new ProbeRequest(HttpMethod.PUT, "/api/v1/admin/titles/" + MOVIE_ID, VALID_BODY),
+                new ProbeRequest(HttpMethod.DELETE, "/api/v1/admin/titles/" + MOVIE_ID, null)
         );
     }
 
     static Stream<ProbeRequest> adminPathsWithoutHandler() {
         return Stream.of(
                 new ProbeRequest(HttpMethod.GET, "/api/v1/admin", null),
-                new ProbeRequest(HttpMethod.GET, "/api/v1/admin/movies", null),
+                new ProbeRequest(HttpMethod.GET, "/api/v1/admin/titles", null),
                 new ProbeRequest(HttpMethod.DELETE, "/api/v1/admin/genres/" + MOVIE_ID, null)
         );
     }
 
     static Stream<ProbeRequest> authenticatedReadAndUserSubResourceOperations() {
         return Stream.of(
-                new ProbeRequest(HttpMethod.GET, "/api/v1/movies", null),
-                new ProbeRequest(HttpMethod.GET, "/api/v1/movies/" + MOVIE_ID, null),
-                new ProbeRequest(HttpMethod.PUT, "/api/v1/movies/a/b", VALID_BODY),
-                new ProbeRequest(HttpMethod.DELETE, "/api/v1/movies/a/b", null)
+                new ProbeRequest(HttpMethod.GET, "/api/v1/titles", null),
+                new ProbeRequest(HttpMethod.GET, "/api/v1/titles/" + MOVIE_ID, null),
+                new ProbeRequest(HttpMethod.PUT, "/api/v1/episodes/a/b", VALID_BODY),
+                new ProbeRequest(HttpMethod.DELETE, "/api/v1/episodes/a/b", null)
         );
     }
 
@@ -202,20 +202,20 @@ class AdminUrlAuthorizationIntegrationTests implements PostgresTestDatabase {
 
     @Test
     void roleUserReadWithNonUuidMovieIdReceivesValidationError() throws Exception {
-        perform(new ProbeRequest(HttpMethod.GET, "/api/v1/movies/not-a-uuid", null), bearerToken("ROLE_USER"))
+        perform(new ProbeRequest(HttpMethod.GET, "/api/v1/titles/not-a-uuid", null), bearerToken("ROLE_USER"))
                 .andExpect(status().isBadRequest())
                 .andExpect(apiError(400, "VALIDATION_ERROR", "Request validation failed", MOVIE_ID_NOT_UUID));
     }
 
     @Test
     void roleUserReadWithInvalidQueryParameterReceivesValidationError() throws Exception {
-        perform(new ProbeRequest(HttpMethod.GET, "/api/v1/movies?size=101", null), bearerToken("ROLE_USER"))
+        perform(new ProbeRequest(HttpMethod.GET, "/api/v1/titles?size=101", null), bearerToken("ROLE_USER"))
                 .andExpect(status().isBadRequest())
                 .andExpect(apiError(400, "VALIDATION_ERROR", "Request validation failed", """
                         {"field": "size", "message": "size must be between 1 and 100"}
                         """));
 
-        perform(new ProbeRequest(HttpMethod.GET, "/api/v1/movies?size=ten", null), bearerToken("ROLE_USER"))
+        perform(new ProbeRequest(HttpMethod.GET, "/api/v1/titles?size=ten", null), bearerToken("ROLE_USER"))
                 .andExpect(status().isBadRequest())
                 .andExpect(apiError(400, "VALIDATION_ERROR", "Request validation failed", """
                         {"field": "size", "message": "must be an integer"}
@@ -291,7 +291,7 @@ class AdminUrlAuthorizationIntegrationTests implements PostgresTestDatabase {
             return ALLOWED;
         }
 
-        @GetMapping(path = "/api/v1/movies", headers = PROBE_HEADER_CONDITION)
+        @GetMapping(path = "/api/v1/titles", headers = PROBE_HEADER_CONDITION)
         ProbeResponse listMovies(
                 @RequestParam(name = "size", defaultValue = "20")
                 @Min(value = 1, message = "size must be between 1 and 100")
@@ -300,27 +300,27 @@ class AdminUrlAuthorizationIntegrationTests implements PostgresTestDatabase {
             return ALLOWED;
         }
 
-        @PostMapping(path = "/api/v1/movies", headers = PROBE_HEADER_CONDITION)
+        @PostMapping(path = "/api/v1/admin/titles", headers = PROBE_HEADER_CONDITION)
         ProbeResponse createMovie(@Valid @RequestBody ProbeMovieRequest request) {
             return ALLOWED;
         }
 
-        @GetMapping(path = "/api/v1/movies/{movieId}", headers = PROBE_HEADER_CONDITION)
+        @GetMapping(path = "/api/v1/titles/{movieId}", headers = PROBE_HEADER_CONDITION)
         ProbeResponse getMovie(@PathVariable UUID movieId) {
             return ALLOWED;
         }
 
-        @PutMapping(path = "/api/v1/movies/{movieId}", headers = PROBE_HEADER_CONDITION)
+        @PutMapping(path = "/api/v1/admin/titles/{movieId}", headers = PROBE_HEADER_CONDITION)
         ProbeResponse updateMovie(@PathVariable UUID movieId, @Valid @RequestBody ProbeMovieRequest request) {
             return ALLOWED;
         }
 
-        @DeleteMapping(path = "/api/v1/movies/{movieId}", headers = PROBE_HEADER_CONDITION)
+        @DeleteMapping(path = "/api/v1/admin/titles/{movieId}", headers = PROBE_HEADER_CONDITION)
         ProbeResponse archiveMovie(@PathVariable UUID movieId) {
             return ALLOWED;
         }
 
-        @PutMapping(path = "/api/v1/movies/{movieId}/{subResource}", headers = PROBE_HEADER_CONDITION)
+        @PutMapping(path = "/api/v1/episodes/{movieId}/{subResource}", headers = PROBE_HEADER_CONDITION)
         ProbeResponse updateUserSubResource(
                 @PathVariable String movieId,
                 @PathVariable String subResource,
@@ -329,7 +329,7 @@ class AdminUrlAuthorizationIntegrationTests implements PostgresTestDatabase {
             return ALLOWED;
         }
 
-        @DeleteMapping(path = "/api/v1/movies/{movieId}/{subResource}", headers = PROBE_HEADER_CONDITION)
+        @DeleteMapping(path = "/api/v1/episodes/{movieId}/{subResource}", headers = PROBE_HEADER_CONDITION)
         ProbeResponse deleteUserSubResource(@PathVariable String movieId, @PathVariable String subResource) {
             return ALLOWED;
         }

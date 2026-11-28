@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import com.vodplatform.shared.storage.ObjectMissingException;
 import com.vodplatform.shared.storage.ObjectStorage;
 import com.vodplatform.shared.storage.StoredObject;
@@ -85,7 +86,7 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
 
     @AfterEach
     void cleanup() {
-        for (UUID movie : movies) jdbc.update("delete from titles where id = ?", movie);
+        for (UUID movie : movies) EpisodeFixtures.removeTitle(jdbc, movie);
     }
 
     @ParameterizedTest
@@ -132,7 +133,7 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
         UUID id = ready(movie("PUBLISHED"));
         String token = bearer("ROLE_USER");
         for (String path : List.of(path(id, false), path(id, true),
-                "/api/v1/movies/" + movies.getFirst() + "/playback")) {
+                "/api/v1/episodes/" + EpisodeFixtures.episode(jdbc, movies.getFirst()) + "/playback")) {
             mvc.perform(request(path, token)).andExpect(status().isOk());
             for (var request : List.of(request(path, null), request(path, "invalid-token"),
                     request(path, null).queryParam("access_token", token))) {
@@ -380,15 +381,16 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
     private UUID movie(String status) {
         UUID id = UUID.randomUUID();
         movies.add(id);
-        jdbc.update("insert into titles(id,title,slug,description,status,created_at,updated_at) values(?,? ,?,'HLS fixture',?,?,?)",
+        jdbc.update("insert into titles(id,title,slug,description,status,created_at,updated_at,content_type) values(?,? ,?,'HLS fixture',?,?,?,'MOVIE')",
                 id, "HLS fixture", "hls-" + id, status, Timestamp.from(T0), Timestamp.from(T0));
+        EpisodeFixtures.addFilmEpisode(jdbc, id);
         return id;
     }
     private UUID ready(UUID movie) { return asset(UUID.randomUUID(), movie, "READY", T0); }
     private UUID asset(UUID id, UUID movie, String status, Instant created) {
-        jdbc.update("insert into video_assets(id,movie_id,raw_bucket,raw_object_key,hls_bucket,hls_master_object_key,status,created_at,updated_at) "
+        jdbc.update("insert into video_assets(id,episode_id,raw_bucket,raw_object_key,hls_bucket,hls_master_object_key,status,created_at,updated_at) "
                         + "values(?,?,'vod-raw',?,'vod-hls',?,?,?,?)",
-                id, movie, id.toString(), key(id), status, Timestamp.from(created), Timestamp.from(created));
+                id, EpisodeFixtures.episode(jdbc, movie), id.toString(), key(id), status, Timestamp.from(created), Timestamp.from(created));
         return id;
     }
     private String bearer(String role) {

@@ -108,8 +108,8 @@ describe('movie form model', () => {
     const movie: MovieDetail = {
       id: movieId, title: 'Movie', slug: 'movie', description: 'Description', releaseYear: 2020,
       maturityRating: 'UNKNOWN', genres: ['Drama'], people: [{ personId, name: 'Person', role: 'UNKNOWN' }],
-      status: 'ARCHIVED', videoStatus: null, posterUrl: null, averageRating: null,
-      userRating: null, inWatchlist: false, playbackProgress: null
+      status: 'ARCHIVED', contentType: 'MOVIE', videoStatus: null, posterUrl: null, averageRating: null,
+      userRating: null, inWatchlist: false, playbackProgress: null, episode: null
     };
     const values = movieDetailToForm(movie);
     expect(values.releaseYear).toBe('2020');
@@ -140,9 +140,9 @@ describe('server field-error mapping', () => {
   });
 
   it('maps slug conflicts and preserves request IDs for troubleshooting', () => {
-    expect(mapMovieFormError(apiError(409, 'MOVIE_SLUG_CONFLICT'))).toEqual({ fields: { slug: 'This slug is already used' }, general: [] });
+    expect(mapMovieFormError(apiError(409, 'TITLE_SLUG_CONFLICT'))).toEqual({ fields: { slug: 'This slug is already used' }, general: [] });
     expect(mapMovieFormError(new ApiRequestError(409, {
-      timestamp: '2026-10-28T00:00:00Z', status: 409, code: 'MOVIE_SLUG_CONFLICT', message: 'Conflict', requestId: 'slug-request'
+      timestamp: '2026-10-28T00:00:00Z', status: 409, code: 'TITLE_SLUG_CONFLICT', message: 'Conflict', requestId: 'slug-request'
     }))).toEqual({ fields: { slug: 'This slug is already used' }, general: ['Request ID: slug-request'] });
     const failure = new ApiRequestError(500, {
       timestamp: '2026-10-28T00:00:00Z', status: 500, code: 'INTERNAL_ERROR', message: 'Try again', requestId: 'request-id'

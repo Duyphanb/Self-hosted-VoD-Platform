@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.exception.UploadDatabaseException;
 import com.vodplatform.encoding.exception.VideoUploadInProgressException;
@@ -152,7 +153,7 @@ class UploadPostgresTests extends UploadTransactionTests implements PostgresTest
             verify(storage, times(1)).delete(anyString(), anyString());
             assertThat(
                             jdbc.queryForObject(
-                                    "select count(*) from video_assets where movie_id=?",
+                                    "select count(*) from video_assets where episode_id=?",
                                     Integer.class,
                                     movie))
                     .isEqualTo(1);
@@ -187,14 +188,14 @@ class UploadPostgresTests extends UploadTransactionTests implements PostgresTest
             var newer = first.get(30, TimeUnit.SECONDS);
             assertThat(
                             jdbc.queryForObject(
-                                    "select id from video_assets where movie_id=? order by"
+                                    "select id from video_assets where episode_id=? order by"
                                             + " created_at desc,id desc limit 1",
                                     UUID.class,
                                     movie))
                     .isEqualTo(newer.videoAssetId());
             assertThat(
                             jdbc.queryForObject(
-                                    "select id from video_assets where movie_id=? and"
+                                    "select id from video_assets where episode_id=? and"
                                         + " status='READY' order by created_at desc,id desc limit"
                                         + " 1",
                                     UUID.class,
@@ -203,7 +204,7 @@ class UploadPostgresTests extends UploadTransactionTests implements PostgresTest
             jdbc.update("update video_assets set status='READY' where id=?", newer.videoAssetId());
             assertThat(
                             jdbc.queryForObject(
-                                    "select id from video_assets where movie_id=? and"
+                                    "select id from video_assets where episode_id=? and"
                                         + " status='READY' order by created_at desc,id desc limit"
                                         + " 1",
                                     UUID.class,
@@ -228,7 +229,7 @@ class UploadPostgresTests extends UploadTransactionTests implements PostgresTest
                                 try (var statement =
                                         connection.prepareStatement(
                                                 "insert into video_assets"
-                                                    + " (id,movie_id,raw_bucket,raw_object_key,status,"
+                                                    + " (id,episode_id,raw_bucket,raw_object_key,status,"
                                                     + "created_at,updated_at)"
                                                     + " values"
                                                     + " (?,?,'vod-raw','fixture-held','QUEUED',now(),now())")) {

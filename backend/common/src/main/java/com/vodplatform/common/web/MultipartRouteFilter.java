@@ -35,7 +35,7 @@ public final class MultipartRouteFilter extends OncePerRequestFilter {
 
     private static final RequestMatcher UPLOAD =
             PathPatternRequestMatcher.pathPattern(
-                    HttpMethod.POST, "/api/v1/admin/movies/{movieId}/video");
+                    HttpMethod.POST, "/api/v1/admin/episodes/{episodeId}/video");
 
     // This gate runs before FilterChainProxy: preserve its default strict URL rules when deciding
     // the sole exception. In particular, PathPattern alone ignores semicolon path parameters.

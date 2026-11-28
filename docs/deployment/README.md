@@ -126,7 +126,7 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
 
    Then check before starting anything:
    - `flyway_schema_history` shows version 7 as successful;
-   - the schema matches the committed snapshot:
+   - the schema matches the snapshot from the V7 checkout:
      `python3 deploy/tests/schema-snapshot.py --container <postgres container> --user <owner> --database <db>`;
    - the row counts of the renamed tables equal those recorded in step 4;
    - the runtime roles keep exactly their table grants (the privilege query in
@@ -154,6 +154,29 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
      from the backend, not the 503 of step 1.
 
    Once the new backend or worker has started, the only way back is forward.
+
+## Episode Cutover (Flyway V8)
+
+Issue 7.2 (#260) moves asset, progress and history ownership to `episodes`. Ship the V8 backend, worker, Nginx
+configuration and frontend as one release. The old upload route is fenced before the edge switches configurations.
+Use the [fenced procedure above](#catalog-rename-upgrade-flyway-v7) with these replacements for the V7→V8 window:
+
+1. Pin V7 as the rollback release and tag the running images `pre-v8`. Build all V8 images before taking traffic down.
+   As long as V7 is serving, the running edge uses the V7 upload location `/api/v1/admin/movies/{id}/video`.
+2. Close that V7 upload location and gracefully reload. Verify refusal of new uploads and wait for the old Nginx
+   workers to exit. Stop Nginx and the backend. Drain ready and unacknowledged broker messages and `PROCESSING`
+   jobs before stopping the worker. Record queued outbox jobs with `published_at IS NULL`.
+3. Record title, asset, job, progress and history row counts. Take a V7 `pg_dump --format=custom`, and prove a
+   restore into an isolated PostgreSQL with the same database settings and roles. Require Flyway history ending at 7.
+4. Verify that the application writers remain stopped and run `$C run --rm --no-deps flyway` from the V8 source.
+   Check version 8 in history, the committed schema snapshot, preserved rows, one published ordinal-1 episode per
+   migrated title, and the runtime role grants. A failed transaction leaves V7 intact. If `afterMigrate` fails,
+   repair the cause and rerun the migration command while the writers are still stopped.
+5. Decide at this checkpoint. On a failed gate restore the V7 backup and select the matching V7 source, images and
+   Nginx configuration. Once either V8 backend or worker starts, roll forward only. On success install the V8
+   Nginx configuration with `/api/v1/admin/episodes/{id}/video`, then use
+   `$C up -d --no-build --no-deps --wait backend worker frontend` followed by
+   `$C up -d --no-build --no-deps --wait nginx`. Check the recorded outbox job IDs after the V8 relay starts.
 
 ## First Administrator
 
@@ -687,23 +710,20 @@ For an authorized purge, stop uploads/retries, the backend relay and worker, and
 ```sql
 WITH ranked AS (
     SELECT a.*, row_number() OVER (
-        PARTITION BY movie_id ORDER BY created_at DESC, id DESC
+        PARTITION BY episode_id ORDER BY created_at DESC, id DESC
     ) AS newest_rank
     FROM video_assets a
-), current_ready AS (
-    SELECT DISTINCT ON (movie_id) movie_id, id
-    FROM video_assets WHERE status = 'READY'
-    ORDER BY movie_id, created_at DESC, id DESC
 )
-SELECT a.id, a.movie_id, a.status, a.raw_bucket, a.raw_object_key,
+SELECT a.id, e.title_id, a.episode_id, a.status, a.raw_bucket, a.raw_object_key,
        a.hls_bucket, a.hls_master_object_key
 FROM ranked a
-JOIN titles m ON m.id = a.movie_id
-LEFT JOIN current_ready c ON c.movie_id = a.movie_id
-WHERE m.status <> 'ARCHIVED'
-  AND ((a.status = 'READY' AND a.id IS DISTINCT FROM c.id)
+JOIN episodes e ON e.id = a.episode_id
+JOIN titles t ON t.id = e.title_id
+LEFT JOIN current_episode_assets c ON c.episode_id = a.episode_id
+WHERE t.status <> 'ARCHIVED' AND e.status <> 'ARCHIVED'
+  AND ((a.status = 'READY' AND a.id IS DISTINCT FROM c.asset_id)
        OR (a.status = 'FAILED' AND a.newest_rank > 1))
-ORDER BY a.movie_id, a.created_at, a.id;
+ORDER BY a.episode_id, a.created_at, a.id;
 ```
 
 Exclude every archived movie, current asset, newest FAILED raw and in-flight asset from deletion. Re-run the candidate query after quiescing and immediately before deletion. For each reviewed asset, enumerate attempts from DB rather than object-list guesses:

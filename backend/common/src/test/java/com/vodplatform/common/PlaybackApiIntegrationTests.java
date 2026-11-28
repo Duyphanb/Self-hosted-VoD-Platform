@@ -12,6 +12,7 @@ import com.vodplatform.catalog.persistence.MovieStatus;
 import com.vodplatform.common.support.MovieVisibilityRule;
 import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import jakarta.persistence.EntityManager;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -41,7 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 class PlaybackApiIntegrationTests implements PostgresTestDatabase {
 
-    private static final String PATH = "/api/v1/movies/{movieId}/playback";
+    private static final String PATH = "/api/v1/episodes/{movieId}/playback";
     private static final Instant T0 = Instant.parse("2026-10-01T00:00:00Z");
 
     @Autowired private MockMvc mockMvc;
@@ -77,12 +78,12 @@ class PlaybackApiIntegrationTests implements PostgresTestDatabase {
         }
         entityManager.clear();
         expectPlayback(fixtures.published(), ready, 100, 0, token);
-        MovieVisibilityRule.assertHiddenLikeMissing(fixtures, movie -> request(movie, token));
+        MovieVisibilityRule.assertHiddenEpisodeLikeMissing(fixtures, movie -> request(movie, token));
 
         var withoutAssets = MovieVisibilityRule.persistFixtures(movies);
         UUID publishedAsset = asset(withoutAssets.published(), "READY", 100, T0);
         expectPlayback(withoutAssets.published(), publishedAsset, 100, 0, token);
-        MovieVisibilityRule.assertHiddenLikeMissing(withoutAssets, movie -> request(movie, token));
+        MovieVisibilityRule.assertHiddenEpisodeLikeMissing(withoutAssets, movie -> request(movie, token));
     }
 
     @ParameterizedTest
@@ -136,7 +137,8 @@ class PlaybackApiIntegrationTests implements PostgresTestDatabase {
         UUID shorter = asset(movie, "READY", 100, T0.plusSeconds(1));
         expectPlayback(movie, shorter, 100, 0, token);
         assertThat(jdbc.queryForMap("select current_seconds,duration_seconds,finished from playback_progress "
-                + "where user_id = ? and movie_id = ?", caller, movie))
+                + "where user_id = ? and episode_id = ?", caller,
+                EpisodeFixtures.episode(jdbc, movie)))
                 .containsEntry("current_seconds", 140).containsEntry("duration_seconds", 999)
                 .containsEntry("finished", true);
     }
@@ -184,14 +186,14 @@ class PlaybackApiIntegrationTests implements PostgresTestDatabase {
 
     private void expectPlayback(UUID movie, UUID asset, Integer duration, int resume, String token) throws Exception {
         request(movie, token).andExpect(status().isOk()).andExpect(content().json("""
-                {"movieId":"%s","videoAssetId":"%s","status":"READY",
+                {"episodeId":"%s","titleId":"%s","videoAssetId":"%s","status":"READY",
                  "hlsManifestUrl":"/hls/video-assets/%s/master.m3u8",
                  "durationSeconds":%s,"resumeSeconds":%d}
-                """.formatted(movie, asset, asset, duration, resume), JsonCompareMode.STRICT));
+                """.formatted(EpisodeFixtures.episode(jdbc, movie), movie, asset, asset, duration, resume), JsonCompareMode.STRICT));
     }
 
     private ResultActions request(UUID movie, String token) throws Exception {
-        return mockMvc.perform(get(PATH, movie).header(HttpHeaders.AUTHORIZATION, token));
+        return mockMvc.perform(get(PATH, EpisodeFixtures.episode(jdbc, movie)).header(HttpHeaders.AUTHORIZATION, token));
     }
 
     private UUID movie() {
@@ -216,17 +218,17 @@ class PlaybackApiIntegrationTests implements PostgresTestDatabase {
     }
 
     private void asset(UUID id, UUID movie, String status, Integer duration, Instant created) {
-        jdbc.update("insert into video_assets (id,movie_id,raw_bucket,raw_object_key,hls_bucket,"
+        jdbc.update("insert into video_assets (id,episode_id,raw_bucket,raw_object_key,hls_bucket,"
                         + "hls_master_object_key,status,duration_seconds,created_at,updated_at) "
                         + "values (?,?,'private-raw',?,'private-hls',?,?,?,?,?)",
-                id, movie, "private/raw/" + id, "unrelated/storage/prefix/" + id + "/different.m3u8",
+                id, EpisodeFixtures.episode(jdbc, movie), "private/raw/" + id, "unrelated/storage/prefix/" + id + "/different.m3u8",
                 status, duration, Timestamp.from(created), Timestamp.from(created));
     }
 
     private void progress(UUID user, UUID movie, int position, Integer duration, boolean finished) {
-        jdbc.update("insert into playback_progress (user_id,movie_id,current_seconds,duration_seconds,finished,"
+        jdbc.update("insert into playback_progress (user_id,episode_id,current_seconds,duration_seconds,finished,"
                         + "last_played_at,created_at,updated_at) values (?,?,?,?,?,?,?,?)",
-                user, movie, position, duration, finished, Timestamp.from(T0), Timestamp.from(T0), Timestamp.from(T0));
+                user, EpisodeFixtures.episode(jdbc, movie), position, duration, finished, Timestamp.from(T0), Timestamp.from(T0), Timestamp.from(T0));
     }
 
     private String bearer(UUID user, String role) {

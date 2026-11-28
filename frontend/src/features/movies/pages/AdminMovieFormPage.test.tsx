@@ -1,3 +1,4 @@
+import { titlePayloadFixture } from '../../../test/titleWireFixture';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
@@ -78,17 +79,18 @@ describe('AdminMovieFormPage through the data router', () => {
     fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
 
     expect(await screen.findByText('Movie created')).toHaveAttribute('role', 'status');
-    expect(router.state.location.pathname).toBe('/admin/movies');
+    expect(router.state.location.pathname).toBe('/admin/titles');
     expect(screen.queryByRole('dialog', { name: 'Discard changes?' })).not.toBeInTheDocument();
     const [[input, init]] = mutations();
-    expect(new URL(String(input), 'http://localhost').pathname).toBe('/api/v1/movies');
+    expect(new URL(String(input), 'http://localhost').pathname).toBe('/api/v1/admin/titles');
     expect(init?.method).toBe('POST');
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer access-token');
     expect(JSON.parse(String(init?.body))).toEqual({
       title: 'Đất Rừng Phương Nam', slug: 'dat-rung-phuong-nam', description: 'A story.\nThe next line.',
-      releaseYear: null, maturityRating: null, genres: ['Drama'], people: [], status: 'DRAFT'
+      releaseYear: null, maturityRating: null, genres: ['Drama'], people: [], status: 'DRAFT', contentType: 'MOVIE'
     });
-    expect(queryClient.getQueryState(movieKeys.detail(movieId))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(movieKeys.adminDetail(movieId))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(movieKeys.detail(movieId))).toBeUndefined();
   });
 
   it('maps indexed server errors to controls and keeps unknown fields in the focused summary', async () => {
@@ -98,7 +100,7 @@ describe('AdminMovieFormPage through the data router', () => {
       { field: 'people[0].name', message: 'More than one person has this name' },
       { field: 'otherField', message: 'An unexpected field error' }
     ], 'form-request-90') : undefined);
-    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    renderForm({ path: `/admin/titles/${movieId}/edit` });
     fireEvent.click(await screen.findByText('Save changes', { selector: 'button' }));
     await waitFor(() => expect(errorSummary()).toHaveFocus());
     const summary = errorSummary();
@@ -114,7 +116,7 @@ describe('AdminMovieFormPage through the data router', () => {
   });
 
   it('maps a duplicate slug conflict to the slug field and lets the admin correct it', async () => {
-    serve((_url, init) => init?.method === 'POST' ? apiError(409, 'MOVIE_SLUG_CONFLICT') : undefined);
+    serve((_url, init) => init?.method === 'POST' ? apiError(409, 'TITLE_SLUG_CONFLICT') : undefined);
     renderForm();
     await fillCreate();
     fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
@@ -135,7 +137,7 @@ describe('AdminMovieFormPage through the data router', () => {
     serve((_url, init) => init?.method === 'PUT' ? apiError(400, 'VALIDATION_ERROR', [
       { field: 'people[1].personId', message: 'must identify an existing person' }
     ]) : undefined);
-    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    renderForm({ path: `/admin/titles/${movieId}/edit` });
     fireEvent.click(await screen.findByText('Save changes', { selector: 'button' }));
     const secondPerson = screen.getByLabelText('Person 2');
     await waitFor(() => expect(secondPerson).toHaveAttribute('aria-invalid', 'true'));
@@ -167,9 +169,9 @@ describe('AdminMovieFormPage through the data router', () => {
   });
 
   it.each(['DRAFT', 'PUBLISHED'])('prefills every edit field and restores an archived movie to %s', async (status) => {
-    serve((url, init) => url.pathname === `/api/v1/movies/${movieId}` && !init?.method
+    serve((url, init) => url.pathname === `/api/v1/admin/titles/${movieId}` && !init?.method
       ? json(movieDetail({ status: 'ARCHIVED' })) : undefined);
-    const { router } = renderForm({ path: `/admin/movies/${movieId.toUpperCase()}/edit` });
+    const { router } = renderForm({ path: `/admin/titles/${movieId.toUpperCase()}/edit` });
     await screen.findByText('Save changes', { selector: 'button' });
     expect(screen.getByLabelText('Title')).toHaveValue('Existing movie');
     expect(screen.getByLabelText('Slug')).toHaveValue('existing-movie');
@@ -188,9 +190,9 @@ describe('AdminMovieFormPage through the data router', () => {
     fireEvent.click(screen.getByLabelText('Move credit 2 up'));
     fireEvent.click(screen.getByText('Save changes', { selector: 'button' }));
     expect(await screen.findByText('Changes saved')).toHaveAttribute('role', 'status');
-    expect(router.state.location.pathname).toBe('/admin/movies');
+    expect(router.state.location.pathname).toBe('/admin/titles');
     const [[input, init]] = mutations();
-    expect(new URL(String(input), 'http://localhost').pathname).toBe(`/api/v1/movies/${movieId}`);
+    expect(new URL(String(input), 'http://localhost').pathname).toBe(`/api/v1/admin/titles/${movieId}`);
     expect(init?.method).toBe('PUT');
     expect(JSON.parse(String(init?.body))).toEqual({
       title: 'Retitled movie', slug: 'existing-movie', description: 'An existing description.', releaseYear: null,
@@ -219,7 +221,7 @@ describe('AdminMovieFormPage through the data router', () => {
   it.each(['header', 'back', 'sign-out'] as const)('waits for an already-sent save when leaving through %s', async (departure) => {
     const held = deferredResponse();
     serve((_url, init) => init?.method === 'POST' ? held.promise : undefined);
-    const { router, queryClient } = renderForm({ entries: ['/account', '/admin/movies/new'] });
+    const { router, queryClient } = renderForm({ entries: ['/account', '/admin/titles/new'] });
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     await fillCreate();
     fireEvent.click(screen.getByText('Create movie', { selector: 'button' }));
@@ -229,12 +231,12 @@ describe('AdminMovieFormPage through the data router', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'Saving movie…' });
     expect(within(dialog).queryByRole('button', { name: /Discard/ })).not.toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/admin/movies/new');
+    expect(router.state.location.pathname).toBe('/admin/titles/new');
     expect(screen.getByLabelText('Title')).toHaveValue('New movie title');
     expect(mutations()).toHaveLength(1);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Stay on page' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/admin/movies/new');
+    expect(router.state.location.pathname).toBe('/admin/titles/new');
     held.release(json(movieDetail(), 201));
     expect(await screen.findByText('Movie created')).toBeInTheDocument();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: movieKeys.all });
@@ -293,14 +295,14 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(requests).toHaveLength(2);
     expect(new URL(String(requests[0][0]), 'http://localhost').pathname).toBe('/api/v1/admin/people');
     expect(JSON.parse(String(requests[0][1]?.body))).toEqual({ name: 'New person' });
-    expect(new URL(String(requests[1][0]), 'http://localhost').pathname).toBe('/api/v1/movies');
+    expect(new URL(String(requests[1][0]), 'http://localhost').pathname).toBe('/api/v1/admin/titles');
     expect(JSON.parse(String(requests[1][1]?.body)).people).toEqual([{ personId: actorId, role: 'ACTOR' }]);
   });
 
   it('handles detail loading before the edit form is available', async () => {
     const held = deferredResponse();
-    serve((url) => url.pathname === `/api/v1/movies/${movieId}` ? held.promise : undefined);
-    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    serve((url) => url.pathname === `/api/v1/admin/titles/${movieId}` ? held.promise : undefined);
+    renderForm({ path: `/admin/titles/${movieId}/edit` });
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Loading movie…'));
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     held.release(json(movieDetail()));
@@ -309,14 +311,14 @@ describe('AdminMovieFormPage through the data router', () => {
 
   it('keeps an unsaved edit draft through a failed background refresh and a successful Retry', async () => {
     let failRefresh = false;
-    serve((url, init) => url.pathname === `/api/v1/movies/${movieId}` && !init?.method && failRefresh
+    serve((url, init) => url.pathname === `/api/v1/admin/titles/${movieId}` && !init?.method && failRefresh
       ? apiError(500, 'INTERNAL_ERROR') : undefined);
-    const { queryClient } = renderForm({ path: `/admin/movies/${movieId}/edit` });
+    const { queryClient } = renderForm({ path: `/admin/titles/${movieId}/edit` });
     await screen.findByLabelText('Title');
     change('Title', 'An unsaved title');
     change('Description', 'An unsaved description.');
     failRefresh = true;
-    await act(async () => { await queryClient.refetchQueries({ queryKey: movieKeys.detail(movieId), exact: true }); });
+    await act(async () => { await queryClient.refetchQueries({ queryKey: movieKeys.adminDetail(movieId), exact: true }); });
     expect(await screen.findByRole('heading', { name: 'Movie could not be refreshed; your changes are kept' })).toBeInTheDocument();
     expect(screen.getByLabelText('Title')).toHaveValue('An unsaved title');
     expect(screen.getByLabelText('Description')).toHaveValue('An unsaved description.');
@@ -333,18 +335,21 @@ describe('AdminMovieFormPage through the data router', () => {
     const freshMovie = movieDetail({ description: 'Description changed on the server.', genres: ['Comedy'] });
     let detailReads = 0;
     serve((url, init) => {
-      if (url.pathname === `/api/v1/movies/${movieId}` && !init?.method) {
+      if (url.pathname === `/api/v1/titles/${movieId}` && !init?.method) {
+        return json(movieDetail());
+      }
+      if (url.pathname === `/api/v1/admin/titles/${movieId}` && !init?.method) {
         detailReads += 1;
-        return detailReads === 1 ? json(movieDetail()) : freshResponse.promise;
+        return freshResponse.promise;
       }
       if (init?.method === 'PUT') return json(movieDetail({ ...freshMovie, title: 'Retitled after a fresh GET' }));
       return undefined;
     });
-    const { queryClient } = renderForm({ path: `/movies/${movieId}` });
+    const { queryClient } = renderForm({ path: `/titles/${movieId}` });
     await screen.findByRole('heading', { level: 1, name: 'Existing movie' });
     queryClient.setQueryDefaults(movieKeys.detail(movieId), { staleTime: Infinity });
     fireEvent.click(screen.getByText('Edit movie', { selector: 'a' }));
-    await waitFor(() => expect(detailReads).toBe(2));
+    await waitFor(() => expect(detailReads).toBe(1));
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     expect(screen.getByText('Loading movie…')).toBeInTheDocument();
     freshResponse.release(json(freshMovie));
@@ -359,8 +364,8 @@ describe('AdminMovieFormPage through the data router', () => {
   it('reopens Edit with Archived status after Cancel and Archive, without republishing on a metadata save', async () => {
     let serverMovie = movieDetail();
     serve((url, init) => {
-      if (url.pathname === '/api/v1/admin/movies') return adminPage(serverMovie);
-      if (url.pathname !== `/api/v1/movies/${movieId}`) return undefined;
+      if (url.pathname === '/api/v1/admin/titles') return adminPage(serverMovie);
+      if (url.pathname !== `/api/v1/admin/titles/${movieId}`) return undefined;
       if (init?.method === 'DELETE') {
         serverMovie = { ...serverMovie, status: 'ARCHIVED' };
         return new Response(null, { status: 204 });
@@ -370,7 +375,7 @@ describe('AdminMovieFormPage through the data router', () => {
       }
       return json(serverMovie);
     });
-    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    renderForm({ path: `/admin/titles/${movieId}/edit` });
     await screen.findByLabelText('Title');
     fireEvent.click(screen.getByText('Cancel', { selector: 'a' }));
     fireEvent.click(await screen.findByLabelText('Archive Existing movie'));
@@ -391,8 +396,8 @@ describe('AdminMovieFormPage through the data router', () => {
     let saved = false;
     const delayedReads: ReturnType<typeof deferredResponse>[] = [];
     serve((url, init) => {
-      if (url.pathname === '/api/v1/admin/movies') return adminPage(serverMovie);
-      if (url.pathname !== `/api/v1/movies/${movieId}`) return undefined;
+      if (url.pathname === '/api/v1/admin/titles') return adminPage(serverMovie);
+      if (url.pathname !== `/api/v1/admin/titles/${movieId}`) return undefined;
       if (init?.method === 'PUT') {
         serverMovie = { ...serverMovie, ...JSON.parse(String(init.body)), people: serverMovie.people };
         saved = true;
@@ -405,31 +410,31 @@ describe('AdminMovieFormPage through the data router', () => {
       }
       return json(serverMovie);
     });
-    const { queryClient } = renderForm({ path: `/admin/movies/${movieId}/edit` });
+    const { queryClient } = renderForm({ path: `/admin/titles/${movieId}/edit` });
     await screen.findByLabelText('Title');
     change('Title', 'The saved title');
     fireEvent.click(screen.getByText('Save changes', { selector: 'button' }));
     expect(await screen.findByText('Changes saved')).toBeInTheDocument();
-    expect(queryClient.getQueryData<MovieDetail>(movieKeys.detail(movieId))?.title).toBe('The saved title');
+    expect(queryClient.getQueryData<MovieDetail>(movieKeys.adminDetail(movieId))?.title).toBe('The saved title');
     const previousReads = delayedReads.length;
     fireEvent.click(await screen.findByLabelText('Edit The saved title'));
     await waitFor(() => expect(delayedReads.length).toBeGreaterThan(previousReads));
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     for (const response of delayedReads) response.release(json(serverMovie));
     expect(await screen.findByLabelText('Title')).toHaveValue('The saved title');
-    expect(queryClient.getQueryData<MovieDetail>(movieKeys.detail(movieId))?.title).toBe('The saved title');
+    expect(queryClient.getQueryData<MovieDetail>(movieKeys.adminDetail(movieId))?.title).toBe('The saved title');
   });
 
   it('keeps the initial archived status and its option when a background refresh returns Published', async () => {
     let currentStatus: MovieDetail['status'] = 'ARCHIVED';
-    serve((url, init) => url.pathname === `/api/v1/movies/${movieId}` && !init?.method
+    serve((url, init) => url.pathname === `/api/v1/admin/titles/${movieId}` && !init?.method
       ? json(movieDetail({ status: currentStatus })) : undefined);
-    const { queryClient } = renderForm({ path: `/admin/movies/${movieId}/edit` });
+    const { queryClient } = renderForm({ path: `/admin/titles/${movieId}/edit` });
     await screen.findByLabelText('Title');
     change('Title', 'Unsaved archived title');
     currentStatus = 'PUBLISHED';
-    await act(async () => { await queryClient.refetchQueries({ queryKey: movieKeys.detail(movieId), exact: true }); });
-    await waitFor(() => expect(queryClient.getQueryData<MovieDetail>(movieKeys.detail(movieId))?.status).toBe('PUBLISHED'));
+    await act(async () => { await queryClient.refetchQueries({ queryKey: movieKeys.adminDetail(movieId), exact: true }); });
+    await waitFor(() => expect(queryClient.getQueryData<MovieDetail>(movieKeys.adminDetail(movieId))?.status).toBe('PUBLISHED'));
     expect(screen.getByLabelText('Title')).toHaveValue('Unsaved archived title');
     const status = screen.getByLabelText('Status');
     expect(status).toHaveValue('ARCHIVED');
@@ -441,22 +446,22 @@ describe('AdminMovieFormPage through the data router', () => {
   });
 
   it('rejects an invalid edit UUID without calling any API', async () => {
-    renderForm({ path: '/admin/movies/not-a-uuid/edit' });
+    renderForm({ path: '/admin/titles/not-a-uuid/edit' });
     expect(await screen.findByRole('heading', { name: 'Movie not found' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/admin/movies');
+    expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/admin/titles');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([400, 404])('shows movie not found when the detail API responds %s', async (status) => {
-    serve((url) => url.pathname === `/api/v1/movies/${movieId}` ? apiError(status, 'MOVIE_NOT_FOUND') : undefined);
-    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    serve((url) => url.pathname === `/api/v1/admin/titles/${movieId}` ? apiError(status, 'MOVIE_NOT_FOUND') : undefined);
+    renderForm({ path: `/admin/titles/${movieId}/edit` });
     expect(await screen.findByRole('heading', { name: 'Movie not found' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
   });
 
   it('shows Forbidden when detail access is denied by the server', async () => {
-    serve((url) => url.pathname === `/api/v1/movies/${movieId}` ? apiError(403, 'FORBIDDEN') : undefined);
-    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    serve((url) => url.pathname === `/api/v1/admin/titles/${movieId}` ? apiError(403, 'FORBIDDEN') : undefined);
+    renderForm({ path: `/admin/titles/${movieId}/edit` });
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
     expect(screen.queryByText('Save changes', { selector: 'button' })).not.toBeInTheDocument();
   });
@@ -472,7 +477,7 @@ describe('AdminMovieFormPage through the data router', () => {
 
   it('shows Movie not found when the edit PUT reports that the movie disappeared', async () => {
     serve((_url, init) => init?.method === 'PUT' ? apiError(404, 'MOVIE_NOT_FOUND') : undefined);
-    renderForm({ path: `/admin/movies/${movieId}/edit` });
+    renderForm({ path: `/admin/titles/${movieId}/edit` });
     fireEvent.click(await screen.findByText('Save changes', { selector: 'button' }));
     expect(await screen.findByRole('heading', { name: 'Movie not found' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
@@ -547,7 +552,7 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(cancel).toHaveFocus();
     fireEvent.click(cancel);
     fireEvent.click(await screen.findByText('Discard changes', { selector: 'button' }));
-    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/movies'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/titles'));
     expect(await screen.findByRole('heading', { level: 1, name: 'Movies' })).toBeInTheDocument();
   });
 
@@ -559,7 +564,7 @@ describe('AdminMovieFormPage through the data router', () => {
     fireEvent.click(within(nav).getByRole('link', { name: 'Movies' }));
     expect(await screen.findByRole('dialog', { name: 'Discard changes?' })).toBeInTheDocument();
     fireEvent.click(screen.getByText('Discard changes', { selector: 'button' }));
-    await waitFor(() => expect(router.state.location.pathname).toBe('/movies'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/titles'));
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
   });
 
@@ -583,13 +588,13 @@ describe('AdminMovieFormPage through the data router', () => {
   });
 
   it('blocks browser Back while dirty and proceeds after the admin confirms', async () => {
-    const { router } = renderForm({ entries: ['/account', '/admin/movies/new'] });
+    const { router } = renderForm({ entries: ['/account', '/admin/titles/new'] });
     await screen.findByLabelText('Title');
     change('Title', 'Unsaved movie');
     await act(async () => { await router.navigate(-1); });
     expect(await screen.findByRole('dialog', { name: 'Discard changes?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-    expect(router.state.location.pathname).toBe('/admin/movies/new');
+    expect(router.state.location.pathname).toBe('/admin/titles/new');
     expect(screen.getByLabelText('Title')).toHaveValue('Unsaved movie');
     await act(async () => { await router.navigate(-1); });
     fireEvent.click(await screen.findByText('Discard changes', { selector: 'button' }));
@@ -600,13 +605,13 @@ describe('AdminMovieFormPage through the data router', () => {
   it('leaves a clean form without a discard prompt', async () => {
     const { router } = renderForm();
     fireEvent.click(await screen.findByText('Cancel', { selector: 'a' }));
-    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/movies'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/titles'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it.each(['new', 'edit'] as const)('returns the %s form to its filtered list and replaces the submitted history entry', async (mode) => {
-    const listPath = '/admin/movies?status=PUBLISHED&page=2&sort=title';
-    serve((url, init) => url.pathname === '/api/v1/admin/movies'
+    const listPath = '/admin/titles?status=PUBLISHED&page=2&sort=title';
+    serve((url, init) => url.pathname === '/api/v1/admin/titles' && !init?.method
       ? adminPage(movieDetail(), 1)
       : init?.method === 'PUT' ? json(movieDetail({ title: 'Saved from filtered list' })) : undefined);
     const { router } = renderForm({ entries: ['/account', listPath] });
@@ -648,7 +653,7 @@ describe('AdminMovieFormPage through the data router', () => {
   });
 });
 
-function renderForm({ path = '/admin/movies/new', entries, user = admin }: { path?: string; entries?: string[]; user?: UserProfile } = {}) {
+function renderForm({ path = '/admin/titles/new', entries, user = admin }: { path?: string; entries?: string[]; user?: UserProfile } = {}) {
   persist(user);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createMemoryRouter([{
@@ -698,10 +703,10 @@ function serve(override?: (url: URL, init: RequestInit | undefined) => Response 
     if (response !== undefined) return response;
     if (url.pathname === '/api/v1/admin/genres') return json([{ id: actorId, name: 'Drama', slug: 'drama' }]);
     if (url.pathname === '/api/v1/admin/people') return json({ items: [], page: { page: 0, size: 20, totalPages: 0, totalElements: 0 } });
-    if (url.pathname === '/api/v1/admin/movies' || (url.pathname === '/api/v1/movies' && !init?.method)) {
+    if (url.pathname === '/api/v1/admin/titles' && !init?.method) {
       return json({ items: [], page: { page: 0, size: 20, totalPages: 0, totalElements: 0 } });
     }
-    if (url.pathname === `/api/v1/movies/${movieId}` || (url.pathname === '/api/v1/movies' && init?.method === 'POST')) return json(movieDetail());
+    if (url.pathname === `/api/v1/admin/titles/${movieId}` || (url.pathname === '/api/v1/admin/titles' && init?.method === 'POST')) return json(movieDetail());
     throw new Error(`Unexpected test request ${init?.method ?? 'GET'} ${url.pathname}`);
   });
 }
@@ -710,13 +715,13 @@ function movieDetail(overrides: Partial<MovieDetail> = {}): MovieDetail {
     id: movieId, title: 'Existing movie', slug: 'existing-movie', description: 'An existing description.', releaseYear: 2020,
     maturityRating: 'T16', genres: ['Drama', 'Mystery'], people: [
       { personId: actorId, name: 'Existing actor', role: 'ACTOR' }, { personId: directorId, name: 'Existing director', role: 'DIRECTOR' }
-    ], averageRating: null, posterUrl: null, status: 'PUBLISHED', videoStatus: null, userRating: null, inWatchlist: false, playbackProgress: null, ...overrides
+    ], averageRating: null, posterUrl: null, status: 'PUBLISHED', contentType: 'MOVIE', videoStatus: null, userRating: null, inWatchlist: false, playbackProgress: null, episode: null, ...overrides
   };
 }
 function adminPage(movie: MovieDetail, page = 0): Response {
   return json({ items: [movie], page: { page, size: 20, totalElements: page * 20 + 1, totalPages: page + 1 } });
 }
-function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }); }
+function json(body: unknown, status = 200) { return new Response(JSON.stringify(titlePayloadFixture(body)), { status, headers: { 'Content-Type': 'application/json' } }); }
 function apiError(status: number, code: string, fieldErrors?: Array<{ field: string; message: string }>, requestId?: string) {
   return json({ timestamp: '2026-10-28T00:00:00Z', status, code, message: 'Request could not be completed', fieldErrors, requestId }, status);
 }

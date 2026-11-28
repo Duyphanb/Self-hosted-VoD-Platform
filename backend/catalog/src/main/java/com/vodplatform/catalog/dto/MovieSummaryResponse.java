@@ -1,6 +1,7 @@
 package com.vodplatform.catalog.dto;
 
 import com.vodplatform.catalog.persistence.MovieStatus;
+import com.vodplatform.catalog.persistence.ContentType;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -25,7 +26,11 @@ public record MovieSummaryResponse(
         List<String> genres,
         Double averageRating,
         MovieStatus status,
-        String videoStatus
+        ContentType contentType,
+        String partLabel,
+        int episodeCount,
+        int playableEpisodeCount,
+        String availability
 ) {
 
     public MovieSummaryResponse {
@@ -48,7 +53,11 @@ public record MovieSummaryResponse(
                 summary.genres(),
                 null,
                 summary.status(),
-                summary.videoStatus()
+                summary.contentType(),
+                summary.partLabel(),
+                summary.availability().episodes(),
+                summary.availability().playableEpisodes(),
+                summary.availability().label()
         );
     }
 }

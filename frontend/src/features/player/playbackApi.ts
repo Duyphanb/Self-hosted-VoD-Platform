@@ -3,7 +3,8 @@ import { isCanonicalUuid } from '../../lib/uuid';
 
 /** `GET /movies/{movieId}/playback` (API contract `PlaybackInfo`). */
 export interface PlaybackInfo {
-  movieId: string;
+  episodeId: string;
+  titleId: string;
   videoAssetId: string;
   /** Same-origin path of the HLS playlist, for example `/hls/video-assets/{id}/master.m3u8`. */
   hlsManifestUrl: string;
@@ -27,7 +28,7 @@ export class InvalidPlaybackResponseError extends Error {
 }
 
 /**
- * Playback information for a visible movie. The API answers 404 MOVIE_NOT_FOUND for a missing or hidden
+ * Playback information for a visible episode. The API answers 404 EPISODE_NOT_FOUND for a missing or hidden
  * movie and 409 VIDEO_NOT_READY when the movie has no current READY asset.
  */
 export async function fetchPlaybackInfo(
@@ -37,13 +38,13 @@ export async function fetchPlaybackInfo(
   identity?: AuthenticationSnapshot
 ): Promise<PlaybackInfo> {
   // With `identity`, the request belongs to that viewer and is never sent with another account's token.
-  const response = await client.request<unknown>(`/movies/${encodeURIComponent(movieId)}/playback`, {
+  const response = await client.request<unknown>(`/episodes/${encodeURIComponent(movieId)}/playback`, {
     authenticated: true,
     identity,
     signal
   });
   const playbackInfo = decodePlaybackInfo(response);
-  if (!playbackInfo) {
+  if (!playbackInfo || playbackInfo.episodeId !== movieId) {
     throw new InvalidPlaybackResponseError();
   }
   return playbackInfo;
@@ -83,7 +84,7 @@ export function hlsManifestPath(videoAssetId: string): string {
 }
 
 function progressPath(movieId: string): string {
-  return `/movies/${encodeURIComponent(movieId)}/progress`;
+  return `/episodes/${encodeURIComponent(movieId)}/progress`;
 }
 
 export function decodePlaybackInfo(value: unknown): PlaybackInfo | null {
@@ -95,7 +96,8 @@ export function decodePlaybackInfo(value: unknown): PlaybackInfo | null {
   const durationSeconds = candidate.durationSeconds ?? null;
   const validResume = Number.isInteger(resumeSeconds) && (resumeSeconds as number) >= 0;
   const validDuration = durationSeconds === null || Number.isInteger(durationSeconds);
-  if (!isCanonicalUuid(candidate.movieId) || !isCanonicalUuid(candidate.videoAssetId)) {
+  if (!isCanonicalUuid(candidate.episodeId) || !isCanonicalUuid(candidate.titleId)
+    || !isCanonicalUuid(candidate.videoAssetId)) {
     return null;
   }
   // The bearer token goes only to the same-origin HLS proxy of this asset (ADR-011 D3, D4).
@@ -104,7 +106,8 @@ export function decodePlaybackInfo(value: unknown): PlaybackInfo | null {
     return null;
   }
   return {
-    movieId: candidate.movieId,
+    episodeId: candidate.episodeId,
+    titleId: candidate.titleId,
     videoAssetId: candidate.videoAssetId,
     hlsManifestUrl: candidate.hlsManifestUrl as string,
     resumeSeconds: resumeSeconds as number,

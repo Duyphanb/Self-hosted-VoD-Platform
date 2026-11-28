@@ -27,14 +27,14 @@ export function MovieDetailPage() {
     content = (
       <NotFoundPage
         description="The movie could not be found."
-        link={{ to: '/movies', label: 'Back to movies' }}
+        link={{ to: '/titles', label: 'Back to movies' }}
         title="Movie not found"
       />
     );
   } else {
     content = (
       <>
-        <Link className={`${secondaryButtonClass} justify-self-start`} to="/movies">Back to movies</Link>
+        <Link className={`${secondaryButtonClass} justify-self-start`} to="/titles">Back to movies</Link>
         {failed ? (
           <ErrorState
             error={error}

@@ -1,6 +1,6 @@
 package com.vodplatform.encoding.service;
 
-import com.vodplatform.catalog.service.MovieRowLocks;
+import com.vodplatform.catalog.service.EpisodeRowLocks;
 import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.exception.UploadDatabaseException;
 import com.vodplatform.encoding.exception.VideoUploadInProgressException;
@@ -38,7 +38,7 @@ public class EncodingJobService {
 
     private final EncodingJobRepository jobs;
 
-    private final MovieRowLocks locks;
+    private final EpisodeRowLocks locks;
 
     private final EncodingJobPublisher publisher;
 
@@ -49,7 +49,7 @@ public class EncodingJobService {
     public EncodingJobService(
             VideoAssetRepository assets,
             EncodingJobRepository jobs,
-            MovieRowLocks locks,
+            EpisodeRowLocks locks,
             EncodingJobPublisher publisher,
             Clock clock,
             PlatformTransactionManager manager) {
@@ -71,15 +71,16 @@ public class EncodingJobService {
         }
     }
 
-    public void precheck(UUID movieId) {
+    public UUID precheck(UUID episodeId) {
         requireNoTransaction();
         try {
-            transaction.executeWithoutResult(
+            return transaction.execute(
                     status -> {
-                        locks.lockForMediaWrite(movieId);
-                        if (assets.existsInFlightByMovieId(movieId)) {
+                        var episode = locks.lockForMediaWrite(episodeId);
+                        if (assets.existsInFlightByEpisodeId(episodeId)) {
                             throw new VideoUploadInProgressException();
                         }
+                        return episode.titleId();
                     });
         } catch (ApiException business) {
             throw business;
@@ -88,14 +89,14 @@ public class EncodingJobService {
         }
     }
 
-    public void commitNewUpload(UUID movieId, UUID assetId, UUID jobId, String bucket, String key) {
+    public void commitNewUpload(UUID episodeId, UUID assetId, UUID jobId, String bucket, String key) {
         requireNoTransaction();
         boolean[] bodyCompleted = {false};
         try {
             transaction.executeWithoutResult(
                     status -> {
-                        var lock = locks.lockForMediaWrite(movieId);
-                        if (assets.existsInFlightByMovieId(movieId)) {
+                        var lock = locks.lockForMediaWrite(episodeId);
+                        if (assets.existsInFlightByEpisodeId(episodeId)) {
                             throw new VideoUploadInProgressException();
                         }
                         var asset =
@@ -105,13 +106,13 @@ public class EncodingJobService {
                     });
         } catch (RuntimeException failure) {
             if (bodyCompleted[0]) {
-                // Acquiring the same movie lock waits for an in-doubt original writer. Read in
+                // Acquiring the same episode lock waits for an in-doubt original writer. Read in
                 // a fresh READ COMMITTED transaction, never in the aborted transaction.
                 try {
                     Boolean committed =
                             transaction.execute(
                                     status -> {
-                                        locks.lockForMediaWrite(movieId);
+                                        locks.lockForMediaWrite(episodeId);
                                         boolean asset = assets.existsById(assetId);
                                         boolean job = jobs.existsById(jobId);
                                         if (asset != job) {
@@ -120,10 +121,10 @@ public class EncodingJobService {
                                         return asset;
                                     });
                     log.warn(
-                            "upload commit resolved outcome={} movieId={} videoAssetId={}"
+                            "upload commit resolved outcome={} episodeId={} videoAssetId={}"
                                     + " encodingJobId={}",
                             Boolean.TRUE.equals(committed) ? "COMMITTED" : "ROLLED_BACK",
-                            movieId,
+                            episodeId,
                             assetId,
                             jobId);
                     if (Boolean.TRUE.equals(committed)) {
@@ -131,8 +132,8 @@ public class EncodingJobService {
                     }
                 } catch (RuntimeException unknown) {
                     log.warn(
-                            "upload commit unknown movieId={} videoAssetId={} encodingJobId={}",
-                            movieId,
+                            "upload commit unknown episodeId={} videoAssetId={} encodingJobId={}",
+                            episodeId,
                             assetId,
                             jobId);
                     throw new UploadCommitUnknownException();
@@ -140,7 +141,7 @@ public class EncodingJobService {
                 throw new UploadDatabaseException();
             }
             if (EncodingConstraints.isViolationOf(
-                    failure, EncodingConstraints.VIDEO_ASSETS_MOVIE_IN_FLIGHT)) {
+                    failure, EncodingConstraints.VIDEO_ASSETS_EPISODE_IN_FLIGHT)) {
                 throw new VideoUploadInProgressException();
             }
             if (failure instanceof ApiException business) {

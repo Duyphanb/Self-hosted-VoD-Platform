@@ -286,19 +286,24 @@ class WorkerJdbcPostgresTest {
         backend.setConnectTimeout(5);
         backend.setSocketTimeout(8);
         UUID movie = UUID.randomUUID();
+        UUID episode = UUID.randomUUID();
         UUID asset = UUID.randomUUID();
         UUID job = UUID.randomUUID();
         String raw = "fixtures/" + asset + ".mp4";
         try (var connection = backend.getConnection()) {
             connection.setAutoCommit(false);
             update(connection, """
-                    INSERT INTO titles(id, title, slug, description, status, created_at, updated_at)
-                    VALUES (?, 'Fixture', ?, 'Fixture', 'DRAFT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    INSERT INTO titles(id, title, slug, description, status, created_at, updated_at, content_type)
+                    VALUES (?, 'Fixture', ?, 'Fixture', 'DRAFT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'MOVIE')
                     """, movie, "fixture-" + movie);
             update(connection, """
-                    INSERT INTO video_assets(id, movie_id, raw_bucket, raw_object_key, status, created_at, updated_at)
+                    INSERT INTO episodes(id, title_id, ordinal, display_label, status, created_at, updated_at)
+                    VALUES (?, ?, 1, '1', 'PUBLISHED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, episode, movie);
+            update(connection, """
+                    INSERT INTO video_assets(id, episode_id, raw_bucket, raw_object_key, status, created_at, updated_at)
                     VALUES (?, ?, 'vod-raw', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, asset, movie, raw, assetStatus);
+                    """, asset, episode, raw, assetStatus);
             update(connection, """
                     INSERT INTO encoding_jobs(id, video_asset_id, status, attempt, queued_at)
                     VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
@@ -345,6 +350,8 @@ class WorkerJdbcPostgresTest {
         @Override
         public void close() throws SQLException {
             try (var connection = backend.getConnection()) {
+                update(connection, "DELETE FROM video_assets WHERE id = ?", attempt.assetId());
+                update(connection, "DELETE FROM episodes WHERE title_id = ?", movie);
                 update(connection, "DELETE FROM titles WHERE id = ?", movie);
             }
         }

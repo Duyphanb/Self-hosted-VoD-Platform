@@ -93,7 +93,7 @@ describe('cookie-backed memory session', () => {
     refresh.mockRejectedValueOnce(failure);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
     await act(async () => {
-      await expect(result.current.client.request('/movies', { authenticated: true })).rejects.toBe(failure);
+      await expect(result.current.client.request('/titles', { authenticated: true })).rejects.toBe(failure);
     });
     expect(result.current.auth.isAuthenticated).toBe(true);
     expect(result.current.auth.error).toBe(failure);
@@ -105,7 +105,7 @@ describe('cookie-backed memory session', () => {
     refresh.mockRejectedValueOnce(new ApiRequestError(401, null));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
     await act(async () => {
-      await expect(result.current.client.request('/movies', { authenticated: true }))
+      await expect(result.current.client.request('/titles', { authenticated: true }))
         .rejects.toBeInstanceOf(ApiRequestError);
     });
     expect(result.current.auth.isAuthenticated).toBe(false);
@@ -210,7 +210,7 @@ describe('cookie-backed memory session', () => {
     window.localStorage.setItem(AUTH_GENERATION_STORAGE_KEY, JSON.stringify(marker));
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    await expect(result.current.client.request('/movies', { authenticated: true }))
+    await expect(result.current.client.request('/titles', { authenticated: true }))
       .rejects.toBeInstanceOf(AuthenticationSupersededError);
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -18,8 +18,8 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
 import com.vodplatform.catalog.exception.MovieNotFoundException;
-import com.vodplatform.catalog.service.LockedMovie;
-import com.vodplatform.catalog.service.MovieRowLocks;
+import com.vodplatform.catalog.service.LockedEpisode;
+import com.vodplatform.catalog.service.EpisodeRowLocks;
 import com.vodplatform.encoding.exception.UploadCommitUnknownException;
 import com.vodplatform.encoding.exception.UploadDatabaseException;
 import com.vodplatform.encoding.messaging.EncodingJobMessage;
@@ -62,7 +62,7 @@ class EncodingJobServiceTest {
 
     final EncodingJobRepository jobs = mock(EncodingJobRepository.class);
 
-    final MovieRowLocks locks = mock(MovieRowLocks.class);
+    final EpisodeRowLocks locks = mock(EpisodeRowLocks.class);
 
     final EncodingJobPublisher publisher = mock(EncodingJobPublisher.class);
 
@@ -74,8 +74,8 @@ class EncodingJobServiceTest {
 
     EncodingJobService service() {
         when(manager.getTransaction(any())).thenAnswer(call -> new SimpleTransactionStatus());
-        LockedMovie lock = mock(LockedMovie.class);
-        when(lock.movieId()).thenReturn(movie);
+        LockedEpisode lock = mock(LockedEpisode.class);
+        when(lock.episodeId()).thenReturn(movie);
         when(locks.lockForMediaWrite(movie)).thenReturn(lock);
         when(assets.save(any())).thenAnswer(call -> call.getArgument(0));
         return new EncodingJobService(assets, jobs, locks, publisher, clock, manager);
@@ -93,7 +93,7 @@ class EncodingJobServiceTest {
         service.commitNewUpload(movie, asset, job, "vod-raw", "owned-key");
         var order = inOrder(locks, assets, jobs);
         order.verify(locks).lockForMediaWrite(movie);
-        order.verify(assets).existsInFlightByMovieId(movie);
+        order.verify(assets).existsInFlightByEpisodeId(movie);
         order.verify(assets).save(any());
         order.verify(jobs).saveAndFlush(any());
         order.verify(locks).lockForMediaWrite(movie);
@@ -147,7 +147,7 @@ class EncodingJobServiceTest {
                             assertThat(event.getFormattedMessage())
                                     .startsWith(prefix)
                                     .contains(
-                                            "movieId=" + movie,
+                                            "episodeId=" + movie,
                                             "videoAssetId=" + asset,
                                             "encodingJobId=" + job)
                                     .doesNotContain("owned-key", "vod-raw", "response lost");
@@ -158,7 +158,7 @@ class EncodingJobServiceTest {
     @Test
     void precheckRepositoryFailureIsSafeAndMissingMoviePassesThrough() {
         var service = service();
-        when(assets.existsInFlightByMovieId(movie))
+        when(assets.existsInFlightByEpisodeId(movie))
                 .thenThrow(new IllegalStateException("secret DB diagnostic"));
         assertThatThrownBy(() -> service.precheck(movie))
                 .isInstanceOf(UploadDatabaseException.class)

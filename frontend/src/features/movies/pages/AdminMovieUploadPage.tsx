@@ -7,7 +7,7 @@ import { ForbiddenPage } from '../../../pages/AccessPages';
 import { NotFoundPage } from '../../../pages/NotFoundPage';
 import { getAdminMoviesReturnTo } from '../adminMovieNavigation';
 import { UploadExitGuard } from '../components/UploadExitGuard';
-import { useMovieDetail } from '../movieQueries';
+import { useAdminMovieDetail } from '../adminMovieQueries';
 import { MAX_UPLOAD_SIZE_MB } from '../uploadLimits';
 import { useVideoUpload } from '../useVideoUpload';
 import { VIDEO_FILE_ACCEPT } from '../videoUpload';
@@ -18,7 +18,7 @@ export function AdminMovieUploadPage() {
 }
 
 function MovieUploadRequest({ movieId }: { movieId: string }) {
-  const movie = useMovieDetail(movieId);
+  const movie = useAdminMovieDetail(movieId);
   const returnTo = getAdminMoviesReturnTo(useLocation().state);
   if (!isCanonicalUuid(movieId) || (movie.isError && movie.error instanceof ApiRequestError && [400, 404].includes(movie.error.status))) {
     return <NotFoundPage title="Movie not found" description="The movie could not be found." link={{ to: returnTo, label: 'Back to movies' }} />;

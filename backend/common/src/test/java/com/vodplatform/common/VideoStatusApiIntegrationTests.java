@@ -14,6 +14,7 @@ import com.vodplatform.catalog.persistence.MovieStatus;
 import com.vodplatform.catalog.service.MovieService;
 import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import java.sql.Timestamp;
@@ -65,16 +66,16 @@ class VideoStatusApiIntegrationTests implements PostgresTestDatabase {
             UUID pending = asset(movie, replacement, T0.plusSeconds(1));
             for (String role : List.of("ROLE_USER", "ROLE_ADMIN")) {
                 String bearer = bearer(role);
-                mockMvc.perform(get("/api/v1/movies").header(HttpHeaders.AUTHORIZATION, bearer))
-                        .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].videoStatus").value("READY"));
-                mockMvc.perform(get("/api/v1/movies/" + movie).header(HttpHeaders.AUTHORIZATION, bearer))
-                        .andExpect(status().isOk()).andExpect(jsonPath("$.videoStatus").value("READY"));
+                mockMvc.perform(get("/api/v1/titles").header(HttpHeaders.AUTHORIZATION, bearer))
+                        .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].availability").value("PLAYABLE"));
+                mockMvc.perform(get("/api/v1/titles/" + movie).header(HttpHeaders.AUTHORIZATION, bearer))
+                        .andExpect(status().isOk()).andExpect(jsonPath("$.episode.videoStatus").value("READY"));
             }
-            mockMvc.perform(get("/api/v1/admin/movies").header(HttpHeaders.AUTHORIZATION, bearer("ROLE_ADMIN")))
-                    .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].videoStatus").value("READY"));
-            mockMvc.perform(put("/api/v1/movies/" + movie).header(HttpHeaders.AUTHORIZATION, bearer("ROLE_ADMIN"))
+            mockMvc.perform(get("/api/v1/admin/titles").header(HttpHeaders.AUTHORIZATION, bearer("ROLE_ADMIN")))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].availability").value("PLAYABLE"));
+            mockMvc.perform(put("/api/v1/admin/titles/" + movie).header(HttpHeaders.AUTHORIZATION, bearer("ROLE_ADMIN"))
                             .contentType(MediaType.APPLICATION_JSON).content(BODY))
-                    .andExpect(status().isOk()).andExpect(jsonPath("$.videoStatus").value("READY"));
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.episode.videoStatus").value("READY"));
             jdbc.update("delete from video_assets where id = ?", pending);
         }
     }
@@ -83,17 +84,17 @@ class VideoStatusApiIntegrationTests implements PostgresTestDatabase {
     void missingAssetsAreNullAndNewestPendingIsReturnedWithoutRoleMasking() throws Exception {
         UUID movie = movie(MovieStatus.DRAFT, 0);
         String admin = bearer("ROLE_ADMIN");
-        mockMvc.perform(get("/api/v1/movies/" + movie).header(HttpHeaders.AUTHORIZATION, admin))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.videoStatus").isEmpty());
+        mockMvc.perform(get("/api/v1/admin/titles/" + movie).header(HttpHeaders.AUTHORIZATION, admin))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.episode.videoStatus").isEmpty());
         asset(movie, "FAILED", T0);
         asset(movie, "QUEUED", T0.plusSeconds(1));
-        mockMvc.perform(get("/api/v1/admin/movies").header(HttpHeaders.AUTHORIZATION, admin))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].videoStatus").value("QUEUED"));
-        mockMvc.perform(get("/api/v1/movies/" + movie).header(HttpHeaders.AUTHORIZATION, bearer("ROLE_USER")))
+        mockMvc.perform(get("/api/v1/admin/titles").header(HttpHeaders.AUTHORIZATION, admin))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].availability").value("PROCESSING"));
+        mockMvc.perform(get("/api/v1/titles/" + movie).header(HttpHeaders.AUTHORIZATION, bearer("ROLE_USER")))
                 .andExpect(status().isNotFound());
-        mockMvc.perform(post("/api/v1/movies").header(HttpHeaders.AUTHORIZATION, admin)
+        mockMvc.perform(post("/api/v1/admin/titles").header(HttpHeaders.AUTHORIZATION, admin)
                         .contentType(MediaType.APPLICATION_JSON).content(BODY))
-                .andExpect(status().isCreated()).andExpect(jsonPath("$.videoStatus").isEmpty());
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.episode.videoStatus").isEmpty());
     }
 
     @Test
@@ -110,7 +111,7 @@ class VideoStatusApiIntegrationTests implements PostgresTestDatabase {
                 entityManager.clear();
                 statistics.clear();
                 assertThat(movieService.listPublished(null, null, 0, pageSize, MovieSort.LATEST).getContent())
-                        .hasSize(pageSize).allSatisfy(movie -> assertThat(movie.videoStatus()).isEqualTo("READY"));
+                        .hasSize(pageSize).allSatisfy(movie -> assertThat(movie.availability().label()).isEqualTo("PLAYABLE"));
                 assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
             }
         } finally {
@@ -128,8 +129,8 @@ class VideoStatusApiIntegrationTests implements PostgresTestDatabase {
 
     private UUID asset(UUID movie, String status, Instant created) {
         UUID id = UUID.randomUUID();
-        jdbc.update("insert into video_assets (id,movie_id,raw_bucket,raw_object_key,status,created_at,updated_at) "
-                        + "values (?,?,'fixture',?,?,?,?)", id, movie, id.toString(), status,
+        jdbc.update("insert into video_assets (id,episode_id,raw_bucket,raw_object_key,status,created_at,updated_at) "
+                        + "values (?,?,'fixture',?,?,?,?)", id, EpisodeFixtures.episode(jdbc, movie), id.toString(), status,
                 Timestamp.from(created), Timestamp.from(created));
         return id;
     }

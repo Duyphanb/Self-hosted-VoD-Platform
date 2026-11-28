@@ -1,5 +1,6 @@
 package com.vodplatform.catalog.service;
 
+import com.vodplatform.catalog.persistence.MovieStatus;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -22,6 +23,14 @@ final class RecordingVideoStatusLookup implements VideoStatusLookup {
                 result.put(movieId, statuses.get(movieId));
             }
         }
+        return Map.copyOf(result);
+    }
+
+    @Override
+    public Map<UUID, Availability> titleAvailability(Collection<UUID> titleIds, Collection<MovieStatus> visibility) {
+        Map<UUID, Availability> result = new HashMap<>();
+        videoStatuses(titleIds).forEach((id, status) -> result.put(id, new Availability(1,
+                "READY".equals(status) ? 1 : 0, List.of("UPLOADED", "QUEUED", "PROCESSING").contains(status))));
         return Map.copyOf(result);
     }
 

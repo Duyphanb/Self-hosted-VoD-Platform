@@ -55,7 +55,7 @@ export async function uploadMovieVideo(
   // Only fill a missing browser MIME declaration. Preserve the original file name.
   if (file.type === '') body.append('file', file.slice(0, file.size, declaredType), file.name);
   else body.append('file', file, file.name);
-  const result = await client.upload(`/admin/movies/${canonicalId}/video`, body, options);
+  const result = await client.upload(`/admin/episodes/${canonicalId}/video`, body, options);
   if (result.status !== 202) throw new UnexpectedUploadResponseError();
   return { response: decodeVideoAssetStatusResponse(result.payload) };
 }
@@ -71,11 +71,17 @@ export function decodeVideoAssetStatusResponse(value: unknown): VideoAssetStatus
 export async function listAdminMovies(client: ApiClient, query: AdminMovieListQuery, signal?: AbortSignal): Promise<MoviePage> {
   const search = new URLSearchParams({ page: String(query.page), size: String(query.size), sort: query.sort });
   if (query.status !== null) search.set('status', query.status);
-  return decodeMoviePage(await client.request<unknown>(`/admin/movies?${search}`, { authenticated: true, signal }));
+  return decodeMoviePage(await client.request<unknown>(`/admin/titles?${search}`, { authenticated: true, signal }));
 }
 
 export async function createMovie(client: ApiClient, payload: UpsertMovieRequest, signal?: AbortSignal): Promise<MovieDetail> {
-  return requireMovie(await client.request<unknown>('/movies', { authenticated: true, method: 'POST', json: payload, signal }));
+  return requireMovie(await client.request<unknown>('/admin/titles', {
+    authenticated: true, method: 'POST', json: { ...payload, contentType: 'MOVIE' }, signal
+  }));
+}
+
+export async function getAdminMovie(client: ApiClient, movieId: string, signal?: AbortSignal): Promise<MovieDetail> {
+  return requireMovie(await client.request<unknown>(moviePath(movieId), { authenticated: true, signal }));
 }
 
 export async function updateMovie(client: ApiClient, movieId: string, payload: UpsertMovieRequest, signal?: AbortSignal): Promise<MovieDetail> {
@@ -109,7 +115,7 @@ export async function createPerson(client: ApiClient, name: string, signal?: Abo
 function moviePath(movieId: string): string {
   const canonicalId = movieId.toLowerCase();
   if (!isCanonicalUuid(canonicalId)) throw new Error('A valid movie ID is required');
-  return `/movies/${canonicalId}`;
+  return `/admin/titles/${canonicalId}`;
 }
 
 function requireMovie(value: unknown): MovieDetail {

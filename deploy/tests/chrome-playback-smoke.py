@@ -127,19 +127,20 @@ def seed(project, base_url, env, worker_image):
     movie = {"title": "Chrome playback smoke", "slug": "chrome-playback-smoke",
              "description": "Generated browser smoke fixture.", "releaseYear": 2024,
              "maturityRating": "T13", "genres": ["Smoke"], "people": [], "status": "PUBLISHED"}
-    status, created = stack.request("/api/v1/movies", auth["accessToken"],
+    status, created = stack.request("/api/v1/admin/titles", auth["accessToken"],
                                     json.dumps(movie).encode(), "application/json")
     if status != 201:
         raise SmokeFailure("published movie creation rejected")
     movie_id = uuid.UUID(created["id"])
+    episode_id = uuid.UUID(created["episode"]["id"])
     content_type, body = worker["multipart"]("file", "chrome-fixture.mp4", "video/mp4", clip)
-    status, accepted = stack.request(f"/api/v1/admin/movies/{movie_id}/video", auth["accessToken"],
+    status, accepted = stack.request(f"/api/v1/admin/episodes/{episode_id}/video", auth["accessToken"],
                                      body, content_type, timeout=120)
     if status != 202:
         raise SmokeFailure("fixture upload rejected")
     asset = uuid.UUID(accepted["videoAssetId"])
     wait_for_ready(stack, asset)
-    return movie_id, asset
+    return movie_id, episode_id, asset
 
 
 def remove_browser_output(output):
@@ -161,12 +162,13 @@ def remove_browser_output(output):
 def run_browser(project, base_url, env):
     stage = "prepare fixture"
     try:
-        movie, asset = seed(project, base_url, env, f"{project}-worker")
+        movie, episode, asset = seed(project, base_url, env, f"{project}-worker")
         browser_env = os.environ.copy()
         for key in ("DEBUG", "PWDEBUG", "NODE_DEBUG"):
             browser_env.pop(key, None)
         browser_env.update({
-            "VOD_CHROME_BASE_URL": base_url, "VOD_CHROME_MOVIE_ID": str(movie), "VOD_CHROME_ASSET_ID": str(asset),
+            "VOD_CHROME_BASE_URL": base_url, "VOD_CHROME_MOVIE_ID": str(movie), "VOD_CHROME_EPISODE_ID": str(episode),
+            "VOD_CHROME_ASSET_ID": str(asset),
             "VOD_CHROME_EMAIL": env["NEWMAN_ADMIN_EMAIL"], "VOD_CHROME_PASSWORD": env["NEWMAN_ADMIN_PASSWORD"],
         })
         stage = "Chrome playback scenario"

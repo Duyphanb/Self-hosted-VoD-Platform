@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import com.vodplatform.progress.service.ProgressNormalizer;
 import com.vodplatform.progress.service.StoredProgress;
 import jakarta.persistence.EntityManagerFactory;
@@ -60,7 +61,7 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
 
     @AfterEach
     void cleanup() {
-        for (UUID id : movies) jdbc.update("delete from titles where id=?", id);
+        for (UUID id : movies) EpisodeFixtures.removeTitle(jdbc, id);
         for (UUID id : genres) jdbc.update("delete from genres where id=?", id);
         for (UUID id : users) jdbc.update("delete from users where id=?", id);
     }
@@ -84,7 +85,7 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
         addGenres(first);
         valid(0, 100, T0.plusSeconds(1));
         UUID finished = valid(90, 100, T0.plusSeconds(1));
-        jdbc.update("update playback_progress set finished=true where movie_id=?", finished);
+        jdbc.update("update playback_progress set finished=true where episode_id=?", EpisodeFixtures.episode(jdbc, finished));
         valid(100, 100, T0.plusSeconds(1));
         UUID shorter = valid(140, 200, T0.plusSeconds(1));
         asset(shorter, UUID.randomUUID(), "READY", 100, T0.plusSeconds(1));
@@ -103,8 +104,8 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
                         JsonCompareMode.STRICT));
         JsonNode result = list(token);
         for (JsonNode item : result) {
-            String id = item.path("movie").path("id").asString();
-            var response = mvc.perform(get("/api/v1/movies/" + id + "/progress")
+            String id = item.path("episode").path("id").asString();
+            var response = mvc.perform(get("/api/v1/episodes/" + id + "/progress")
                             .header("Authorization", token)).andExpect(status().isOk()).andReturn();
             assertThat(item.path("progress"))
                     .isEqualTo(mapper.readTree(response.getResponse().getContentAsString()));
@@ -161,7 +162,7 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
         assertThat(result).containsExactlyElementsOf(
                 java.util.stream.Stream.concat(newer.stream(), java.util.stream.Stream.of(high)).toList());
         // Without the 49 newer rows both tied movies remain in database order, not UUID.compareTo.
-        for (UUID id : newer) jdbc.update("delete from playback_progress where movie_id=?", id);
+        for (UUID id : newer) jdbc.update("delete from playback_progress where episode_id=?", EpisodeFixtures.episode(jdbc, id));
         assertThat(ids(list(token))).containsExactly(high, low);
     }
 
@@ -173,8 +174,8 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
             UUID id = valid(40, 100, T0.plusSeconds(100 + i));
             switch (i % 3) {
                 case 0 -> jdbc.update("update titles set status='DRAFT' where id=?", id);
-                case 1 -> jdbc.update("update playback_progress set finished=true where movie_id=?", id);
-                default -> jdbc.update("update video_assets set status='QUEUED' where movie_id=?", id);
+                case 1 -> jdbc.update("update playback_progress set finished=true where episode_id=?", EpisodeFixtures.episode(jdbc, id));
+                default -> jdbc.update("update video_assets set status='QUEUED' where episode_id=?", EpisodeFixtures.episode(jdbc, id));
             }
         }
         assertThat(ids(list(token))).containsExactlyElementsOf(expected);
@@ -245,18 +246,59 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
 
     private List<UUID> ids(JsonNode result) {
         List<UUID> ids = new ArrayList<>();
-        for (JsonNode item : result) ids.add(UUID.fromString(item.path("movie").path("id").asString()));
+        for (JsonNode item : result) ids.add(UUID.fromString(item.path("title").path("id").asString()));
         return ids;
     }
 
     private String itemJson(UUID movie, int position, int duration, Instant played, String genres) {
+        UUID episode = EpisodeFixtures.episode(jdbc, movie);
+        var progress = """
+                {"episodeId":"%s","currentSeconds":%d,"durationSeconds":%d,
+                 "finished":false,"lastPlayedAt":"%s"}
+                """.formatted(episode, position, duration, played);
         return """
-                {"movie":{"id":"%s","title":"Continue fixture","slug":"continue-%s",
+                {"kind":"RESUME","title":{"id":"%s","title":"Continue fixture","slug":"continue-%s",
                   "description":"Continue fixture","releaseYear":2026,"posterUrl":null,
-                  "genres":%s,"averageRating":null,"status":"PUBLISHED","videoStatus":"READY"},
-                 "progress":{"movieId":"%s","currentSeconds":%d,"durationSeconds":%d,
-                  "finished":false,"lastPlayedAt":"%s"}}
-                """.formatted(movie, movie, genres, movie, position, duration, played);
+                  "genres":%s,"averageRating":null,"status":"PUBLISHED","contentType":"MOVIE",
+                  "partLabel":null,"episodeCount":1,"playableEpisodeCount":1,"availability":"PLAYABLE"},
+                 "episode":{"id":"%s","titleId":"%s","ordinal":1,"displayLabel":"1","name":null,
+                  "videoStatus":"READY","progress":%s},"progress":%s}
+                """.formatted(movie, movie, genres, episode, movie, progress, progress);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"DRAFT", "PUBLISHED"})
+    void latestFinishedEpisodeDoesNotFallBackOrSkipItsImmediateSuccessor(String successorStatus) throws Exception {
+        UUID title = valid(32, 100, T0);
+        jdbc.update("update titles set content_type='TV_SEASON' where id=?", title);
+        UUID anchor = extraEpisode(title, 2, "PUBLISHED");
+        UUID successor = extraEpisode(title, 3, successorStatus);
+        UUID later = extraEpisode(title, 4, "PUBLISHED");
+        assertThat(later).isNotEqualTo(successor);
+        rawAsset(anchor, UUID.randomUUID(), "READY", 100, T0);
+        rawAsset(later, UUID.randomUUID(), "READY", 100, T0);
+        rawProgress(user, anchor, 92, true, T0.plusSeconds(10));
+        assertThat(list(token)).isEmpty();
+
+        rawAsset(successor, UUID.randomUUID(), "READY", 100, T0);
+        if (successorStatus.equals("DRAFT")) {
+            assertThat(list(token)).isEmpty();
+            jdbc.update("update episodes set status='PUBLISHED' where id=?", successor);
+        }
+        var result = list(token);
+        assertThat(result.size()).isEqualTo(1);
+        assertThat(result.get(0).path("kind").asString()).isEqualTo("NEXT_EPISODE");
+        assertThat(result.get(0).path("episode").path("id").asString()).isEqualTo(successor.toString());
+        assertThat(result.get(0).path("progress").isNull()).isTrue();
+    }
+
+    private UUID extraEpisode(UUID title, int ordinal, String status) {
+        UUID episode = UUID.randomUUID();
+        jdbc.update("""
+                insert into episodes (id,title_id,ordinal,display_label,status,created_at,updated_at)
+                values (?, ?, ?, ?, ?, now(), now())
+                """, episode, title, ordinal, Integer.toString(ordinal), status);
+        return episode;
     }
 
     private UUID valid(int position, Integer duration, Instant played) {
@@ -269,25 +311,34 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
     private UUID movie(UUID id, String status) {
         movies.add(id);
         jdbc.update("""
-                insert into titles(id,title,slug,description,release_year,status,created_at,updated_at)
-                values(?,'Continue fixture',?,'Continue fixture',2026,?,?,?)
+                insert into titles(id,title,slug,description,release_year,status,created_at,updated_at,content_type)
+                values(?,'Continue fixture',?,'Continue fixture',2026,?,?,?,'MOVIE')
                 """, id, "continue-" + id, status, Timestamp.from(T0), Timestamp.from(T0));
+        EpisodeFixtures.addFilmEpisode(jdbc, id);
         return id;
     }
 
     private void asset(UUID movie, UUID id, String state, Integer duration, Instant created) {
+        rawAsset(EpisodeFixtures.episode(jdbc, movie), id, state, duration, created);
+    }
+
+    private void rawAsset(UUID episode, UUID id, String state, Integer duration, Instant created) {
         jdbc.update("""
-                insert into video_assets(id,movie_id,raw_bucket,raw_object_key,status,duration_seconds,created_at,updated_at)
+                insert into video_assets(id,episode_id,raw_bucket,raw_object_key,status,duration_seconds,created_at,updated_at)
                 values(?,?,'fixture',?,?,?,?,?)
-                """, id, movie, id.toString(), state, duration, Timestamp.from(created), Timestamp.from(created));
+                """, id, episode, id.toString(), state, duration, Timestamp.from(created), Timestamp.from(created));
     }
 
     private void progress(UUID owner, UUID movie, int position, boolean finished, Instant played) {
+        rawProgress(owner, EpisodeFixtures.episode(jdbc, movie), position, finished, played);
+    }
+
+    private void rawProgress(UUID owner, UUID episode, int position, boolean finished, Instant played) {
         jdbc.update("""
-                insert into playback_progress(user_id,movie_id,current_seconds,duration_seconds,finished,
+                insert into playback_progress(user_id,episode_id,current_seconds,duration_seconds,finished,
                                               last_played_at,created_at,updated_at)
                 values(?,?,?,999,?,?,?,?)
-                """, owner, movie, position, finished, Timestamp.from(played), Timestamp.from(T0), Timestamp.from(T0));
+                """, owner, episode, position, finished, Timestamp.from(played), Timestamp.from(T0), Timestamp.from(T0));
     }
 
     private UUID user() {

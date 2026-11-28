@@ -163,10 +163,10 @@ function renderGuestRoutes() {
     <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }} initialEntries={['/']}>
       <TestProviders>
         <Routes>
-          <Route element={<GuestRoute signedInPath="/movies" />}>
+          <Route element={<GuestRoute signedInPath="/titles" />}>
             <Route index element={<div>Landing content</div>} />
           </Route>
-          <Route path="/movies" element={<div>Signed-in destination</div>} />
+          <Route path="/titles" element={<div>Signed-in destination</div>} />
         </Routes>
       </TestProviders>
     </MemoryRouter>

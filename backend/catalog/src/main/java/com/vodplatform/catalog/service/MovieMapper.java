@@ -1,6 +1,7 @@
 package com.vodplatform.catalog.service;
 
 import com.vodplatform.catalog.dto.CreditedPerson;
+import com.vodplatform.catalog.dto.EpisodeSummary;
 import com.vodplatform.catalog.dto.MovieDetail;
 import com.vodplatform.catalog.dto.MovieSummary;
 import com.vodplatform.catalog.persistence.Genre;
@@ -25,7 +26,7 @@ final class MovieMapper {
     /**
      * @param genres the genres assigned to the movie, in any order
      */
-    static MovieSummary toSummary(Movie movie, Collection<Genre> genres, String videoStatus) {
+    static MovieSummary toSummary(Movie movie, Collection<Genre> genres, VideoStatusLookup.Availability availability) {
         return new MovieSummary(
                 movie.getId(),
                 movie.getTitle(),
@@ -34,11 +35,17 @@ final class MovieMapper {
                 movie.getReleaseYear(),
                 genreNames(genres),
                 movie.getStatus(),
-                videoStatus
+                movie.getContentType(),
+                movie.getPartLabel(),
+                availability
         );
     }
 
     static MovieDetail toDetail(Movie movie, String videoStatus) {
+        return toDetail(movie, videoStatus, VideoStatusLookup.Availability.singleEpisode(videoStatus));
+    }
+
+    static MovieDetail toDetail(Movie movie, String videoStatus, VideoStatusLookup.Availability availability) {
         List<CreditedPerson> people = movie.getCredits().stream()
                 .map(credit -> new CreditedPerson(
                         credit.getPerson().getId(),
@@ -46,6 +53,7 @@ final class MovieMapper {
                         credit.getRole()
                 ))
                 .toList();
+        var episode = movie.movieEpisode();
         return new MovieDetail(
                 movie.getId(),
                 movie.getTitle(),
@@ -56,7 +64,11 @@ final class MovieMapper {
                 genreNames(movie.getGenres()),
                 people,
                 movie.getStatus(),
-                videoStatus
+                videoStatus,
+                movie.getContentType(),
+                movie.getPartLabel(),
+                episode == null ? null : EpisodeSummary.of(episode, videoStatus, null),
+                availability
         );
     }
 

@@ -15,6 +15,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import com.vodplatform.encoding.messaging.EncodingJobMessage;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
 import com.vodplatform.encoding.messaging.PublishOutcome;
@@ -95,8 +96,8 @@ class UploadTransactionTests implements PostgresTestDatabase {
     UUID movie(String status) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-                "insert into titles (id,title,slug,description,status,created_at,updated_at) values"
-                        + " (?,?,?,? ,?,?,?)",
+                "insert into titles (id,title,slug,description,status,created_at,updated_at,content_type) values"
+                        + " (?,?,?,? ,?,?,?,'MOVIE')",
                 id,
                 "Upload fixture",
                 "upload-" + id,
@@ -105,7 +106,7 @@ class UploadTransactionTests implements PostgresTestDatabase {
                 Timestamp.from(Instant.now()),
                 Timestamp.from(Instant.now()));
         movies.add(id);
-        return id;
+        return EpisodeFixtures.addFilmEpisode(jdbc, id);
     }
 
     MockMultipartFile file() {
@@ -116,12 +117,7 @@ class UploadTransactionTests implements PostgresTestDatabase {
     @AfterEach
     void clean() {
         for (UUID id : movies) {
-            jdbc.update(
-                    "delete from encoding_jobs where video_asset_id in "
-                            + "(select id from video_assets where movie_id=?)",
-                    id);
-            jdbc.update("delete from video_assets where movie_id=?", id);
-            jdbc.update("delete from titles where id=?", id);
+            EpisodeFixtures.removeTitle(jdbc, id);
         }
     }
 
@@ -199,13 +195,13 @@ class UploadTransactionTests implements PostgresTestDatabase {
         UUID id = movie("DRAFT");
         doAnswer(
                         call -> {
-                            jdbc.update("delete from titles where id=?", id);
+                            jdbc.update("delete from episodes where id=?", id);
                             return null;
                         })
                 .when(storage)
                 .put(anyString(), anyString(), any(), anyLong(), anyString());
         assertThatThrownBy(() -> upload.upload(id, file(), Optional.empty()))
-                .isInstanceOf(com.vodplatform.catalog.exception.MovieNotFoundException.class);
+                .isInstanceOf(com.vodplatform.catalog.exception.EpisodeNotFoundException.class);
         verify(publisher, never()).publish(any(), any());
         verify(storage).delete(anyString(), anyString());
     }
@@ -213,8 +209,8 @@ class UploadTransactionTests implements PostgresTestDatabase {
     void requireOnlyOwnedPendingJobs() {
         List<UUID> owners =
                 jdbc.queryForList(
-                        "select distinct a.movie_id from encoding_jobs j join video_assets a on"
-                            + " a.id=j.video_asset_id where j.status='QUEUED' and j.published_at is"
+                        "select distinct e.title_id from encoding_jobs j join video_assets a on"
+                            + " a.id=j.video_asset_id join episodes e on e.id=a.episode_id where j.status='QUEUED' and j.published_at is"
                             + " null",
                         UUID.class);
         assertThat(movies)
@@ -278,7 +274,7 @@ class UploadTransactionTests implements PostgresTestDatabase {
             var at = Timestamp.from(clock.instant().minusSeconds(200 - n));
             jdbc.update(
                     "insert into video_assets"
-                        + " (id,movie_id,raw_bucket,raw_object_key,status,created_at,updated_at)"
+                        + " (id,episode_id,raw_bucket,raw_object_key,status,created_at,updated_at)"
                         + " values (?,?,'vod-raw',?,'FAILED',?,?)",
                     asset,
                     movie,
@@ -311,7 +307,7 @@ class UploadTransactionTests implements PostgresTestDatabase {
                 .containsExactlyElementsOf(
                         jdbc.queryForList(
                                 "select id from encoding_jobs where video_asset_id in (select id"
-                                    + " from video_assets where movie_id=?) order by queued_at,id"
+                                    + " from video_assets where episode_id=?) order by queued_at,id"
                                     + " limit 50",
                                 UUID.class,
                                 movie));

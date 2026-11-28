@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.vodplatform.common.contract.ApiContract;
 import com.vodplatform.common.support.BearerSessionFixture;
 import com.vodplatform.common.support.PostgresTestDatabase;
+import com.vodplatform.common.support.EpisodeFixtures;
 import com.vodplatform.encoding.messaging.EncodingJobPublisher;
 import com.vodplatform.encoding.messaging.PublishOutcome;
 import com.vodplatform.shared.storage.ObjectStorage;
@@ -82,6 +83,7 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
     @MockitoBean EncodingJobPublisher publisher;
 
     private UUID movie;
+    private UUID episode;
 
     @BeforeEach
     void fixture() {
@@ -89,8 +91,8 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
         when(publisher.publish(any(), any())).thenReturn(new PublishOutcome.Confirmed());
         movie = UUID.randomUUID();
         jdbc.update(
-                "insert into titles (id,title,slug,description,status,created_at,updated_at)"
-                        + " values (?,?,?,?,?,?,?)",
+                "insert into titles (id,title,slug,description,status,created_at,updated_at,content_type)"
+                        + " values (?,?,?,?,?,?,?,'TV_SEASON')",
                 movie,
                 "Upload race fixture",
                 "upload-race-" + movie,
@@ -98,16 +100,12 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
                 "DRAFT",
                 Timestamp.from(Instant.now()),
                 Timestamp.from(Instant.now()));
+        episode = EpisodeFixtures.addFilmEpisode(jdbc, movie);
     }
 
     @AfterEach
     void cleanOwnRows() {
-        jdbc.update(
-                "delete from encoding_jobs where video_asset_id in "
-                        + "(select id from video_assets where movie_id=?)",
-                movie);
-        jdbc.update("delete from video_assets where movie_id=?", movie);
-        jdbc.update("delete from titles where id=?", movie);
+        EpisodeFixtures.removeTitle(jdbc, movie);
     }
 
     private String admin() {
@@ -128,7 +126,7 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
                         })
                 .when(storage)
                 .put(anyString(), anyString(), any(), anyLong(), anyString());
-        String path = "/api/v1/admin/movies/" + movie + "/video";
+        String path = uploadPath(episode);
         var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
         var body = PREFIX + "0000ftypxxxx\r\n--race--\r\n";
         List<HttpResponse<String>> responses;
@@ -183,13 +181,13 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
         String loserKey = keys.stream().filter(key -> !key.contains(winner)).findFirst().orElseThrow();
         verify(storage, times(1)).delete(anyString(), anyString());
         verify(storage).delete(eq("vod-raw"), eq(loserKey));
-        assertThat(jdbc.queryForObject("select count(*) from video_assets where movie_id=?", Integer.class, movie))
+        assertThat(jdbc.queryForObject("select count(*) from video_assets where episode_id=?", Integer.class, episode))
                 .isEqualTo(1);
         assertThat(jdbc.queryForObject(
                         "select count(*) from encoding_jobs j join video_assets a on a.id=j.video_asset_id"
-                                + " where a.movie_id=?",
+                                + " where a.episode_id=?",
                         Integer.class,
-                        movie))
+                        episode))
                 .isEqualTo(1);
 
         Path spool = Path.of(multipart.getLocation());
@@ -198,6 +196,45 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
             Thread.sleep(20);
         }
         assertThat(hasSpoolFiles(spool)).as("spool released after both requests").isFalse();
+    }
+
+    @Test
+    void parallelUploadsToDifferentEpisodesOfOneTitleBothCommit() throws Exception {
+        UUID second = UUID.randomUUID();
+        jdbc.update("""
+                insert into episodes (id,title_id,ordinal,display_label,status,created_at,updated_at)
+                values (?, ?, 2, '2', 'DRAFT', now(), now())
+                """, second, movie);
+        CountDownLatch bothStoring = new CountDownLatch(2);
+        doAnswer(call -> {
+            bothStoring.countDown();
+            assertThat(bothStoring.await(15, TimeUnit.SECONDS)).isTrue();
+            assertThat(call.<String>getArgument(1)).startsWith(movie + "/");
+            return null;
+        }).when(storage).put(anyString(), anyString(), any(), anyLong(), anyString());
+        var client = HttpClient.newHttpClient();
+        String bearer = admin();
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(() -> sendUpload(client, episode, bearer));
+            var next = pool.submit(() -> sendUpload(client, second, bearer));
+            assertThat(first.get(40, TimeUnit.SECONDS).statusCode()).isEqualTo(202);
+            assertThat(next.get(40, TimeUnit.SECONDS).statusCode()).isEqualTo(202);
+        }
+        assertThat(jdbc.queryForList("select episode_id from video_assets where episode_id in (?, ?)",
+                UUID.class, episode, second)).containsExactlyInAnyOrder(episode, second);
+    }
+
+    private HttpResponse<String> sendUpload(HttpClient client, UUID target, String bearer) throws Exception {
+        var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + uploadPath(target)))
+                .timeout(Duration.ofSeconds(30)).header("Authorization", bearer)
+                .header("Content-Type", "multipart/form-data; boundary=race")
+                .POST(HttpRequest.BodyPublishers.ofString(PREFIX + "0000ftypxxxx\r\n--race--\r\n"))
+                .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static String uploadPath(UUID target) {
+        return "/api/v1/admin/episodes/" + target + "/video";
     }
 
     private static boolean hasSpoolFiles(Path spool) throws Exception {
