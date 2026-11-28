@@ -121,8 +121,8 @@ If your local `.env` predates Issue 6.9, explicitly update it to `CORS_ALLOWED_O
 
 ### Frontend development
 
-Start the [local Compose stack](#run-the-local-stack) with its Nginx edge. From `frontend/`, use Node 22
-(`nvm use` with a compatible version manager), then run:
+Start the [local Compose stack](#run-the-local-stack) with its Nginx edge. From `frontend/`, use Node 22.22.2 or a
+later Node 22 release (`nvm use` with a compatible version manager), then run:
 
 ```bash
 npm ci
@@ -158,10 +158,16 @@ and reloading after logout leaves you signed out. Login and refresh set a host-o
 Open an authenticated page or play a ready title and check that protected API and HLS requests use
 the same Vite origin and carry the access bearer.
 
+Use one UI origin per browser profile. The Compose UI (`http://localhost`) and the Vite UI share the `vod_refresh`
+cookie, because cookies ignore ports, but not their refresh locks. Refreshing in both at once can trip ADR-012's
+refresh-replay protection and sign you out everywhere.
+
 Dev and `npm run preview` bind to loopback by default. Preview serves the built files on port 4173.
-`npm run dev:lan` and `npm run preview:lan` explicitly bind to all interfaces. Use the LAN scripts
-only on a trusted network with local credentials configured for that exposure. For authenticated LAN
-access, see the HTTPS requirement [below](#lan-access-for-a-demo).
+`npm run dev:lan` and `npm run preview:lan` explicitly bind to all interfaces. `dev:lan` makes the API
+and HLS routes reachable from the network through the proxy, even while Nginx stays on loopback. Before
+you run it, replace the published `JWT_SECRET` and the other placeholders as in step 1 of
+[LAN access for a demo](#lan-access-for-a-demo), recreate the backend, and use it only on a trusted
+network. Signing in from other devices still needs HTTPS, as that section explains.
 
 From the repository root, `python deploy/tests/frontend-build-context-smoke.py` checks that a
 synthetic `.env` marker is absent from both the Docker context and the built frontend bundle.
