@@ -289,7 +289,7 @@ proxy address (Nginx's `/32` on `vod_proxy`); the backend port must never be pub
 Before placing a load balancer or CDN ahead of Nginx, configure `real_ip` and review the
 `X-Forwarded-For` trust boundary (#51, #136). HSTS stays deferred at the edge; Spring's HSTS is disabled.
 
-Planned ([ADR-015 D15](adr/ADR-015.md#d15-privacy-logs-and-caching), with Issue 7.5 / #263): the edge and the SPA's static server log requests with a format that records the path (`$uri`) but never the query string, the full request line or the Referer (`$request`, `$request_uri`, `$args`, `$http_referer`), in every location including the named error locations; the static server may instead turn its access log off. The `/api/v1/search` and `/api/v1/search/suggestions` locations log errors only at a level that excludes Nginx's request-line errors, so a search term never reaches a log even when the backend is unreachable.
+Planned ([ADR-015 D15](adr/ADR-015.md#d15-privacy-logs-and-caching), with Issue 7.5 / #263): the edge and the SPA's static server log requests with a format that records the path (`$uri`) but never the query string, the full request line or the Referer (`$request`, `$request_uri`, `$args`, `$http_referer`), in every location including the named error locations; the static server may instead turn its access log off. Nginx appends the request line, query included, to every error it logs for a request, at any severity, so the `/api/v1/search` and `/api/v1/search/suggestions` locations send their error log to `/dev/null`; a search term then never reaches a log even when the backend is unreachable, and the access log still records those requests' status and request ID.
 
 HLS MIME baseline:
 
