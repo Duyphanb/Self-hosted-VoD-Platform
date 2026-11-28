@@ -16,10 +16,12 @@ public interface VideoAssetRepository extends JpaRepository<VideoAsset, UUID> {
 
     Optional<VideoAsset> findFirstByEpisodeIdOrderByCreatedAtDescIdDesc(UUID episodeId);
 
+    /** Greatest (created_at, id), using database UUID order rather than Java UUID.compareTo. */
     default Optional<VideoAsset> findNewestByEpisodeId(UUID episodeId) {
         return findFirstByEpisodeIdOrderByCreatedAtDescIdDesc(episodeId);
     }
 
+    /** The episode's current asset, as the one shared definition {@code current_episode_assets} selects it. */
     @Query(value = """
             SELECT asset.* FROM video_assets asset
             JOIN current_episode_assets current_asset ON current_asset.asset_id = asset.id
@@ -27,15 +29,24 @@ public interface VideoAssetRepository extends JpaRepository<VideoAsset, UUID> {
             """, nativeQuery = true)
     Optional<VideoAsset> findCurrentReadyByEpisodeId(UUID episodeId);
 
+    /**
+     * The asset only while it is its episode's current asset; HLS checks this on every request. The view is
+     * filtered by the asset's own episode, its {@code DISTINCT ON} key, so PostgreSQL reads that episode's index
+     * entries instead of ranking every READY asset.
+     */
     @Query(value = """
             SELECT asset.* FROM video_assets asset
-            JOIN current_episode_assets current_asset ON current_asset.asset_id = asset.id
             WHERE asset.id = :assetId
+              AND asset.id = (
+                  SELECT current_asset.asset_id FROM current_episode_assets current_asset
+                  WHERE current_asset.episode_id = asset.episode_id
+              )
             """, nativeQuery = true)
     Optional<VideoAsset> findCurrentReadyById(UUID assetId);
 
     boolean existsByEpisodeIdAndStatusIn(UUID episodeId, Collection<VideoAssetStatus> statuses);
 
+    /** Advisory check only; the partial unique index {@code ux_video_assets_episode_in_flight} decides races. */
     default boolean existsInFlightByEpisodeId(UUID episodeId) {
         return existsByEpisodeIdAndStatusIn(episodeId, VideoAssetStatus.IN_FLIGHT);
     }
