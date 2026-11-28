@@ -75,12 +75,14 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
 **The window**
 
 1. **Stop new uploads.**
-   - Close the upload location in the deployed Nginx configuration so that it answers 503.
+   - Keep a copy of the deployed Nginx configuration file. Compose bind-mounts it from the host, so the change below
+     outlives a restart until it is undone.
+   - Close the upload location in that file so that it answers 503.
    - Check the configuration with `$C exec nginx nginx -t`, then reload gracefully with `$C exec nginx nginx -s reload`.
    - A new upload `POST` must now get 503, while `/api/v1/health` still returns 200.
    - Uploads already accepted finish on the previous Nginx worker generation. Wait until those worker processes have
-     exited, within a time limit you set. If uploads still run at the limit, decide whether to wait or to cut them.
-   - The edge started in step 6 uses the release's own configuration, with uploads open.
+     exited. Do not cut an accepted upload. If the drain takes longer than the window allows, abort the cutover:
+     restore the saved configuration, reload, and reopen uploads.
 2. **Stop the edge and the backend:** `$C stop nginx backend`. No job is published any more; the worker keeps
    consuming what the broker already holds.
 3. **Drain the worker.**
@@ -94,13 +96,17 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
    - If you cannot wait, stopping the worker interrupts one encode. It fails as `WORKER_INTERRUPTED` at the next
      start and needs a retry or a new upload ([Encoding Recovery](#encoding-recovery)).
 4. **Record, dump and prove the restore.**
-   - Record the row counts of `movies`, `movie_genres`, `movie_credits`, `ratings` and `watchlist_items`.
-   - Take `pg_dump --format=custom` of the application database.
+   - Record the row counts of `movies`, `movie_genres`, `movie_credits`, `ratings` and `watchlist_items`, and the
+     database-level privileges of the runtime roles (`has_database_privilege(<role>, current_database(), 'CONNECT')`
+     and `'TEMP'`).
+   - Take `pg_dump --format=custom` of the application database. With `pg_restore --create`, the dump also carries the
+     database's own ACL and settings. Roles are cluster-wide and are not in it.
    - Prove that it restores:
      - use a disposable PostgreSQL of the same image and ICU settings;
-     - roles are cluster-wide, so create the owner and grantee roles empty first;
-     - run `pg_restore --clean --if-exists --single-transaction --exit-on-error`;
-     - require exit code 0, a Flyway history ending at 6, and the recorded row counts.
+     - create the owner and the runtime login roles first, as `deploy/postgres-init.sh` does;
+     - restore with `pg_restore --create --exit-on-error -d postgres` from the maintenance database;
+     - require exit code 0, a Flyway history ending at 6, the recorded row counts and the recorded database-level
+       privileges.
 5. **Apply the migration alone:** `$C run --rm --no-deps flyway`.
    - V7 runs in one transaction, so a failed V7 leaves V6 unchanged.
    - The `afterMigrate` grants callback runs in its own transaction after V7. If it fails, V7 can stay committed with
@@ -114,19 +120,24 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
    - the runtime roles keep exactly their table grants (the privilege query in
      `deploy/tests/title-rename-migration-smoke.sh`).
 6. **Decide here,** before any new backend or worker runs.
+   - On either path, restore the saved Nginx configuration before the edge starts.
    - **Roll forward** if step 5 passed:
      - `$C up -d --no-build --no-deps --wait backend worker frontend`;
      - then `$C up -d --no-build --no-deps --wait nginx`.
 
      `--no-deps` keeps Compose from running `postgres-init` and Flyway again after this point.
    - **Roll back** if anything in step 5 failed:
-     - restore the dump into a clean database (recreate the database or use a new volume, with the roles present),
-       stopping on any error;
-     - verify that the Flyway history ends at 6, that the schema matches the V6 snapshot (`schema-snapshot.py` from the
-       V6 checkout) and that the grants are exact;
+     - drop the application database, then restore the dump with `pg_restore --create --exit-on-error -d postgres`.
+       It recreates the database with its V6 ACL and settings in the same cluster, where the roles already exist.
+       Stop on any error;
+     - on that database, verify that the Flyway history ends at 6, that the schema matches the V6 snapshot
+       (`schema-snapshot.py` from the V6 checkout), that the table grants are exact, and that the database-level
+       privileges equal those recorded in step 4;
      - from the V6 checkout, point the image tags back with `docker image tag "$PROJECT-backend:pre-v7" "$PROJECT-backend"`
        and the same for `worker` and `frontend`;
      - start with the same two `--no-deps` commands.
+   - After the edge is up on either path, check that uploads are open again: an unauthenticated upload `POST` gets 401
+     from the backend, not the 503 of step 1.
 
    Once the new backend or worker has started, the only way back is forward.
 
