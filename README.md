@@ -160,7 +160,8 @@ the same Vite origin and carry the access bearer.
 
 Use one UI origin per browser profile. The Compose UI (`http://localhost`) and the Vite UI share the `vod_refresh`
 cookie, because cookies ignore ports, but not their refresh locks. Refreshing in both at once can trip ADR-012's
-refresh-replay protection and sign you out everywhere.
+refresh-replay protection, which revokes that browser session and signs both local UIs out. Sessions on other
+devices are not affected.
 
 Dev and `npm run preview` bind to loopback by default. Preview serves the built files on port 4173.
 `npm run dev:lan` and `npm run preview:lan` explicitly bind to all interfaces. `dev:lan` makes the API
