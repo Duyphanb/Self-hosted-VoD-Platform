@@ -10,6 +10,8 @@ import com.vodplatform.auth.persistence.RoleEntity;
 import com.vodplatform.auth.persistence.RoleRepository;
 import com.vodplatform.auth.persistence.UserEntity;
 import com.vodplatform.auth.persistence.UserRepository;
+import com.vodplatform.catalog.persistence.Episode;
+import com.vodplatform.catalog.persistence.EpisodeRepository;
 import com.vodplatform.catalog.persistence.Genre;
 import com.vodplatform.catalog.persistence.GenreRepository;
 import com.vodplatform.catalog.persistence.Movie;
@@ -67,6 +69,7 @@ class CatalogPersistenceContextTests implements PostgresTestDatabase {
                 RefreshTokenEntity.class,
                 AuthSessionEntity.class,
                 Movie.class,
+                Episode.class,
                 Genre.class,
                 Person.class,
                 MovieCredit.class,
@@ -79,6 +82,7 @@ class CatalogPersistenceContextTests implements PostgresTestDatabase {
     @Test
     void catalogRepositoriesAreRegisteredAlongsideTheAuthRepositories() {
         assertThat(applicationContext.getBeanNamesForType(MovieRepository.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(EpisodeRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(GenreRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(PersonRepository.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(UserRepository.class)).hasSize(1);

@@ -21,6 +21,7 @@ let hlsLog = [];
 let progressSaves = [];
 const ASSET_A = '5f1e2d3c-4b5a-4968-8776-655443322110';
 const ASSET_B = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+const TITLE_ID = '3c2b1a09-8f7e-4d6c-9b5a-493827160504';
 const SEGMENT_COUNT = 5;
 const users = Object.fromEntries(['alice', 'bob'].map(id => [id, {
   id,
@@ -178,7 +179,7 @@ async function hls(request, response, url) {
   finish(404, 'application/json', JSON.stringify({ code: 'VIDEO_ASSET_NOT_FOUND' }));
 }
 
-function playback(request, response, movieId) {
+function playback(request, response, episodeId) {
   counts.playback = (counts.playback ?? 0) + 1;
   if (!access.has(bearer(request))) return error(response, 401, 'UNAUTHORIZED');
   if (control.playbackStatus === 409) return error(response, 409, 'VIDEO_NOT_READY');
@@ -189,7 +190,8 @@ function playback(request, response, movieId) {
     access.clear();
   }
   return json(response, 200, {
-    movieId,
+    episodeId,
+    titleId: TITLE_ID,
     videoAssetId,
     status: 'READY',
     hlsManifestUrl: `/hls/video-assets/${videoAssetId}/master.m3u8`,
@@ -302,12 +304,12 @@ const server = http.createServer(async (request, response) => {
     if (path.startsWith('/hls/video-assets/')) {
       return await hls(request, response, new URL(request.url, 'http://localhost'));
     }
-    const movieRoute = path.match(/^\/api\/v1\/movies\/([0-9a-f-]{36})\/(playback|progress)$/);
-    if (movieRoute?.[2] === 'playback') return playback(request, response, movieRoute[1]);
-    if (movieRoute?.[2] === 'progress' && request.method === 'PUT') {
+    const episodeRoute = path.match(/^\/api\/v1\/episodes\/([0-9a-f-]{36})\/(playback|progress)$/);
+    if (episodeRoute?.[2] === 'playback') return playback(request, response, episodeRoute[1]);
+    if (episodeRoute?.[2] === 'progress' && request.method === 'PUT') {
       if (!access.has(bearer(request))) return error(response, 401, 'UNAUTHORIZED');
       progressSaves.push(await body(request));
-      return json(response, 200, { movieId: movieRoute[1], currentSeconds: 0, finished: false });
+      return json(response, 200, { episodeId: episodeRoute[1], currentSeconds: 0, finished: false });
     }
     if (path.startsWith('/api/')) return error(response, 404, 'NOT_FOUND');
     let file = resolve(root, '.' + path);

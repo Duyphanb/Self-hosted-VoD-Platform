@@ -111,7 +111,7 @@ class NginxUploadEdgeTests(unittest.TestCase):
             self.assertIsNotNone(re.fullmatch(UPLOAD_PATTERN, path))
         for path in ("/api/v1/admin/episodes/id/video/", "/api/v1/admin/episodes/id/videos",
                      "/api/v1/admin/episodes/a/b/video", "/api/v1/admin/episodes//video",
-                     "/API/v1/admin/movies/id/video", "/hls/id/video"):
+                     "/API/v1/admin/episodes/id/video", "/api/v1/admin/movies/id/video", "/hls/id/video"):
             self.assertIsNone(re.fullmatch(UPLOAD_PATTERN, path))
 
     def test_upload_inherits_http11_forwarded_headers_and_error_mappings(self):

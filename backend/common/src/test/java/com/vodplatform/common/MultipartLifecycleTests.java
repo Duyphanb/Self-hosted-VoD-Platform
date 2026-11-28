@@ -485,7 +485,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
     }
 
     @Test
-    void missingMovieIsNotFoundAfterValidationAndCleanedUp() throws Exception {
+    void missingEpisodeIsNotFoundAfterValidationAndCleanedUp() throws Exception {
         String path = "/api/v1/admin/episodes/" + UUID.randomUUID() + "/video";
         var error = contractError(path, upload(path, "upload.missing_1", body(20)), 404, "EPISODE_NOT_FOUND");
         assertThat(error.get("requestId").asString()).isEqualTo("upload.missing_1");
@@ -493,7 +493,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
     }
 
     @Test
-    void invalidMovieIdIsRejectedBeforeParsing() throws Exception {
+    void invalidEpisodeIdIsRejectedBeforeParsing() throws Exception {
         String path = "/api/v1/admin/episodes/not-a-uuid/video";
         assertNoSpool(
                 () -> {
@@ -504,7 +504,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
                                     400,
                                     "VALIDATION_ERROR");
                     assertThat(error.get("fieldErrors").get(0).get("field").asString())
-                            .isEqualTo("movieId");
+                            .isEqualTo("episodeId");
                     assertThat(error.get("requestId").asString()).isEqualTo("upload.bad_id_1");
                 });
     }
@@ -513,7 +513,7 @@ class MultipartLifecycleTests implements PostgresTestDatabase {
         return Stream.of(
                 Arguments.of("GET", "/api/v1/health?page=3", false),
                 Arguments.of("GET", "/api/v1/me/multipart-probe?page=3", true),
-                Arguments.of("GET", "/api/v1/movies?page=3", false),
+                Arguments.of("GET", "/api/v1/titles?page=3", false),
                 Arguments.of("PUT", UPLOAD + "?page=3", true));
     }
 

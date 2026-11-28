@@ -861,7 +861,7 @@ async function renderPlayer({
       <AuthProvider redirectToLogin={() => undefined}>
         <SessionControls />
         <MountedOnceSignedIn>
-          <HlsPlayer movieId={MOVIE_ID} title={TITLE} playbackInfo={info} reloadPlaybackInfo={reloadPlaybackInfo} />
+          <HlsPlayer episodeId={MOVIE_ID} title={TITLE} playbackInfo={info} reloadPlaybackInfo={reloadPlaybackInfo} />
         </MountedOnceSignedIn>
       </AuthProvider>
     </QueryClientProvider>
@@ -1064,7 +1064,7 @@ function authResponse(user: UserProfile, accessToken: string) {
 }
 
 function progressResponse() {
-  return { movieId: MOVIE_ID, currentSeconds: 0, durationSeconds: 600, finished: false, lastPlayedAt: null };
+  return { episodeId: MOVIE_ID, currentSeconds: 0, durationSeconds: 600, finished: false, lastPlayedAt: null };
 }
 
 function apiError(status: number, code: string) {

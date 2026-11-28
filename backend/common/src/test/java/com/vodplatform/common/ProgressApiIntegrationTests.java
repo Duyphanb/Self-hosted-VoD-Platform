@@ -118,7 +118,7 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
         for(UUID hidden:f.hidden()) {
             asset(hidden,"READY",100,0);
             jdbc.update("insert into playback_progress(user_id,episode_id,current_seconds,finished,last_played_at,created_at,updated_at) values(?,?,20,false,?,?,?)",
-                user,hidden,Timestamp.from(T0),Timestamp.from(T0),Timestamp.from(T0));
+                user,EpisodeFixtures.episode(jdbc, hidden),Timestamp.from(T0),Timestamp.from(T0),Timestamp.from(T0));
         }
         String auth=token(user,role);
         var before=jdbc.queryForList("select * from playback_progress where user_id=? order by episode_id",user);

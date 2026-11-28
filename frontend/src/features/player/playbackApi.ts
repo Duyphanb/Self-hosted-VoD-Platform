@@ -1,7 +1,7 @@
 import type { ApiClient, AuthenticationSnapshot } from '../../lib/api/client';
 import { isCanonicalUuid } from '../../lib/uuid';
 
-/** `GET /movies/{movieId}/playback` (API contract `PlaybackInfo`). */
+/** `GET /episodes/{episodeId}/playback` (API contract `PlaybackInfo`). */
 export interface PlaybackInfo {
   episodeId: string;
   titleId: string;
@@ -33,18 +33,18 @@ export class InvalidPlaybackResponseError extends Error {
  */
 export async function fetchPlaybackInfo(
   client: ApiClient,
-  movieId: string,
+  episodeId: string,
   signal?: AbortSignal,
   identity?: AuthenticationSnapshot
 ): Promise<PlaybackInfo> {
   // With `identity`, the request belongs to that viewer and is never sent with another account's token.
-  const response = await client.request<unknown>(`/episodes/${encodeURIComponent(movieId)}/playback`, {
+  const response = await client.request<unknown>(`/episodes/${encodeURIComponent(episodeId)}/playback`, {
     authenticated: true,
     identity,
     signal
   });
   const playbackInfo = decodePlaybackInfo(response);
-  if (!playbackInfo || playbackInfo.episodeId !== movieId) {
+  if (!playbackInfo || playbackInfo.episodeId !== episodeId) {
     throw new InvalidPlaybackResponseError();
   }
   return playbackInfo;
@@ -56,11 +56,11 @@ export async function fetchPlaybackInfo(
  */
 export async function saveProgress(
   client: ApiClient,
-  movieId: string,
+  episodeId: string,
   save: ProgressSave,
   identity: AuthenticationSnapshot
 ): Promise<void> {
-  await client.request<unknown>(progressPath(movieId), {
+  await client.request<unknown>(progressPath(episodeId), {
     method: 'PUT',
     authenticated: true,
     identity,
@@ -71,11 +71,11 @@ export async function saveProgress(
 /** A best-effort save at page unload: `keepalive`, the current token, no refresh or retry (ADR-011 D13). */
 export function saveProgressOnUnload(
   client: ApiClient,
-  movieId: string,
+  episodeId: string,
   save: ProgressSave,
   identity: AuthenticationSnapshot
 ): void {
-  client.sendOnUnload(progressPath(movieId), { method: 'PUT', json: save }, identity);
+  client.sendOnUnload(progressPath(episodeId), { method: 'PUT', json: save }, identity);
 }
 
 /** The same-origin path of an asset's HLS playlist (API contract `PlaybackInfo.hlsManifestUrl`). */
@@ -83,8 +83,8 @@ export function hlsManifestPath(videoAssetId: string): string {
   return `/hls/video-assets/${videoAssetId}/master.m3u8`;
 }
 
-function progressPath(movieId: string): string {
-  return `/episodes/${encodeURIComponent(movieId)}/progress`;
+function progressPath(episodeId: string): string {
+  return `/episodes/${encodeURIComponent(episodeId)}/progress`;
 }
 
 export function decodePlaybackInfo(value: unknown): PlaybackInfo | null {

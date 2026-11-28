@@ -10,7 +10,7 @@ import { startPlaybackRun, type PlayerMemory, type PlayerSource, type PlayerStat
 import { ProgressSaver } from './progressSaver';
 
 export interface HlsPlayerProps {
-  movieId: string;
+  episodeId: string;
   /** The movie title; it labels the video element for assistive technology. */
   title: string;
   /** Read once at mount; mount a new player (for example with `key`) for another movie. */
@@ -48,7 +48,7 @@ const FATAL_MESSAGES: Partial<Record<PlayerStatus | 'signedOut', FatalMessage>> 
  * loads paused at the resume position, never starts playback on its own, sends the bearer token on every
  * HLS request, and saves progress. It stops for good when the signed-in identity changes.
  */
-export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: HlsPlayerProps) {
+export function HlsPlayer({ episodeId, title, playbackInfo, reloadPlaybackInfo }: HlsPlayerProps) {
   // Subscribing to the session re-renders the player when the signed-in identity changes.
   useAuth();
   const client = useApiClient();
@@ -80,14 +80,14 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
         if (!playerIdentity) {
           return Promise.reject(new AuthenticationSupersededError());
         }
-        return saveProgress(client, movieId, snapshot, playerIdentity).then(() => {
+        return saveProgress(client, episodeId, snapshot, playerIdentity).then(() => {
           // The saved position changes the continue-watching list; an open list fetches it again.
           void refreshContinueWatching(queryClient);
         });
       },
       saveOnUnload: (snapshot) => {
         if (playerIdentity) {
-          saveProgressOnUnload(client, movieId, snapshot, playerIdentity);
+          saveProgressOnUnload(client, episodeId, snapshot, playerIdentity);
         }
       },
       onAssetNotCurrent: (videoAssetId) => handler.current(videoAssetId)
@@ -144,9 +144,9 @@ export function HlsPlayer({ movieId, title, playbackInfo, reloadPlaybackInfo }: 
   // of this movie waits for these saves before it reads the resume position.
   useEffect(() => () => {
     if (playerIdentity) {
-      registerClosingPlayerSaves(movieId, playerIdentity.userId, saver.whenIdle());
+      registerClosingPlayerSaves(episodeId, playerIdentity.userId, saver.whenIdle());
     }
-  }, [movieId, playerIdentity, saver]);
+  }, [episodeId, playerIdentity, saver]);
 
   const shownStatus = displayedStatus(supported, identityLost, signedOut, status);
   const fatalMessage = FATAL_MESSAGES[shownStatus];

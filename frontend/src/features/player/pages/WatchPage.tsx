@@ -52,22 +52,22 @@ interface QueryResult<T> {
  * other error shows the error state with Retry.
  */
 export function WatchPage() {
-  const movieId = (useParams().episodeId ?? '').toLowerCase();
+  const episodeId = (useParams().episodeId ?? '').toLowerCase();
   // Subscribing to the session re-renders the page when the session changes, even for the same viewer:
   // the cleared queries run again and the new identity gets a new player.
   useAuth();
   const apiClient = useApiClient();
   const movie = useQuery({
-    queryKey: movieKeys.watchedTitle(movieId),
-    queryFn: ({ signal }) => getWatchedTitle(apiClient, movieId, signal),
-    enabled: isCanonicalUuid(movieId),
+    queryKey: movieKeys.watchedTitle(episodeId),
+    queryFn: ({ signal }) => getWatchedTitle(apiClient, episodeId, signal),
+    enabled: isCanonicalUuid(episodeId),
     refetchOnMount: 'always'
   });
-  const playback = usePlaybackInfo(movieId);
+  const playback = usePlaybackInfo(episodeId);
   const pageRef = useRef<HTMLDivElement>(null);
   // Whether this visit already used its one automatic recheck of a 409; each new movie ID is a new visit.
   const recheckUsed = useRef(false);
-  const state = watchPageState(movieId, movie, playback, {
+  const state = watchPageState(episodeId, movie, playback, {
     movie: movie.isFetchedAfterMount,
     playback: playback.isFetchedAfterMount
   });
@@ -81,19 +81,19 @@ export function WatchPage() {
     if (!playerIdentity) {
       return Promise.reject(new AuthenticationSupersededError());
     }
-    return fetchPlaybackInfo(apiClient, movieId, undefined, playerIdentity);
-  }, [apiClient, movieId, playerIdentity]);
+    return fetchPlaybackInfo(apiClient, episodeId, undefined, playerIdentity);
+  }, [apiClient, episodeId, playerIdentity]);
 
   // Route change: focus moves from the link that opened this page to the page itself.
   useEffect(() => {
     pageRef.current?.focus({ preventScroll: true });
-  }, [movieId]);
+  }, [episodeId]);
 
   // A new visit, also a return to a movie opened earlier, gets its own recheck. This effect runs before
   // the recheck effect below, in the same commit.
   useEffect(() => {
     recheckUsed.current = false;
-  }, [movieId]);
+  }, [episodeId]);
 
   // A 409 that raced the end of encoding: the movie already reports READY, so ask once more.
   const notReadyButMovieReady = state.kind === 'notReady' && state.movie.videoStatus === 'READY';
@@ -176,8 +176,8 @@ export function WatchPage() {
         <PlayerLoadBoundary>
           <Suspense fallback={<LoadingState label="Loading player…" />}>
             <HlsPlayer
-              key={`${movieId}:${identityKey}`}
-              movieId={movieId}
+              key={`${episodeId}:${identityKey}`}
+              episodeId={episodeId}
               playbackInfo={state.playbackInfo}
               reloadPlaybackInfo={reloadPlaybackInfo}
               title={state.movie.title}
@@ -213,12 +213,12 @@ export function WatchPage() {
  * mounted with.
  */
 function watchPageState(
-  movieId: string,
+  episodeId: string,
   movie: QueryResult<MovieSummary>,
   playback: QueryResult<PlaybackInfo>,
   fetchedOnThisVisit: FetchedOnThisVisit
 ): WatchPageState {
-  if (!isCanonicalUuid(movieId)) {
+  if (!isCanonicalUuid(episodeId)) {
     return { kind: 'notFound' };
   }
   const movieError = realError(movie);

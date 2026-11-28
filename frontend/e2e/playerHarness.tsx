@@ -5,7 +5,7 @@ import { AuthProvider, useApiClient, useAuth } from '../src/features/auth/AuthCo
 import { HlsPlayer } from '../src/features/player/HlsPlayer';
 import { fetchPlaybackInfo, type PlaybackInfo } from '../src/features/player/playbackApi';
 
-const MOVIE_ID = '0b9a7c55-6f0e-4b3a-9d1c-2e4f6a8b0c1d';
+const EPISODE_ID = '0b9a7c55-6f0e-4b3a-9d1c-2e4f6a8b0c1d';
 
 /** Signs in through the real session protocol, then mounts the real player with real hls.js. */
 export function PlayerHarness() {
@@ -18,11 +18,11 @@ export function PlayerHarness() {
     void auth.login({ email, password: 'fixture-password' }).catch(() => undefined);
   };
   const openPlayer = () => {
-    fetchPlaybackInfo(client, MOVIE_ID)
+    fetchPlaybackInfo(client, EPISODE_ID)
       .then(setPlaybackInfo)
       .catch(() => setLoadError('failed'));
   };
-  const reloadPlaybackInfo = useCallback(() => fetchPlaybackInfo(client, MOVIE_ID), [client]);
+  const reloadPlaybackInfo = useCallback(() => fetchPlaybackInfo(client, EPISODE_ID), [client]);
 
   return (
     <main>
@@ -34,7 +34,7 @@ export function PlayerHarness() {
       <button onClick={openPlayer}>Open player</button>
       {playbackInfo && (
         <HlsPlayer
-          movieId={MOVIE_ID}
+          episodeId={EPISODE_ID}
           title="Fixture movie"
           playbackInfo={playbackInfo}
           reloadPlaybackInfo={reloadPlaybackInfo}
