@@ -52,6 +52,27 @@ Set `CORS_ALLOWED_ORIGINS` to the browser-visible public origin (include a non-d
 Auth-state read failures return 503 `AUTH_STATE_UNAVAILABLE` and preserve the cookie. An unconfirmed logout stays
 pending in the SPA and must be retried. A rejected refresh returns 401 and clears the cookie.
 
+## Catalog Rename Upgrade (Flyway V7)
+
+Issue 7.1 (#259) renames `movies`, `movie_genres` and `movie_credits` to `titles`, `title_genres` and `title_credits`
+([ADR-013](../architecture/adr/ADR-013.md) D13, slice S1). A backend or worker built before V7 fails against the
+renamed tables, and a new one fails against V6, so the upgrade is fenced: no writer runs while V7 is applied. Set `C`
+to the Compose command of the deployment, as in [Production Credential Preflight](#production-credential-preflight).
+
+1. Stop new uploads and let uploads that are already sending finish.
+2. Stop the edge and the writers: `$C stop nginx backend worker`. If this interrupts an encode, follow
+   [Encoding Recovery](#encoding-recovery) after the upgrade.
+3. Take a PostgreSQL dump of the V6 database and verify that it restores, for example into a throwaway database.
+   Keep it until the upgrade is accepted.
+4. Apply the migration alone: `$C run --rm flyway`. V7 runs in one transaction, so a failed V7 leaves V6 unchanged.
+   The `afterMigrate` grants callback runs in its own transaction after V7. If the callback fails, V7 can stay
+   committed with incomplete grants: run the same command again (the callback is idempotent) and continue only after
+   it succeeds.
+5. Before starting anything, check that `flyway_schema_history` shows version 7 as successful and that the runtime
+   roles keep exactly their table grants (the privilege query in `deploy/tests/title-rename-migration-smoke.sh`).
+6. Decide at this checkpoint. If step 4 or 5 cannot be completed, restore the V6 dump and start the previous release.
+   Otherwise start the new release with `$C up -d`. Once the new backend or worker has started, roll forward only.
+
 ## First Administrator
 
 Registration always assigns `ROLE_USER`, and no administrator account or

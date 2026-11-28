@@ -112,6 +112,9 @@ cmp "$work/before.sql" "$work/after.sql"
 printf '%s\n' 'PASS: failed V7 rolled back schema, ACLs, data and history'
 
 sql -c 'SET ROLE fixture_owner; DROP INDEX ix_titles_status;'
+# Remove one expected grant so that the check below proves the callback ran on the V7 upgrade itself.
+sql -c 'SET ROLE fixture_owner; REVOKE SELECT ON movies FROM fixture_backend;'
+[ "$(sql -c "SELECT has_table_privilege('fixture_backend', 'public.movies', 'SELECT')")" = f ]
 migrate 7 || { cat "$work/flyway.log" >&2; exit 1; }
 [ "$(rows titles title_genres title_credits title_id)" = "$before_rows" ]
 [ "$(sql -c "SELECT count(*) FROM flyway_schema_history WHERE version = '7' AND success")" = 1 ]
