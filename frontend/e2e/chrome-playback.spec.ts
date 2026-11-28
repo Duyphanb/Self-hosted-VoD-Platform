@@ -113,8 +113,8 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     }
     await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
     await page.getByRole('link', { name: 'Chrome playback smoke' }).first().click();
-    await expect(page.getByRole('link', { name: 'Watch', exact: true })).toHaveAttribute('href', watch);
-    await page.goto(`/movies/${movie}/watch`);
+    // Stay in the login document: the 401 checkpoints below measure the token this login issued.
+    await page.getByRole('link', { name: 'Watch', exact: true }).click();
     await expect(page).toHaveURL(origin + watch);
     await expect.poll(async () => (await media(video)).ready, { timeout: 22_000 }).toBeGreaterThanOrEqual(2);
     expect(traffic.current().some(exchange => exchange.route === hlsPrefix + 'master.m3u8'
@@ -367,5 +367,10 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
   });
   await checkpoint('Exactly one cookie bootstrap in the new document', async () => {
     expect(traffic.current().filter(exchange => exchange.route === refreshRoute)).toHaveLength(1);
+  });
+  await checkpoint('An old watch bookmark redirects to the episode', async () => {
+    await page.goto(`/movies/${movie}/watch`);
+    await expect(page).toHaveURL(origin + watch);
+    await expect.poll(async () => (await media(video)).ready, { timeout: 22_000 }).toBeGreaterThanOrEqual(2);
   });
 });
