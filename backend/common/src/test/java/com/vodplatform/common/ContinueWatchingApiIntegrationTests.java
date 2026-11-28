@@ -292,6 +292,57 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
         assertThat(result.get(0).path("progress").isNull()).isTrue();
     }
 
+    @Test
+    void finishedAnchorWhoseSuccessorIsAlreadyFinishedShowsNoCard() throws Exception {
+        UUID title = seriesWithResumableFirstEpisode();
+        UUID anchor = extraEpisode(title, 2, "PUBLISHED");
+        UUID successor = extraEpisode(title, 3, "PUBLISHED");
+        rawAsset(anchor, UUID.randomUUID(), "READY", 100, T0);
+        rawAsset(successor, UUID.randomUUID(), "READY", 100, T0);
+        rawProgress(user, successor, 100, true, T0.plusSeconds(5));
+        rawProgress(user, anchor, 92, true, T0.plusSeconds(10));
+
+        assertThat(list(token)).isEmpty();
+    }
+
+    @Test
+    void nextEpisodeCardShowsTheSuccessorsOwnNormalizedProgress() throws Exception {
+        UUID title = seriesWithResumableFirstEpisode();
+        UUID anchor = extraEpisode(title, 2, "PUBLISHED");
+        UUID successor = extraEpisode(title, 3, "PUBLISHED");
+        rawAsset(anchor, UUID.randomUUID(), "READY", 100, T0);
+        rawAsset(successor, UUID.randomUUID(), "READY", 80, T0);
+        rawProgress(user, successor, 40, false, T0.plusSeconds(5));
+        rawProgress(user, anchor, 92, true, T0.plusSeconds(10));
+
+        JsonNode result = list(token);
+
+        assertThat(result.size()).isEqualTo(1);
+        JsonNode item = result.get(0);
+        assertThat(item.path("kind").asString()).isEqualTo("NEXT_EPISODE");
+        assertThat(item.path("episode").path("id").asString()).isEqualTo(successor.toString());
+        assertThat(item.path("progress").path("episodeId").asString()).isEqualTo(successor.toString());
+        assertThat(item.path("progress").path("currentSeconds").asInt()).isEqualTo(40);
+        assertThat(item.path("progress").path("durationSeconds").asInt()).isEqualTo(80);
+    }
+
+    @Test
+    void anchorThatIsNeitherFinishedNorResumableHidesAnOlderResumableEpisode() throws Exception {
+        UUID title = seriesWithResumableFirstEpisode();
+        UUID anchor = extraEpisode(title, 2, "PUBLISHED");
+        rawAsset(anchor, UUID.randomUUID(), "READY", 100, T0);
+        rawProgress(user, anchor, 0, false, T0.plusSeconds(10));
+
+        assertThat(list(token)).isEmpty();
+    }
+
+    /** A series title whose first episode alone would give a RESUME card at 32 of 100 seconds. */
+    private UUID seriesWithResumableFirstEpisode() {
+        UUID title = valid(32, 100, T0);
+        jdbc.update("update titles set content_type='TV_SEASON' where id=?", title);
+        return title;
+    }
+
     private UUID extraEpisode(UUID title, int ordinal, String status) {
         UUID episode = UUID.randomUUID();
         jdbc.update("""
