@@ -64,13 +64,18 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
 
 **Before the window**
 
+- These steps assume one deployment directory whose checkout is switched between releases with Git. The deployed
+  `nginx.conf` and the environment file stay in place, so every Compose command resolves the same bind sources. The
+  application database is not named `postgres` (the Compose default is `vod_platform`). A production layout with its
+  own files, such as an HTTPS listener or an overlay, is defined by #136 and adapts these steps.
 - Check that PostgreSQL, RabbitMQ and MinIO are healthy and that their init services have completed. The commands
   below use `--no-deps`, so nothing is started implicitly.
-- Keep a checkout of the running release (V6). Its Compose file and migration bundle are what a rollback uses.
+- Record the commit of the running release (V6). A rollback switches the checkout back to it, so that its Compose file
+  and migration bundle are used.
 - Tag the image each running service uses, for example
   `docker image tag "$(docker inspect --format '{{.Image}}' "$($C ps -q backend)")" "$PROJECT-backend:pre-v7"`, and the
   same for `worker` and `frontend`.
-- From the V7 checkout, build the new images with `$C build backend worker frontend`.
+- Switch the checkout to the V7 release and build the new images with `$C build backend worker frontend`.
 
 **The window**
 
@@ -111,8 +116,7 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
        its `POSTGRES_DB` at the default `postgres`;
      - create the owner and the runtime login roles first, as `deploy/postgres-init.sh` does;
      - as the bootstrap superuser (`POSTGRES_USER`), run `pg_restore --create --exit-on-error -d postgres <dump>`.
-       This connects to the maintenance database and creates the archived database with its owner, ACL and settings.
-       If the application database itself is named `postgres`, connect to `template1` instead;
+       This connects to the maintenance database and creates the archived database with its owner, ACL and settings;
      - require exit code 0, a Flyway history ending at 6, the recorded row counts and the recorded database-level
        privileges.
 5. **Apply the migration alone:** `$C run --rm --no-deps flyway`.
@@ -135,15 +139,15 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
 
      `--no-deps` keeps Compose from running `postgres-init` and Flyway again after this point.
    - **Roll back** if anything in step 5 failed:
-     - as the bootstrap superuser, connected to the maintenance database (`postgres`, or `template1` if the
-       application database is named `postgres`), drop the application database, then run
+     - as the bootstrap superuser, connected to the maintenance database `postgres`, drop the application database,
+       then run
        `pg_restore --create --exit-on-error -d postgres <dump>`, the same command step 4 proved. It recreates the
        database with its V6 owner, ACL and settings in the same cluster, where the roles already exist. Stop on any
        error;
      - on that database, verify that the Flyway history ends at 6, that the schema matches the V6 snapshot
        (`schema-snapshot.py` from the V6 checkout), that the table grants are exact, and that the database-level
        privileges equal those recorded in step 4;
-     - from the V6 checkout, point the image tags back with `docker image tag "$PROJECT-backend:pre-v7" "$PROJECT-backend"`
+     - switch the checkout back to the recorded V6 commit, point the image tags back with `docker image tag "$PROJECT-backend:pre-v7" "$PROJECT-backend"`
        and the same for `worker` and `frontend`;
      - start with the same two `--no-deps` commands.
    - After the edge is up on either path, check that uploads are open again: an unauthenticated upload `POST` gets 401
