@@ -55,26 +55,53 @@ pending in the SPA and must be retried. A rejected refresh returns 401 and clear
 ## Catalog Rename Upgrade (Flyway V7)
 
 Issue 7.1 (#259) renames `movies`, `movie_genres` and `movie_credits` to `titles`, `title_genres` and `title_credits`.
-A backend or worker built before V7 fails against the renamed tables, and a new one fails against V6, so the release
-runs the fenced sequence of [ADR-013](../architecture/adr/ADR-013.md) D13 ("Deployment of every migration slice"). Set
-`C` to the Compose command of the deployment, as in [Production Credential Preflight](#production-credential-preflight),
-and `PROJECT` to its project name.
+The backend maps those tables, so a backend built before V7 fails against V7, and the reverse. The worker only uses
+`encoding_jobs` and `video_assets`, which V7 does not change, but it is drained and stopped too. That way PostgreSQL,
+RabbitMQ and object storage cross the cutover together. The release follows the fenced sequence of
+[ADR-013](../architecture/adr/ADR-013.md) D13 ("Deployment of every migration slice"). It was rehearsed on a disposable
+stack for #259. Set `C` to the Compose command of the deployment, as in
+[Production Credential Preflight](#production-credential-preflight), and `PROJECT` to its project name.
 
-Before the window, keep the running images for rollback and build the new ones. Compose names a built image after the
-project and service, so tag each running image first, for example
-`docker image tag "$PROJECT-backend" "$PROJECT-backend:pre-v7"` and the same for `worker` and `frontend`. Then build
-from the new source with `$C build backend worker frontend`.
+**Before the window**
 
-1. Stop new uploads at the edge and wait until no upload request is in progress.
-2. Stop the edge and the backend: `$C stop nginx backend`. No job is published any more; the worker keeps consuming
-   what the broker already holds.
-3. Drain the worker. Wait until the encoding queue is empty and no `encoding_jobs` row is `PROCESSING`, then
-   `$C stop worker`. Checking `PROCESSING` alone is not enough while messages remain. If you cannot wait, stopping the
-   worker interrupts one encode, which fails as `WORKER_INTERRUPTED` at the next start and needs a retry or a new
-   upload ([Encoding Recovery](#encoding-recovery)).
-4. Record the row counts of `movies`, `movie_genres`, `movie_credits`, `ratings` and `watchlist_items`. Take a
-   `pg_dump` and restore it once into a disposable PostgreSQL container to prove that it restores.
-5. With every writer still stopped, apply the migration alone: `$C run --rm flyway`.
+- Check that PostgreSQL, RabbitMQ and MinIO are healthy and that their init services have completed. The commands
+  below use `--no-deps`, so nothing is started implicitly.
+- Keep a checkout of the running release (V6). Its Compose file and migration bundle are what a rollback uses.
+- Tag the image each running service uses, for example
+  `docker image tag "$(docker inspect --format '{{.Image}}' "$($C ps -q backend)")" "$PROJECT-backend:pre-v7"`, and the
+  same for `worker` and `frontend`.
+- From the V7 checkout, build the new images with `$C build backend worker frontend`.
+
+**The window**
+
+1. **Stop new uploads.**
+   - Close the upload location in the deployed Nginx configuration so that it answers 503.
+   - Check the configuration with `$C exec nginx nginx -t`, then reload gracefully with `$C exec nginx nginx -s reload`.
+   - A new upload `POST` must now get 503, while `/api/v1/health` still returns 200.
+   - Uploads already accepted finish on the previous Nginx worker generation. Wait until those worker processes have
+     exited, within a time limit you set. If uploads still run at the limit, decide whether to wait or to cut them.
+   - The edge started in step 6 uses the release's own configuration, with uploads open.
+2. **Stop the edge and the backend:** `$C stop nginx backend`. No job is published any more; the worker keeps
+   consuming what the broker already holds.
+3. **Drain the worker.**
+   - Watch the encoding queue (named by `RABBITMQ_ENCODING_QUEUE`, default `video-encoding-queue`, not its dead-letter
+     queue) with `$C exec rabbitmq rabbitmqctl --quiet list_queues -p / name messages_ready messages_unacknowledged consumers`.
+   - Watch the database with `SELECT count(*) FROM encoding_jobs WHERE status = 'PROCESSING'`.
+   - Wait until `messages_ready` and `messages_unacknowledged` are both 0 and no job is `PROCESSING`, then run
+     `$C stop worker`.
+   - Record the jobs that are `QUEUED` with `published_at IS NULL`. These are the outbox: the new release's relay
+     publishes them after the decision.
+   - If you cannot wait, stopping the worker interrupts one encode. It fails as `WORKER_INTERRUPTED` at the next
+     start and needs a retry or a new upload ([Encoding Recovery](#encoding-recovery)).
+4. **Record, dump and prove the restore.**
+   - Record the row counts of `movies`, `movie_genres`, `movie_credits`, `ratings` and `watchlist_items`.
+   - Take `pg_dump --format=custom` of the application database.
+   - Prove that it restores:
+     - use a disposable PostgreSQL of the same image and ICU settings;
+     - roles are cluster-wide, so create the owner and grantee roles empty first;
+     - run `pg_restore --clean --if-exists --single-transaction --exit-on-error`;
+     - require exit code 0, a Flyway history ending at 6, and the recorded row counts.
+5. **Apply the migration alone:** `$C run --rm --no-deps flyway`.
    - V7 runs in one transaction, so a failed V7 leaves V6 unchanged.
    - The `afterMigrate` grants callback runs in its own transaction after V7. If it fails, V7 can stay committed with
      incomplete grants. Run the same command again (the callback is idempotent) and continue only after it succeeds.
@@ -86,10 +113,20 @@ from the new source with `$C build backend worker frontend`.
    - the row counts of the renamed tables equal those recorded in step 4;
    - the runtime roles keep exactly their table grants (the privilege query in
      `deploy/tests/title-rename-migration-smoke.sh`).
-6. Decide here.
-   - If anything in step 5 failed, restore the dump and start the previous images, tagged `pre-v7`.
-   - Otherwise start the new backend and worker, then the edge: `$C up -d --no-build backend worker`, then
-     `$C up -d --no-build`.
+6. **Decide here,** before any new backend or worker runs.
+   - **Roll forward** if step 5 passed:
+     - `$C up -d --no-build --no-deps --wait backend worker frontend`;
+     - then `$C up -d --no-build --no-deps --wait nginx`.
+
+     `--no-deps` keeps Compose from running `postgres-init` and Flyway again after this point.
+   - **Roll back** if anything in step 5 failed:
+     - restore the dump into a clean database (recreate the database or use a new volume, with the roles present),
+       stopping on any error;
+     - verify that the Flyway history ends at 6, that the schema matches the V6 snapshot (`schema-snapshot.py` from the
+       V6 checkout) and that the grants are exact;
+     - from the V6 checkout, point the image tags back with `docker image tag "$PROJECT-backend:pre-v7" "$PROJECT-backend"`
+       and the same for `worker` and `frontend`;
+     - start with the same two `--no-deps` commands.
 
    Once the new backend or worker has started, the only way back is forward.
 
