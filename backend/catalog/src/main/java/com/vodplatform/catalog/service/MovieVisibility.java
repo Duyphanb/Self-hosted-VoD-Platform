@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Which movie statuses a caller may see (ADR-009, {@code SECURITY.md#movie-visibility}). This is
+ * Which movie statuses a caller may see (ADR-009, {@code SECURITY.md#title-and-episode-visibility}). This is
  * the single place that encodes the status rule.
  */
 public enum MovieVisibility {

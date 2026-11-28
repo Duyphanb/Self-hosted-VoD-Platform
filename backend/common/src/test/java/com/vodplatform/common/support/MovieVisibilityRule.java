@@ -25,7 +25,7 @@ import org.springframework.test.web.servlet.ResultActions;
 
 /**
  * Fixtures and assertions for the movie visibility rule (ADR-009,
- * {@code SECURITY.md#movie-visibility}): an endpoint that takes a {@code movieId} answers a
+ * {@code SECURITY.md#title-and-episode-visibility}): an endpoint that takes a {@code movieId} answers a
  * {@code DRAFT} or {@code ARCHIVED} movie exactly as it answers a missing one, with 404
  * {@code TITLE_NOT_FOUND}, so the response never reveals that the movie exists. ADR-009 requires
  * these 404 tests for movie detail and, in Sprints 5-8, for playback, HLS, progress, rating,

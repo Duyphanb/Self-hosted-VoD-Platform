@@ -18,7 +18,7 @@ Frozen requirements and architecture govern implementation. Planning/status docu
 | Authentication, authorization, uploads, HLS access | [SECURITY.md](architecture/SECURITY.md) and the affected API/sequence. [ADR-012](architecture/adr/ADR-012.md) covers browser sessions, refresh cookies and revocation. |
 | Upload transport, asset/current rules, encoding handoff and media cleanup | [ADR-010](architecture/adr/ADR-010.md), [ADR index](architecture/README.md#adr-index); migration and backlog specifications are planned implementation, not delivered behaviour |
 | HLS proxy responses, player rules (hls.js, token refresh, errors, start position), playback progress, completion and continue watching | [ADR-011](architecture/adr/ADR-011.md); backlog specifications are planned implementation, not delivered behaviour |
-| Movie visibility, archive retention, catalog slugs and matching | [SECURITY.md](architecture/SECURITY.md#movie-visibility), [ADR-009](architecture/adr/ADR-009.md) |
+| Movie visibility, archive retention, catalog slugs and matching | [SECURITY.md](architecture/SECURITY.md#title-and-episode-visibility), [ADR-009](architecture/adr/ADR-009.md) |
 | Content model (franchises, titles, episodes), asset activation, Admin Preview, the movies-to-titles migration | [ADR-013](architecture/adr/ADR-013.md); its slices are planned implementation, not delivered behaviour |
 | Search, aliases, suggestions, similar titles, recommendations and the Home row order | [ADR-015](architecture/adr/ADR-015.md); its slices are planned implementation, not delivered behaviour |
 | Compose, network exposure, storage, environment configuration | [INFRASTRUCTURE.md](architecture/INFRASTRUCTURE.md); private buckets are `vod-raw`, `vod-hls`, `vod-thumbnails` |

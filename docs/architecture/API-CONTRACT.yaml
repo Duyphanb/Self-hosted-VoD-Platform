@@ -732,9 +732,9 @@ paths:
         Never automatically resubmit. A deliberate re-upload returns 409 while
         in-flight, or creates a newer asset with extra storage cost if the first
         finished. A direct newest-asset view follows in #168; no new endpoint here.
-        Planned (ADR-013 S2): becomes POST /api/v1/admin/episodes/{episodeId}/video
-        with this behaviour, one in-flight asset per episode. From S5 a READY
-        asset is a candidate until an admin activates it.
+        One in-flight asset per episode (ADR-013 D6); two episodes of one title may
+        upload at the same time. Planned (ADR-013 S5): a READY asset is a candidate
+        until an admin activates it.
       requestBody:
         required: true
         content:
@@ -805,14 +805,14 @@ paths:
       tags: [Stream]
       summary: Get playback information for a ready movie
       description: >
-        Apply movie visibility first (404 for missing or non-PUBLISHED, for every
-        playback caller). Current is the READY asset with greatest (created_at, id).
+        Apply episode visibility first (404 EPISODE_NOT_FOUND for a missing episode
+        or one that is not visible, for every playback caller). Current is the
+        episode's READY asset with greatest (created_at, id).
         Return only that asset, preserving previous playback during a pending or
         failed replacement. With no current asset return 409 VIDEO_NOT_READY.
-        resumeSeconds follows ADR-011 D11. A episodeId that is not a UUID returns
+        resumeSeconds follows ADR-011 D11. An episodeId that is not a UUID returns
         400 VALIDATION_ERROR.
-        Planned (ADR-013): S2 moves this to GET /api/v1/episodes/{episodeId}/playback.
-        From S5 the current asset is the one an admin activated, and the
+        Planned (ADR-013): from S5 the current asset is the one an admin activated, and the
         response adds timelineId and activationGeneration.
       responses:
         "200":
@@ -855,8 +855,8 @@ paths:
         Every not-found case, including a videoAssetId that is not a UUID,
         returns 404 VIDEO_ASSET_NOT_FOUND; the application's own validation never
         answers 400 here. Error responses also carry Cache-Control no-store.
-        Planned (ADR-013): from S2 visibility and the current asset are checked
-        per episode; from S5 only the asset an admin activated is served here.
+        Visibility and the current asset are checked per episode (ADR-013 D6).
+        Planned (ADR-013): from S5 only the asset an admin activated is served here.
         Admins preview other READY assets on the separate admin-only route
         /hls/admin/video-assets/{videoAssetId}/..., never through this one.
       responses:
@@ -938,7 +938,7 @@ paths:
         when one exists (position clamped to its duration, durationSeconds set to
         it; ADR-011 D11); without any stored progress returns currentSeconds 0,
         finished false and null durationSeconds and lastPlayedAt. A current asset
-        is not required. A episodeId that is not a UUID returns 400
+        is not required. An episodeId that is not a UUID returns 400
         VALIDATION_ERROR.
       responses:
         "200":
@@ -967,8 +967,7 @@ paths:
         (ADR-011 D10). The newest write by server time wins; the response is the
         stored state, which can be a newer concurrent write. An accepted write
         also records watch history.
-        Planned (ADR-013): S2 moves this to /api/v1/episodes/{episodeId}/progress
-        (GET and PUT). From S5 the request also carries activationGeneration;
+        Planned (ADR-013): from S5 the request also carries activationGeneration;
         a value that is not the episode's current generation answers 409
         VIDEO_ASSET_NOT_CURRENT, and a position saved on another cut reads as 0.
       requestBody:
@@ -1461,7 +1460,7 @@ components:
           type: string
           description: >
             Machine-readable error code. Known codes include VALIDATION_ERROR,
-            MALFORMED_REQUEST, UNAUTHORIZED, FORBIDDEN, TITLE_NOT_FOUND,
+            MALFORMED_REQUEST, UNAUTHORIZED, FORBIDDEN, TITLE_NOT_FOUND, EPISODE_NOT_FOUND,
             GENRE_NOT_FOUND, PERSON_NOT_FOUND, TITLE_SLUG_CONFLICT, GENRE_CONFLICT,
             PAYLOAD_TOO_LARGE, UNSUPPORTED_VIDEO_TYPE, VIDEO_UPLOAD_IN_PROGRESS,
             UPLOAD_STORAGE_UNAVAILABLE, UPLOAD_DATABASE_ERROR, UPLOAD_OUTCOME_UNKNOWN,

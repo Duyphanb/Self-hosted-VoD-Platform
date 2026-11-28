@@ -201,7 +201,7 @@ public class MovieService {
     }
 
     /**
-     * The catalog visibility check (ADR-009, {@code SECURITY.md#movie-visibility}): returns the
+     * The catalog visibility check (ADR-009, {@code SECURITY.md#title-and-episode-visibility}): returns the
      * movie when the visibility includes its status. A missing movie and a movie the caller may
      * not see raise the same {@link MovieNotFoundException}, so the response never reveals that a
      * {@code DRAFT} or {@code ARCHIVED} movie exists. Other modules reuse this check with

@@ -73,10 +73,10 @@ Roles:
 Backend enforcement:
 
 - Public endpoints: register, login, refresh.
-- Authenticated user endpoints include profile, titles, episodes, playback, HLS and progress.
-- Admin endpoints include title management, genre and people management, upload and video asset listing.
+- Authenticated user endpoints: profile, titles, episodes, playback, HLS, progress, watchlist, history, rating, search.
+- Admin endpoints: title management, admin title listing, genre and people management, upload, video asset listing, encoding retry.
 
-URL authorization for `/api/v1/admin/**` runs before body validation, with method-level `@PreAuthorize` as a second layer. A `ROLE_USER` request returns 403 even when its body is invalid or the target is missing. Multipart requests outside `POST /api/v1/admin/episodes/{episodeId}/video` return 400 `MALFORMED_REQUEST` before authentication. The upload operation authorizes from headers before parsing multipart.
+Admin endpoints are enforced by one URL authorization rule, `/api/v1/admin/**` (since ADR-013 S2 the catalog writes live under `/api/v1/admin/titles`; viewer routes such as `/api/v1/titles/{titleId}` and `/api/v1/episodes/{episodeId}/progress` are not admin endpoints), before request validation runs, with method-level `@PreAuthorize` as a second layer. A `ROLE_USER` request to an admin endpoint returns 403 even when its body is invalid or the target does not exist. A multipart body sent to any operation other than `POST /api/v1/admin/episodes/{episodeId}/video`, including other methods on that path, is rejected with 400 `MALFORMED_REQUEST` before authentication; the upload operation authorizes from headers before its multipart body is parsed. The old upload path is not kept.
 
 During the fenced cutover, an open V7 tab that starts its title check after the switch receives 404 and stops the upload. If its title check completed before the switch, the legacy upload request is subject to the default 1 MiB edge limit and returns 400 or 413 without storing an object. Reloading gets the current SPA. [ADR-013 D13](adr/ADR-013.md#d13-migration-cutover-and-rollback)
 
@@ -96,10 +96,15 @@ Users must not read or modify another user's records.
 
 ## Title and Episode Visibility
 
-- Viewer routes and aggregates include only `PUBLISHED` titles for every role. A viewer episode must also be `PUBLISHED`. For a `MOVIE` the single episode is `PUBLISHED` and follows title visibility.
-- Title and episode viewer requests return the same 404 for hidden and missing records. Playback, authenticated HLS and progress apply the same visibility checks for every role.
-- Admin reads and writes on `/api/v1/admin/**` can address unpublished titles. The catalog module defines the visibility rule shared by the viewer flows.
-- S3 adds franchise visibility and S5 adds the separate `/hls/admin/**` preview authorization. [ADR-013 D3](adr/ADR-013.md#d3-visibility-at-three-levels)
+Title and episode visibility is the catalog access rule referenced by playback, HLS and progress checks. See
+[ADR-009](adr/ADR-009.md) and [ADR-013 D3](adr/ADR-013.md#d3-visibility-at-three-levels).
+
+- An episode is visible when it and its title are `PUBLISHED`; a title is visible when it is `PUBLISHED`. The episode of a `MOVIE` title is always `PUBLISHED` and follows its title.
+- Except for the admin routes below, every endpoint that takes a title or episode ID, read or write (title detail, episode list and detail, playback, HLS, progress, rating, watchlist), returns the same 404 for a hidden item as for a missing one (`TITLE_NOT_FOUND`, `EPISODE_NOT_FOUND`). The response must not reveal that the item exists.
+- User-facing lists (titles, episodes, search, suggestions, watchlist, history, Continue Watching) contain only visible items, for every role, and counts exclude hidden items before paging.
+- The admin exceptions are exactly `/api/v1/admin/**` and, from S5, `/hls/admin/**`. `GET /api/v1/titles/{titleId}` is published-only for every role; the admin form reads `GET /api/v1/admin/titles/{titleId}`. For admins, playback, HLS, progress, rating and watchlist on hidden content still return 404.
+- The catalog module owns one visibility check that other modules reuse; modules must not re-implement the status rule.
+- S3 adds franchises, whose status gates only their own page, strip, references in title responses and name in search, never their titles.
 
 ### Planned: search and discovery (ADR-015)
 
