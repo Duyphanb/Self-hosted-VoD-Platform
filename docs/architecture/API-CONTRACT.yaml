@@ -38,8 +38,9 @@ info:
     RC-1 adds GET /api/v1/titles/{titleId}/similar and RC-2 adds
     GET /api/v1/me/recommendations (Cache-Control no-store). Search,
     suggestions, similar titles and recommendations list only PUBLISHED
-    titles, for every role; TMDB-origin values are never indexed, and
-    filters and similar titles ignore them until ADR-014 allows each use.
+    titles, for every role; only the admin's own values and AniList-origin
+    aliases are indexed, and filters and similar titles use only the
+    admin's own data until ADR-014 allows a provider use.
     ADR-015 D17 lists every planned path and schema; info.version stays
     1.0.0-frozen.
 servers:
@@ -973,7 +974,8 @@ paths:
         Planned (ADR-015 SR-2, not yet implemented): one SearchHit per PUBLISHED
         title, for every role, including titles with nothing playable yet. q is
         trimmed and holds 1-100 code points (400 VALIDATION_ERROR when blank,
-        longer, or containing a control character); a q without any letter or
+        longer, containing a control character, or longer than 300 code
+        points after Unicode NFKC normalization); a q without any letter or
         digit returns an empty page. Matching tiers: exact, accent-folded,
         prefix and substring matches on the display title and aliases, then the
         visible franchise name, then full text; a typo fallback, only if the

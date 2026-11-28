@@ -46,7 +46,7 @@ Logging requirements:
 - no `System.out.println`
 - include timestamp, level, logger, message, and `requestId` where present
 - do not log JWTs, refresh tokens, passwords, raw secrets, or sensitive request bodies
-- do not log search terms or URL query strings: planned with ADR-015 SR-2, Nginx's access logs record the path without its query string and the two search API locations discard their error log, because Nginx appends the request line to every error ([ADR-015 D15](adr/ADR-015.md#d15-privacy-logs-and-caching)); the backend already logs no request parameter
+- do not log search terms or URL query strings: planned with ADR-015 SR-2, Nginx's access logs record the path without its query string and the edge's `server` block and the two search API locations discard their error log, because Nginx appends the request line to every error, and Tomcat's logging of requests it rejects while parsing is disabled ([ADR-015 D15](adr/ADR-015.md#d15-privacy-logs-and-caching)); the backend already logs no request parameter
 - include `videoAssetId` and `encodingJobId` in worker lifecycle logs
 
 Important backend events:
