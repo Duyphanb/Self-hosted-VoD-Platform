@@ -322,8 +322,14 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
         Object episode = id instanceof UUID uuid ? EpisodeFixtures.episode(jdbc, uuid) : id;
         return "/api/v1/episodes/" + episode + "/progress";
     }
-    private Map<String,Object> progress(UUID u,UUID m) {return jdbc.queryForMap("select * from playback_progress where user_id=? and episode_id=?",u,m);}
-    private Map<String,Object> history(UUID u,UUID m) {return jdbc.queryForMap("select * from watch_history where user_id=? and episode_id=?",u,m);}
+    private Map<String, Object> progress(UUID user, UUID episode) {
+        return jdbc.queryForMap("select * from playback_progress where user_id=? and episode_id=?", user, episode);
+    }
+
+    private Map<String, Object> history(UUID user, UUID episode) {
+        return jdbc.queryForMap("select * from watch_history where user_id=? and episode_id=?", user, episode);
+    }
+
     private Instant time(Map<String,Object> row,String col) {return ((Timestamp)row.get(col)).toInstant();}
     private int progressCount() {return jdbc.queryForObject("select count(*) from playback_progress where user_id=?",Integer.class,user);}
     private int historyCount() {return jdbc.queryForObject("select count(*) from watch_history where user_id=?",Integer.class,user);}
@@ -337,7 +343,22 @@ class ProgressApiIntegrationTests implements PostgresTestDatabase {
                 """, id, "progress-" + id, Timestamp.from(T0), Timestamp.from(T0));
         return EpisodeFixtures.addFilmEpisode(jdbc, id);
     }
-    private UUID asset(UUID movie,String state,Integer duration,int second) {UUID id=UUID.randomUUID();jdbc.update("insert into video_assets(id,episode_id,raw_bucket,raw_object_key,status,duration_seconds,created_at,updated_at) values(?,?,'fixture',?,?,?,?,?)",id,EpisodeFixtures.episode(jdbc, movie),id.toString(),state,duration,Timestamp.from(T0.plusSeconds(second)),Timestamp.from(T0));return id;}
+    /**
+     * Inserts an asset of an episode. {@code movie()} returns episode IDs; the visibility fixtures pass title IDs,
+     * which resolve to the title's film episode.
+     */
+    private UUID asset(UUID episodeOrTitle, String state, Integer duration, int second) {
+        UUID id = UUID.randomUUID();
+        UUID episode = EpisodeFixtures.episode(jdbc, episodeOrTitle);
+        jdbc.update("""
+                insert into video_assets(
+                    id,episode_id,raw_bucket,raw_object_key,status,duration_seconds,created_at,updated_at)
+                values(?,?,'fixture',?,?,?,?,?)
+                """, id, episode, id.toString(), state, duration, Timestamp.from(T0.plusSeconds(second)),
+                Timestamp.from(T0));
+        return id;
+    }
+
     private String token(UUID user, String role) {
         return "Bearer " + bearerSessions.tokenFor(user, "progress@example.test", role);
     }

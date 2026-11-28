@@ -2018,13 +2018,22 @@ components:
         episode:
           $ref: "#/components/schemas/EpisodeSummary"
         progress:
-          nullable: true
-          allOf:
+          description: The caller's normalized progress on this episode, or null without any.
+          anyOf:
             - $ref: "#/components/schemas/ProgressResponse"
+            - $ref: "#/components/schemas/NoProgress"
 
     ContentType:
       type: string
       enum: [MOVIE, TV_SEASON, OVA, ONA, SPECIAL]
+
+    NoProgress:
+      description: >
+        Only null. OpenAPI 3.0 applies nullable only beside an explicit type, so a nullable
+        ProgressResponse is written as anyOf ProgressResponse or this schema.
+      type: object
+      nullable: true
+      enum: [null]
 
     EpisodeSummary:
       type: object
@@ -2049,9 +2058,10 @@ components:
           nullable: true
           enum: [UPLOADED, QUEUED, PROCESSING, READY, FAILED, null]
         progress:
-          nullable: true
-          allOf:
+          description: The caller's normalized progress on this episode, or null without any.
+          anyOf:
             - $ref: "#/components/schemas/ProgressResponse"
+            - $ref: "#/components/schemas/NoProgress"
 
     EpisodePage:
       type: object

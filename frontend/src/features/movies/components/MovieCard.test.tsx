@@ -13,7 +13,7 @@ const movie: MovieSummary = {
   posterUrl: null,
   genres: ['Science Fiction', 'Documentary', 'Drama'],
   averageRating: null,
-  status: 'PUBLISHED', contentType: 'MOVIE',
+  status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null,
   videoStatus: null
 };
 

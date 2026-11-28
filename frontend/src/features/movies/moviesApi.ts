@@ -39,6 +39,8 @@ export interface MovieSummary {
   averageRating: number | null;
   status: MovieStatus | UnknownEnumValue;
   contentType: typeof CONTENT_TYPES[number] | UnknownEnumValue;
+  /** The admin's optional label for a part, such as "Season 2"; null when none. */
+  partLabel: string | null;
   /** Playback availability; READY can remain while a replacement upload is processed. Null when no asset exists. */
   videoStatus: VideoAssetStatus | UnknownEnumValue | null;
 }
@@ -204,6 +206,7 @@ export function decodeMovieSummary(value: unknown): MovieSummary | null {
     averageRating: value.averageRating,
     status: knownOrUnknown(MOVIE_STATUSES, value.status),
     contentType: knownOrUnknown(CONTENT_TYPES, value.contentType),
+    partLabel: value.partLabel as string | null,
     videoStatus: statusFromAvailability(value.availability)
   };
 }

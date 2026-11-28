@@ -29,6 +29,7 @@ export interface UpsertMovieRequest {
   genres: string[];
   people: { personId: string; role: CreditRole }[];
   status: MovieStatus;
+  partLabel: string | null;
 }
 
 export interface VideoAssetStatusResponse {

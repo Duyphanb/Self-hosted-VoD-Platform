@@ -446,7 +446,7 @@ function item(movieId: string, title: string, progress: Partial<PlaybackProgress
     posterUrl: null,
     genres: ['Drama'],
     averageRating: null,
-    status: 'PUBLISHED', contentType: 'MOVIE',
+    status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null,
     videoStatus: 'READY'
   };
   return continueFixture(movie, {

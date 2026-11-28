@@ -819,7 +819,7 @@ function movieSummary(index: number, overrides: Partial<MovieSummary> = {}): Mov
     posterUrl: null,
     genres: ['Drama'],
     averageRating: null,
-    status: 'PUBLISHED', contentType: 'MOVIE',
+    status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null,
     videoStatus: null,
     ...overrides
   };

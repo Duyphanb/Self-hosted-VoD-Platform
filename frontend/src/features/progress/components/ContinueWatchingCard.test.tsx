@@ -77,7 +77,7 @@ function renderCard(progress: Pick<PlaybackProgress, 'currentSeconds' | 'duratio
       posterUrl: null,
       genres: ['Drama'],
       averageRating: null,
-      status: 'PUBLISHED', contentType: 'MOVIE',
+      status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null,
       videoStatus: 'READY'
     },
     progress: {

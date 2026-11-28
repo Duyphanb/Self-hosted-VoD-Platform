@@ -94,7 +94,12 @@ export function AdminMovieListPage() {
                 <td className="md:p-3"><span className="text-slate-400 md:hidden">Video: </span><VideoStatusBadge status={movie.videoStatus} /></td>
                 <td className="md:p-3">
                   <div className="flex flex-wrap items-center gap-3">
-                    <Link aria-label={`View ${movie.title}`} className="text-sky-300 underline" to={`/titles/${movie.id}`}>View</Link>
+                    {movie.status === 'PUBLISHED' ? (
+                      // The viewer page is published-only for every role (ADR-013 D3).
+                      <Link aria-label={`View ${movie.title}`} className="text-sky-300 underline" to={`/titles/${movie.id}`}>
+                        View
+                      </Link>
+                    ) : null}
                     <Link aria-label={`Edit ${movie.title}`} className="text-sky-300 underline" state={{ returnTo }} to={`/admin/titles/${movie.id}/edit`}>Edit</Link>
                     <Link aria-label={`Upload video for ${movie.title}`} className="text-sky-300 underline" state={{ returnTo }} to={`/admin/titles/${movie.id}/video`}>Upload video</Link>
                     {movie.status !== 'ARCHIVED' ? (

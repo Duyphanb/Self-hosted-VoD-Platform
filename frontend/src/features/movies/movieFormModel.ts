@@ -14,12 +14,15 @@ export interface MovieFormValues {
   genres: string[];
   people: MovieFormCredit[];
   status: string;
+  /** Not edited by this form; carried so the full replacement keeps it. */
+  partLabel: string | null;
 }
 export type MovieFormErrors = Record<string, string>;
 export interface MovieFormFailure { fields: MovieFormErrors; general: string[] }
 
 export function createEmptyMovieForm(): MovieFormValues {
-  return { title: '', slug: '', description: '', releaseYear: '', maturityRating: '', genres: [], people: [], status: 'DRAFT' };
+  return { title: '', slug: '', description: '', releaseYear: '', maturityRating: '', genres: [], people: [], status: 'DRAFT',
+    partLabel: null };
 }
 
 export function movieDetailToForm(movie: MovieDetail): MovieFormValues {
@@ -27,6 +30,7 @@ export function movieDetailToForm(movie: MovieDetail): MovieFormValues {
     title: movie.title, slug: movie.slug, description: movie.description,
     releaseYear: movie.releaseYear === null ? '' : String(movie.releaseYear),
     maturityRating: movie.maturityRating ?? '', genres: [...movie.genres], status: movie.status,
+    partLabel: movie.partLabel,
     people: movie.people.map((credit, index) => ({ ...credit, key: `${credit.personId}-${credit.role}-${index}` }))
   };
 }
@@ -39,7 +43,8 @@ export function toMoviePayload(values: MovieFormValues): UpsertMovieRequest {
     maturityRating: values.maturityRating === '' ? null : values.maturityRating as MaturityRating,
     genres: values.genres.map(normalizeCatalogName),
     people: values.people.map((credit) => ({ personId: credit.personId.toLowerCase(), role: credit.role as CreditRole })),
-    status: values.status as MovieStatus
+    status: values.status as MovieStatus,
+    partLabel: values.partLabel
   };
 }
 

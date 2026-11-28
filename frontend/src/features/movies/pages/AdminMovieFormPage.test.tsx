@@ -87,7 +87,8 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer access-token');
     expect(JSON.parse(String(init?.body))).toEqual({
       title: 'Đất Rừng Phương Nam', slug: 'dat-rung-phuong-nam', description: 'A story.\nThe next line.',
-      releaseYear: null, maturityRating: null, genres: ['Drama'], people: [], status: 'DRAFT', contentType: 'MOVIE'
+      releaseYear: null, maturityRating: null, genres: ['Drama'], people: [], status: 'DRAFT', partLabel: null,
+      contentType: 'MOVIE'
     });
     expect(queryClient.getQueryState(movieKeys.adminDetail(movieId))?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(movieKeys.detail(movieId))).toBeUndefined();
@@ -197,7 +198,8 @@ describe('AdminMovieFormPage through the data router', () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       title: 'Retitled movie', slug: 'existing-movie', description: 'An existing description.', releaseYear: null,
       maturityRating: 'T16', genres: ['Drama', 'Mystery'],
-      people: [{ personId: directorId, role: 'DIRECTOR' }, { personId: actorId, role: 'ACTOR' }], status
+      people: [{ personId: directorId, role: 'DIRECTOR' }, { personId: actorId, role: 'ACTOR' }], status,
+      partLabel: null
     });
   });
 
@@ -721,7 +723,7 @@ function movieDetail(overrides: Partial<MovieDetail> = {}): MovieDetail {
     id: movieId, title: 'Existing movie', slug: 'existing-movie', description: 'An existing description.', releaseYear: 2020,
     maturityRating: 'T16', genres: ['Drama', 'Mystery'], people: [
       { personId: actorId, name: 'Existing actor', role: 'ACTOR' }, { personId: directorId, name: 'Existing director', role: 'DIRECTOR' }
-    ], averageRating: null, posterUrl: null, status: 'PUBLISHED', contentType: 'MOVIE', videoStatus: null, userRating: null, inWatchlist: false, playbackProgress: null, episode: null, ...overrides
+    ], averageRating: null, posterUrl: null, status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null, videoStatus: null, userRating: null, inWatchlist: false, playbackProgress: null, episode: null, ...overrides
   };
 }
 function adminPage(movie: MovieDetail, page = 0): Response {

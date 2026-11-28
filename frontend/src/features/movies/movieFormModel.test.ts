@@ -13,7 +13,8 @@ const movieId = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
 describe('movie form model', () => {
   it('starts a create form as Draft with explicit empty collections', () => {
     expect(createEmptyMovieForm()).toEqual({
-      title: '', slug: '', description: '', releaseYear: '', maturityRating: '', genres: [], people: [], status: 'DRAFT'
+      title: '', slug: '', description: '', releaseYear: '', maturityRating: '', genres: [], people: [], status: 'DRAFT',
+      partLabel: null
     });
     expect(validateMovieForm(createEmptyMovieForm())).toMatchObject({ title: expect.any(String), slug: expect.any(String), description: expect.any(String), genres: expect.any(String) });
   });
@@ -100,7 +101,7 @@ describe('movie form model', () => {
       people: [{ key: 'ui-only', personId: personId.toUpperCase(), name: 'Display only', role: 'ACTOR' }]
     }))).toEqual({
       title: 'Two  spaces', slug: 'movie', description: 'Description\ntext', releaseYear: null, maturityRating: null,
-      genres: ['Đất Rừng'], people: [{ personId, role: 'ACTOR' }], status: 'DRAFT'
+      genres: ['Đất Rừng'], people: [{ personId, role: 'ACTOR' }], status: 'DRAFT', partLabel: null
     });
   });
 
@@ -108,7 +109,7 @@ describe('movie form model', () => {
     const movie: MovieDetail = {
       id: movieId, title: 'Movie', slug: 'movie', description: 'Description', releaseYear: 2020,
       maturityRating: 'UNKNOWN', genres: ['Drama'], people: [{ personId, name: 'Person', role: 'UNKNOWN' }],
-      status: 'ARCHIVED', contentType: 'MOVIE', videoStatus: null, posterUrl: null, averageRating: null,
+      status: 'ARCHIVED', contentType: 'MOVIE', partLabel: null, videoStatus: null, posterUrl: null, averageRating: null,
       userRating: null, inWatchlist: false, playbackProgress: null, episode: null
     };
     const values = movieDetailToForm(movie);
@@ -118,6 +119,20 @@ describe('movie form model', () => {
     expect(validateMovieForm(values)).toHaveProperty('maturityRating');
     values.genres.push('Action');
     expect(movie.genres).toEqual(['Drama']);
+  });
+
+  it('keeps a part label the form does not edit in the full replacement', () => {
+    const movie: MovieDetail = {
+      id: movieId, title: 'Movie', slug: 'movie', description: 'Description', releaseYear: 2020,
+      maturityRating: null, genres: ['Drama'], people: [],
+      status: 'PUBLISHED', contentType: 'MOVIE', partLabel: 'Season 2', videoStatus: null, posterUrl: null,
+      averageRating: null, userRating: null, inWatchlist: false, playbackProgress: null, episode: null
+    };
+
+    const payload = toMoviePayload({ ...movieDetailToForm(movie), description: 'Edited description' });
+
+    expect(payload.partLabel).toBe('Season 2');
+    expect(payload.description).toBe('Edited description');
   });
 });
 

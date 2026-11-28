@@ -443,7 +443,7 @@ function serve(get?: () => Response | Promise<Response>) {
 }
 function detail(overrides: Partial<MovieDetail> = {}): MovieDetail {
   return { id: movieId, title: 'Upload movie', slug: 'upload-movie', description: 'Movie description', releaseYear: 2026,
-    maturityRating: null, genres: [], people: [], averageRating: null, posterUrl: null, status: 'PUBLISHED', contentType: 'MOVIE', videoStatus: null,
+    maturityRating: null, genres: [], people: [], averageRating: null, posterUrl: null, status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null, videoStatus: null,
     userRating: null, inWatchlist: false, playbackProgress: null, episode: null, ...overrides };
 }
 function video() { return new File(['synthetic'], 'movie.mp4', { type: 'video/mp4' }); }

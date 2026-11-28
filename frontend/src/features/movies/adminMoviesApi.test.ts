@@ -13,7 +13,7 @@ const entry = { id: personId, name: 'Đất Rừng', slug: 'dat-rung' };
 const page = { page: 0, size: 20, totalElements: 1, totalPages: 1 };
 const payload: UpsertMovieRequest = {
   title: 'Movie', slug: 'movie', description: 'Description', releaseYear: null, maturityRating: null,
-  genres: ['Drama'], people: [{ personId, role: 'DIRECTOR' }], status: 'DRAFT'
+  genres: ['Drama'], people: [{ personId, role: 'DIRECTOR' }], status: 'DRAFT', partLabel: null
 };
 const movie: MovieDetail = {
   ...payload,

@@ -131,11 +131,14 @@ def seed(sql):
         INSERT INTO titles (id,title,slug,description,status,created_at,updated_at)
         VALUES (:'title','Title','title','Published fixture','PUBLISHED',now(),now()),
                (:'draft','Draft','draft','Hidden fixture','DRAFT',now(),now());
-        INSERT INTO video_assets (id,movie_id,raw_bucket,raw_object_key,status,duration_seconds,created_at,updated_at)
-        VALUES ('7fffffff-ffff-ffff-ffff-ffffffffffff',:'title','vod-raw','older.mp4','READY',120,now(),now()),
-               ('80000000-0000-0000-0000-000000000000',:'title','vod-raw','current.mp4','READY',120,now(),now()),
-               (:'queued',:'title','vod-raw','queued.mp4','QUEUED',NULL,now(),now()),
-               (gen_random_uuid(),:'draft','vod-raw','failed.mp4','FAILED',NULL,now(),now());
+        INSERT INTO video_assets (id,movie_id,raw_bucket,raw_object_key,hls_bucket,hls_master_object_key,status,
+                                  duration_seconds,created_at,updated_at)
+        VALUES ('7fffffff-ffff-ffff-ffff-ffffffffffff',:'title','vod-raw','older.mp4','vod-hls',
+                'video-assets/7fffffff-ffff-ffff-ffff-ffffffffffff/attempt-1/master.m3u8','READY',120,now(),now()),
+               ('80000000-0000-0000-0000-000000000000',:'title','vod-raw','current.mp4','vod-hls',
+                'video-assets/80000000-0000-0000-0000-000000000000/attempt-2/master.m3u8','READY',120,now(),now()),
+               (:'queued',:'title','vod-raw','queued.mp4',NULL,NULL,'QUEUED',NULL,now(),now()),
+               (gen_random_uuid(),:'draft','vod-raw','failed.mp4',NULL,NULL,'FAILED',NULL,now(),now());
         INSERT INTO encoding_jobs (id,video_asset_id,status,attempt,queued_at,published_at)
         VALUES (gen_random_uuid(),:'queued','QUEUED',1,now(),NULL),
                (gen_random_uuid(),'80000000-0000-0000-0000-000000000000','READY',1,now(),now());

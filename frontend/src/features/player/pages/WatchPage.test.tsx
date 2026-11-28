@@ -710,7 +710,7 @@ function movieDetail(overrides: Partial<MovieDetail> = {}): MovieDetail {
     posterUrl: null,
     genres: ['Drama'],
     averageRating: null,
-    status: 'PUBLISHED', contentType: 'MOVIE',
+    status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null,
     videoStatus: 'READY',
     maturityRating: 'T16',
     people: [],

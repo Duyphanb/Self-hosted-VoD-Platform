@@ -20,6 +20,15 @@ describe('AdminMovieListPage', () => {
   beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock); });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it('links only a published title to its viewer page', async () => {
+    fetchMock.mockImplementation(async () => moviePage([movie(3, { status: 'PUBLISHED' })]));
+    renderList();
+
+    const table = await screen.findByRole('table', { name: 'Movies available for administration' }, { timeout: 5_000 });
+
+    expect(within(table).getByRole('link', { name: 'View Movie 3' })).toHaveAttribute('href', `/titles/${movie(3).id}`);
+  });
+
   it('requests all statuses with authentication and renders the admin table actions', async () => {
     fetchMock.mockImplementation(async () => moviePage([movie(1), movie(2, { status: 'ARCHIVED', contentType: 'MOVIE', videoStatus: 'READY' })]));
     renderList();
@@ -28,7 +37,8 @@ describe('AdminMovieListPage', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Movies');
     expect(within(table).getByRole('link', { name: 'Movie 1' })).toHaveAttribute('href', `/admin/titles/${movie(1).id}/edit`);
-    expect(within(table).getByRole('link', { name: 'View Movie 1' })).toHaveAttribute('href', `/titles/${movie(1).id}`);
+    expect(within(table).queryByRole('link', { name: 'View Movie 1' })).not.toBeInTheDocument();
+    expect(within(table).queryByRole('link', { name: 'View Movie 2' })).not.toBeInTheDocument();
     expect(within(table).getByRole('link', { name: 'Edit Movie 1' })).toHaveAttribute('href', `/admin/titles/${movie(1).id}/edit`);
     expect(within(table).getByRole('button', { name: 'Archive Movie 1' })).toBeInTheDocument();
     expect(within(table).queryByRole('button', { name: 'Archive Movie 2' })).not.toBeInTheDocument();
@@ -361,7 +371,7 @@ function deferredResponse() {
   return { promise, release: (response: Response) => act(() => resolveResponse(response)) };
 }
 function movie(index: number, overrides: Partial<MovieSummary> = {}): MovieSummary {
-  return { id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, title: `Movie ${index}`, slug: `movie-${index}`, description: `Description ${index}`, releaseYear: 2020, posterUrl: null, genres: ['Drama'], averageRating: null, status: 'DRAFT', contentType: 'MOVIE', videoStatus: null, ...overrides };
+  return { id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, title: `Movie ${index}`, slug: `movie-${index}`, description: `Description ${index}`, releaseYear: 2020, posterUrl: null, genres: ['Drama'], averageRating: null, status: 'DRAFT', contentType: 'MOVIE', partLabel: null, videoStatus: null, ...overrides };
 }
 function moviePage(items: MovieSummary[], page: Partial<PageMeta> = {}) {
   return new Response(JSON.stringify({ items: items.map(titlePayloadFixture), page: { page: 0, size: 20, totalElements: items.length, totalPages: items.length ? 1 : 0, ...page } }), { status: 200, headers: { 'Content-Type': 'application/json' } });

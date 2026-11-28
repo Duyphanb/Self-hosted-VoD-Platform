@@ -23,7 +23,7 @@ const movie: MovieSummary = {
   posterUrl: null,
   genres: ['Drama', 'Thriller'],
   averageRating: null,
-  status: 'PUBLISHED', contentType: 'MOVIE',
+  status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null,
   videoStatus: null
 };
 

@@ -8,6 +8,10 @@ public final class EpisodeFixtures {
     private EpisodeFixtures() {
     }
 
+    /**
+     * The title's ordinal-1 episode. An ID that is not a title (an episode ID, or the random ID of a
+     * missing-resource case) is returned unchanged.
+     */
     public static UUID episode(JdbcTemplate jdbc, UUID title) {
         return jdbc.query("select id from episodes where title_id = ? and ordinal = 1",
                 (row, index) -> row.getObject(1, UUID.class), title).stream().findFirst().orElse(title);
