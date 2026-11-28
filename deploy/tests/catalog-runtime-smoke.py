@@ -251,7 +251,8 @@ def main():
     assert call(f"{VIEWER_TITLES}/{published_id}", token=viewer) == (200, restored)
     status, archived_by_put = call(f"{ADMIN_TITLES}/{draft_id}", movie("smoke-draft", status="ARCHIVED"), admin, "PUT")
     assert status == 200 and archived_by_put["status"] == "ARCHIVED" and hidden_like_missing(draft_id, viewer)
-    assert is_api_error(call(f"{ADMIN_TITLES}/{missing_id}", movie("smoke-missing"), admin, "PUT"), 404, "TITLE_NOT_FOUND")
+    missing = call(f"{ADMIN_TITLES}/{missing_id}", movie("smoke-missing"), admin, "PUT")
+    assert is_api_error(missing, 404, "TITLE_NOT_FOUND")
     assert is_api_error(call(f"{ADMIN_TITLES}/{missing_id}", token=admin, method="DELETE"), 404, "TITLE_NOT_FOUND")
     print("PASS admin versus user visibility, idempotent soft archive and restore")
 
@@ -328,11 +329,13 @@ def main():
         status, source = call("/api/v1/admin/genres", {"name": old_genre}, admin)
         assert status == 201
         genre_id = source["id"]
+        published_body = movie("smoke-published", genres=[old_genre, new_genre], people=[
+            {"personId": person_id, "role": "DIRECTOR"}, {"name": new_person, "role": "ACTOR"}])
+        draft_body = movie("smoke-draft", status="DRAFT", genres=[new_genre, old_genre],
+                           people=[{"personId": person_id, "role": "ACTOR"}])
         responses = concurrent([
-            lambda: call(f"{ADMIN_TITLES}/{published_id}", movie("smoke-published", genres=[old_genre, new_genre], people=[
-                {"personId": person_id, "role": "DIRECTOR"}, {"name": new_person, "role": "ACTOR"}]), admin, "PUT"),
-            lambda: call(f"{ADMIN_TITLES}/{draft_id}", movie("smoke-draft", status="DRAFT", genres=[new_genre, old_genre],
-                         people=[{"personId": person_id, "role": "ACTOR"}]), admin, "PUT"),
+            lambda: call(f"{ADMIN_TITLES}/{published_id}", published_body, admin, "PUT"),
+            lambda: call(f"{ADMIN_TITLES}/{draft_id}", draft_body, admin, "PUT"),
             lambda: call(f"{ADMIN_TITLES}/{published_id}", token=admin, method="DELETE"),
             lambda: call(f"/api/v1/admin/genres/{genre_id}", {"name": new_genre}, admin, "PUT"),
             lambda: call(f"/api/v1/admin/people/{person_id}", {"name": new_person}, admin, "PUT"),

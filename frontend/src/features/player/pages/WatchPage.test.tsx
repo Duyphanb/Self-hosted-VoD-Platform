@@ -739,6 +739,8 @@ function apiError(status: number, code: string, message: string): Response {
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body && typeof body === 'object' && 'playbackProgress' in body && !('episodeCount' in body)
-      ? episodeFixture(body as MovieDetail) : body), { status, headers: { 'Content-Type': 'application/json' } });
+  const isFilmDetail = body !== null && typeof body === 'object' && 'playbackProgress' in body
+    && !('episodeCount' in body);
+  const payload = isFilmDetail ? episodeFixture(body as MovieDetail) : body;
+  return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } });
 }

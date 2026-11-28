@@ -641,5 +641,8 @@ function apiError(status: number, code: string, message: string, requestId?: str
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(titlePayloadFixture(body)), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(titlePayloadFixture(body)), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
+  });
 }

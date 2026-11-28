@@ -390,7 +390,8 @@ class HlsApiIntegrationTests implements PostgresTestDatabase {
     private UUID asset(UUID id, UUID movie, String status, Instant created) {
         jdbc.update("insert into video_assets(id,episode_id,raw_bucket,raw_object_key,hls_bucket,hls_master_object_key,status,created_at,updated_at) "
                         + "values(?,?,'vod-raw',?,'vod-hls',?,?,?,?)",
-                id, EpisodeFixtures.episode(jdbc, movie), id.toString(), key(id), status, Timestamp.from(created), Timestamp.from(created));
+                id, EpisodeFixtures.episode(jdbc, movie), id.toString(), key(id), status, Timestamp.from(created),
+                Timestamp.from(created));
         return id;
     }
     private String bearer(String role) {

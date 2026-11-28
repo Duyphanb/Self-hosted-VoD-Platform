@@ -50,7 +50,8 @@ class VideoAssetRepositoryTest {
                 asset(uuid(100), uuid(20), VideoAssetStatus.QUEUED, T0.plusSeconds(2))));
 
         assertThat(assets.findNewestByEpisodeId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(1));
-        assertThat(assets.findCurrentReadyByEpisodeId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(99));
+        assertThat(assets.findCurrentReadyByEpisodeId(uuid(10))).get()
+                .extracting(VideoAsset::getId).isEqualTo(uuid(99));
     }
 
     @Test

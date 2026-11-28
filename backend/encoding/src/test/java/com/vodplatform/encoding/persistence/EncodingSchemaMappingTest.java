@@ -94,7 +94,8 @@ class EncodingSchemaMappingTest {
                         "ux_video_assets_hls_master.hls_bucket", "ux_video_assets_hls_master.hls_master_object_key",
                         "ux_encoding_jobs_asset_attempt.video_asset_id", "ux_encoding_jobs_asset_attempt.attempt");
         assertThat(rows("select lower(index_name), index_type_name from information_schema.indexes where table_schema = 'PUBLIC'")
-                .stream().map(row -> row[0].toString())).contains("ix_video_assets_episode_id", "ix_video_assets_status",
+                .stream().map(row -> row[0].toString()))
+                .contains("ix_video_assets_episode_id", "ix_video_assets_status",
                         "ix_encoding_jobs_video_asset_id", "ix_encoding_jobs_status")
                 .doesNotContain(EncodingConstraints.VIDEO_ASSETS_EPISODE_IN_FLIGHT);
         assertThat(rows("""

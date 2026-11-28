@@ -339,8 +339,8 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
                           "userRating": null,
                           "inWatchlist": false
                         }
-                        """.formatted(BRIGHT_DAYS, movieRepository.findById(BRIGHT_DAYS).orElseThrow().movieEpisode().getId(),
-                                BRIGHT_DAYS, DIRECTOR, ACTOR), JsonCompareMode.STRICT));
+                        """.formatted(BRIGHT_DAYS, filmEpisodeId(BRIGHT_DAYS), BRIGHT_DAYS, DIRECTOR, ACTOR),
+                        JsonCompareMode.STRICT));
         perform(MOVIES + "/" + APPLE_STORY, user)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.maturityRating").isEmpty())
@@ -506,6 +506,10 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
 
     private static UUID id(String name) {
         return UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private UUID filmEpisodeId(UUID title) {
+        return movieRepository.findById(title).orElseThrow().movieEpisode().getId();
     }
 
     // ---- helpers ----

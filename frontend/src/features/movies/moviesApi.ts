@@ -267,7 +267,12 @@ export function decodeEpisodeSummary(value: unknown): EpisodeSummary | null {
   };
 }
 
-export async function getWatchedTitle(client: ApiClient, episodeId: string, signal?: AbortSignal): Promise<MovieSummary> {
+/** The title of a visible episode, for the watch page (`GET /episodes/{episodeId}`). */
+export async function getWatchedTitle(
+  client: ApiClient,
+  episodeId: string,
+  signal?: AbortSignal
+): Promise<MovieSummary> {
   const value = await client.request<unknown>(`/episodes/${encodeURIComponent(episodeId)}`, {
     authenticated: true, signal
   });

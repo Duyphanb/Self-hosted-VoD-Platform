@@ -209,9 +209,10 @@ class UploadTransactionTests implements PostgresTestDatabase {
     void requireOnlyOwnedPendingJobs() {
         List<UUID> owners =
                 jdbc.queryForList(
-                        "select distinct e.title_id from encoding_jobs j join video_assets a on"
-                            + " a.id=j.video_asset_id join episodes e on e.id=a.episode_id where j.status='QUEUED' and j.published_at is"
-                            + " null",
+                        "select distinct e.title_id from encoding_jobs j"
+                            + " join video_assets a on a.id=j.video_asset_id"
+                            + " join episodes e on e.id=a.episode_id"
+                            + " where j.status='QUEUED' and j.published_at is null",
                         UUID.class);
         assertThat(movies)
                 .as("relay fixtures must own every pending job before running the global relay")

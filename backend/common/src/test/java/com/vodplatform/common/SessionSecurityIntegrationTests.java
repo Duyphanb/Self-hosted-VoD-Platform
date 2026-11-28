@@ -152,7 +152,8 @@ class SessionSecurityIntegrationTests extends CookieAuthFixture implements Postg
         jdbc.update("delete from user_roles where user_id=? and role_id=(select id from roles where name='ROLE_ADMIN')",
                 user);
         mvc.perform(get(ADMIN).header("Authorization", authorization)).andExpect(status().isForbidden());
-        mvc.perform(post("/api/v1/admin/titles").header("Authorization", authorization)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/admin/titles").header("Authorization", authorization))
+                .andExpect(status().isForbidden());
         verify(reader, times(3)).read(sessionId(), true);
         verify(reader, times(1)).readAsync(sessionId(), false);
     }

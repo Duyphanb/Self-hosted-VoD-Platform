@@ -318,7 +318,9 @@ describe('AdminMovieFormPage through the data router', () => {
     change('Title', 'An unsaved title');
     change('Description', 'An unsaved description.');
     failRefresh = true;
-    await act(async () => { await queryClient.refetchQueries({ queryKey: movieKeys.adminDetail(movieId), exact: true }); });
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: movieKeys.adminDetail(movieId), exact: true });
+    });
     expect(await screen.findByRole('heading', { name: 'Movie could not be refreshed; your changes are kept' })).toBeInTheDocument();
     expect(screen.getByLabelText('Title')).toHaveValue('An unsaved title');
     expect(screen.getByLabelText('Description')).toHaveValue('An unsaved description.');
@@ -433,7 +435,9 @@ describe('AdminMovieFormPage through the data router', () => {
     await screen.findByLabelText('Title');
     change('Title', 'Unsaved archived title');
     currentStatus = 'PUBLISHED';
-    await act(async () => { await queryClient.refetchQueries({ queryKey: movieKeys.adminDetail(movieId), exact: true }); });
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: movieKeys.adminDetail(movieId), exact: true });
+    });
     await waitFor(() => expect(queryClient.getQueryData<MovieDetail>(movieKeys.adminDetail(movieId))?.status).toBe('PUBLISHED'));
     expect(screen.getByLabelText('Title')).toHaveValue('Unsaved archived title');
     const status = screen.getByLabelText('Status');
@@ -453,7 +457,9 @@ describe('AdminMovieFormPage through the data router', () => {
   });
 
   it.each([400, 404])('shows movie not found when the detail API responds %s', async (status) => {
-    serve((url) => url.pathname === `/api/v1/admin/titles/${movieId}` ? apiError(status, 'MOVIE_NOT_FOUND') : undefined);
+    serve((url) => url.pathname === `/api/v1/admin/titles/${movieId}`
+      ? apiError(status, 'TITLE_NOT_FOUND')
+      : undefined);
     renderForm({ path: `/admin/titles/${movieId}/edit` });
     expect(await screen.findByRole('heading', { name: 'Movie not found' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();

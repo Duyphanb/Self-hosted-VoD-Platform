@@ -62,10 +62,12 @@ def main():
         seed(sql)
         sql("SET ROLE fixture_owner; CREATE VIEW current_episode_assets AS SELECT 1 AS forced_collision;")
         failure = migrate(8, check=False)
-        assert failure.returncode and 'current_episode_assets' in failure.stderr + failure.stdout, "Missing late failure"
+        failure_output = failure.stderr + failure.stdout
+        assert failure.returncode and 'current_episode_assets' in failure_output, "Missing late failure"
         assert sql("SELECT to_regclass('public.episodes') IS NULL AND "
                    "(SELECT max(version) = '7' FROM flyway_schema_history);") == "t"
-        assert sql("SELECT count(*) FROM (TABLE public.video_assets EXCEPT ALL TABLE before_v8.video_assets) rows;") == "0"
+        assert sql("SELECT count(*) FROM "
+                   "(TABLE public.video_assets EXCEPT ALL TABLE before_v8.video_assets) rows;") == "0"
         sql("SET ROLE fixture_owner; DROP VIEW current_episode_assets;")
         print("Late DDL failure rolled V8 back to V7", flush=True)
 
@@ -86,7 +88,8 @@ def main():
                                ('REFERENCES'), ('TRIGGER')) privilege(name)
             WHERE tables.schemaname = 'public' AND (
               has_table_privilege('fixture_backend', format('public.%I', tables.tablename), privilege.name) <>
-                (tables.tablename <> 'flyway_schema_history' AND privilege.name IN ('SELECT','INSERT','UPDATE','DELETE'))
+                (tables.tablename <> 'flyway_schema_history'
+                 AND privilege.name IN ('SELECT','INSERT','UPDATE','DELETE'))
               OR has_table_privilege('fixture_worker', format('public.%I', tables.tablename), privilege.name) <>
                 (tables.tablename IN ('encoding_jobs','video_assets') AND privilege.name IN ('SELECT','UPDATE')));
             """) == "0"

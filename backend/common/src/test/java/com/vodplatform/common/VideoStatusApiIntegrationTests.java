@@ -111,7 +111,8 @@ class VideoStatusApiIntegrationTests implements PostgresTestDatabase {
                 entityManager.clear();
                 statistics.clear();
                 assertThat(movieService.listPublished(null, null, 0, pageSize, MovieSort.LATEST).getContent())
-                        .hasSize(pageSize).allSatisfy(movie -> assertThat(movie.availability().label()).isEqualTo("PLAYABLE"));
+                        .hasSize(pageSize)
+                        .allSatisfy(movie -> assertThat(movie.availability().label()).isEqualTo("PLAYABLE"));
                 assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
             }
         } finally {
@@ -130,7 +131,8 @@ class VideoStatusApiIntegrationTests implements PostgresTestDatabase {
     private UUID asset(UUID movie, String status, Instant created) {
         UUID id = UUID.randomUUID();
         jdbc.update("insert into video_assets (id,episode_id,raw_bucket,raw_object_key,status,created_at,updated_at) "
-                        + "values (?,?,'fixture',?,?,?,?)", id, EpisodeFixtures.episode(jdbc, movie), id.toString(), status,
+                        + "values (?,?,'fixture',?,?,?,?)",
+                id, EpisodeFixtures.episode(jdbc, movie), id.toString(), status,
                 Timestamp.from(created), Timestamp.from(created));
         return id;
     }

@@ -120,7 +120,8 @@ class VideoAssetPostgresTest {
         executor.shutdownNow();
         assertThat(executor.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
         for (UUID title : movies) {
-            jdbc.update("delete from video_assets where episode_id in (select id from episodes where title_id=?)", title);
+            jdbc.update("delete from video_assets where episode_id in "
+                    + "(select id from episodes where title_id=?)", title);
             jdbc.update("delete from episodes where title_id=?", title);
             jdbc.update("delete from titles where id=?", title);
         }

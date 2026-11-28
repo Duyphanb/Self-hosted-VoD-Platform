@@ -22,7 +22,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ContextConfiguration;
 
 @DataJpaTest(properties = "spring.jpa.properties.hibernate.session_factory.statement_inspector=com.vodplatform.encoding.persistence.RecordingStatementInspector")
-@ContextConfiguration(classes = {EncodingConfiguration.class, CatalogConfiguration.class, EncodingVideoStatusLookup.class})
+@ContextConfiguration(classes = {
+        EncodingConfiguration.class, CatalogConfiguration.class, EncodingVideoStatusLookup.class})
 class EncodingVideoStatusLookupTest {
 
     @Autowired VideoAssetRepository assets;

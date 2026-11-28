@@ -189,11 +189,13 @@ class PlaybackApiIntegrationTests implements PostgresTestDatabase {
                 {"episodeId":"%s","titleId":"%s","videoAssetId":"%s","status":"READY",
                  "hlsManifestUrl":"/hls/video-assets/%s/master.m3u8",
                  "durationSeconds":%s,"resumeSeconds":%d}
-                """.formatted(EpisodeFixtures.episode(jdbc, movie), movie, asset, asset, duration, resume), JsonCompareMode.STRICT));
+                """.formatted(EpisodeFixtures.episode(jdbc, movie), movie, asset, asset, duration, resume),
+                JsonCompareMode.STRICT));
     }
 
     private ResultActions request(UUID movie, String token) throws Exception {
-        return mockMvc.perform(get(PATH, EpisodeFixtures.episode(jdbc, movie)).header(HttpHeaders.AUTHORIZATION, token));
+        return mockMvc.perform(get(PATH, EpisodeFixtures.episode(jdbc, movie))
+                .header(HttpHeaders.AUTHORIZATION, token));
     }
 
     private UUID movie() {
@@ -221,14 +223,16 @@ class PlaybackApiIntegrationTests implements PostgresTestDatabase {
         jdbc.update("insert into video_assets (id,episode_id,raw_bucket,raw_object_key,hls_bucket,"
                         + "hls_master_object_key,status,duration_seconds,created_at,updated_at) "
                         + "values (?,?,'private-raw',?,'private-hls',?,?,?,?,?)",
-                id, EpisodeFixtures.episode(jdbc, movie), "private/raw/" + id, "unrelated/storage/prefix/" + id + "/different.m3u8",
+                id, EpisodeFixtures.episode(jdbc, movie), "private/raw/" + id,
+                "unrelated/storage/prefix/" + id + "/different.m3u8",
                 status, duration, Timestamp.from(created), Timestamp.from(created));
     }
 
     private void progress(UUID user, UUID movie, int position, Integer duration, boolean finished) {
         jdbc.update("insert into playback_progress (user_id,episode_id,current_seconds,duration_seconds,finished,"
                         + "last_played_at,created_at,updated_at) values (?,?,?,?,?,?,?,?)",
-                user, EpisodeFixtures.episode(jdbc, movie), position, duration, finished, Timestamp.from(T0), Timestamp.from(T0), Timestamp.from(T0));
+                user, EpisodeFixtures.episode(jdbc, movie), position, duration, finished, Timestamp.from(T0),
+                Timestamp.from(T0), Timestamp.from(T0));
     }
 
     private String bearer(UUID user, String role) {

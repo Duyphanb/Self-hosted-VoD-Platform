@@ -85,7 +85,8 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
         addGenres(first);
         valid(0, 100, T0.plusSeconds(1));
         UUID finished = valid(90, 100, T0.plusSeconds(1));
-        jdbc.update("update playback_progress set finished=true where episode_id=?", EpisodeFixtures.episode(jdbc, finished));
+        jdbc.update("update playback_progress set finished=true where episode_id=?",
+                EpisodeFixtures.episode(jdbc, finished));
         valid(100, 100, T0.plusSeconds(1));
         UUID shorter = valid(140, 200, T0.plusSeconds(1));
         asset(shorter, UUID.randomUUID(), "READY", 100, T0.plusSeconds(1));
@@ -162,7 +163,9 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
         assertThat(result).containsExactlyElementsOf(
                 java.util.stream.Stream.concat(newer.stream(), java.util.stream.Stream.of(high)).toList());
         // Without the 49 newer rows both tied movies remain in database order, not UUID.compareTo.
-        for (UUID id : newer) jdbc.update("delete from playback_progress where episode_id=?", EpisodeFixtures.episode(jdbc, id));
+        for (UUID id : newer) {
+            jdbc.update("delete from playback_progress where episode_id=?", EpisodeFixtures.episode(jdbc, id));
+        }
         assertThat(ids(list(token))).containsExactly(high, low);
     }
 
@@ -174,8 +177,10 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
             UUID id = valid(40, 100, T0.plusSeconds(100 + i));
             switch (i % 3) {
                 case 0 -> jdbc.update("update titles set status='DRAFT' where id=?", id);
-                case 1 -> jdbc.update("update playback_progress set finished=true where episode_id=?", EpisodeFixtures.episode(jdbc, id));
-                default -> jdbc.update("update video_assets set status='QUEUED' where episode_id=?", EpisodeFixtures.episode(jdbc, id));
+                case 1 -> jdbc.update("update playback_progress set finished=true where episode_id=?",
+                        EpisodeFixtures.episode(jdbc, id));
+                default -> jdbc.update("update video_assets set status='QUEUED' where episode_id=?",
+                        EpisodeFixtures.episode(jdbc, id));
             }
         }
         assertThat(ids(list(token))).containsExactlyElementsOf(expected);
@@ -389,7 +394,8 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
                 insert into playback_progress(user_id,episode_id,current_seconds,duration_seconds,finished,
                                               last_played_at,created_at,updated_at)
                 values(?,?,?,999,?,?,?,?)
-                """, owner, episode, position, finished, Timestamp.from(played), Timestamp.from(T0), Timestamp.from(T0));
+                """, owner, episode, position, finished, Timestamp.from(played), Timestamp.from(T0),
+                Timestamp.from(T0));
     }
 
     private UUID user() {

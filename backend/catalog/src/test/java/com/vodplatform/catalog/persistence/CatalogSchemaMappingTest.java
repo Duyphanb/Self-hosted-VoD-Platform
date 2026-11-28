@@ -49,7 +49,8 @@ class CatalogSchemaMappingTest {
                 .map(EntityType::getJavaType)
                 .collect(Collectors.toSet());
 
-        assertThat(entityTypes).containsExactlyInAnyOrder(Movie.class, Episode.class, Genre.class, Person.class, MovieCredit.class);
+        assertThat(entityTypes).containsExactlyInAnyOrder(
+                Movie.class, Episode.class, Genre.class, Person.class, MovieCredit.class);
     }
 
     @Test

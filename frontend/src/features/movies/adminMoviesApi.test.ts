@@ -16,7 +16,11 @@ const payload: UpsertMovieRequest = {
   genres: ['Drama'], people: [{ personId, role: 'DIRECTOR' }], status: 'DRAFT'
 };
 const movie: MovieDetail = {
-  ...payload, contentType: 'MOVIE', episode: null, id: movieId, people: [{ personId, role: 'DIRECTOR', name: 'Director' }],
+  ...payload,
+  contentType: 'MOVIE',
+  episode: null,
+  id: movieId,
+  people: [{ personId, role: 'DIRECTOR', name: 'Director' }],
   posterUrl: null, averageRating: null, videoStatus: null, userRating: null, inWatchlist: false, playbackProgress: null
 };
 const fetchMock = vi.fn<typeof fetch>();
@@ -60,7 +64,8 @@ describe('admin movie API', () => {
     });
     expect(path()).toBe(method === 'POST' ? '/api/v1/admin/titles' : `/api/v1/admin/titles/${movieId}`);
     expect(fetchMock.mock.calls[0][1]?.method).toBe(method);
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual(method === 'POST' ? { ...payload, contentType: 'MOVIE' } : payload);
+    const sentBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(sentBody).toEqual(method === 'POST' ? { ...payload, contentType: 'MOVIE' } : payload);
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Content-Type')).toBe('application/json');
   });
 
@@ -130,5 +135,8 @@ function client(): ApiClient {
 function url(): URL { return new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost'); }
 function path(): string { return url().pathname; }
 function json(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(titlePayloadFixture(value)), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(titlePayloadFixture(value)), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
+  });
 }
