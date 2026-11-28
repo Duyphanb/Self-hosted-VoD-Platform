@@ -54,24 +54,44 @@ pending in the SPA and must be retried. A rejected refresh returns 401 and clear
 
 ## Catalog Rename Upgrade (Flyway V7)
 
-Issue 7.1 (#259) renames `movies`, `movie_genres` and `movie_credits` to `titles`, `title_genres` and `title_credits`
-([ADR-013](../architecture/adr/ADR-013.md) D13, slice S1). A backend or worker built before V7 fails against the
-renamed tables, and a new one fails against V6, so the upgrade is fenced: no writer runs while V7 is applied. Set `C`
-to the Compose command of the deployment, as in [Production Credential Preflight](#production-credential-preflight).
+Issue 7.1 (#259) renames `movies`, `movie_genres` and `movie_credits` to `titles`, `title_genres` and `title_credits`.
+A backend or worker built before V7 fails against the renamed tables, and a new one fails against V6, so the release
+runs the fenced sequence of [ADR-013](../architecture/adr/ADR-013.md) D13 ("Deployment of every migration slice"). Set
+`C` to the Compose command of the deployment, as in [Production Credential Preflight](#production-credential-preflight),
+and `PROJECT` to its project name.
 
-1. Stop new uploads and let uploads that are already sending finish.
-2. Stop the edge and the writers: `$C stop nginx backend worker`. If this interrupts an encode, follow
-   [Encoding Recovery](#encoding-recovery) after the upgrade.
-3. Take a PostgreSQL dump of the V6 database and verify that it restores, for example into a throwaway database.
-   Keep it until the upgrade is accepted.
-4. Apply the migration alone: `$C run --rm flyway`. V7 runs in one transaction, so a failed V7 leaves V6 unchanged.
-   The `afterMigrate` grants callback runs in its own transaction after V7. If the callback fails, V7 can stay
-   committed with incomplete grants: run the same command again (the callback is idempotent) and continue only after
-   it succeeds.
-5. Before starting anything, check that `flyway_schema_history` shows version 7 as successful and that the runtime
-   roles keep exactly their table grants (the privilege query in `deploy/tests/title-rename-migration-smoke.sh`).
-6. Decide at this checkpoint. If step 4 or 5 cannot be completed, restore the V6 dump and start the previous release.
-   Otherwise start the new release with `$C up -d`. Once the new backend or worker has started, roll forward only.
+Before the window, keep the running images for rollback and build the new ones. Compose names a built image after the
+project and service, so tag each running image first, for example
+`docker image tag "$PROJECT-backend" "$PROJECT-backend:pre-v7"` and the same for `worker` and `frontend`. Then build
+from the new source with `$C build backend worker frontend`.
+
+1. Stop new uploads at the edge and wait until no upload request is in progress.
+2. Stop the edge and the backend: `$C stop nginx backend`. No job is published any more; the worker keeps consuming
+   what the broker already holds.
+3. Drain the worker. Wait until the encoding queue is empty and no `encoding_jobs` row is `PROCESSING`, then
+   `$C stop worker`. Checking `PROCESSING` alone is not enough while messages remain. If you cannot wait, stopping the
+   worker interrupts one encode, which fails as `WORKER_INTERRUPTED` at the next start and needs a retry or a new
+   upload ([Encoding Recovery](#encoding-recovery)).
+4. Record the row counts of `movies`, `movie_genres`, `movie_credits`, `ratings` and `watchlist_items`. Take a
+   `pg_dump` and restore it once into a disposable PostgreSQL container to prove that it restores.
+5. With every writer still stopped, apply the migration alone: `$C run --rm flyway`.
+   - V7 runs in one transaction, so a failed V7 leaves V6 unchanged.
+   - The `afterMigrate` grants callback runs in its own transaction after V7. If it fails, V7 can stay committed with
+     incomplete grants. Run the same command again (the callback is idempotent) and continue only after it succeeds.
+
+   Then check before starting anything:
+   - `flyway_schema_history` shows version 7 as successful;
+   - the schema matches the committed snapshot:
+     `python3 deploy/tests/schema-snapshot.py --container <postgres container> --user <owner> --database <db>`;
+   - the row counts of the renamed tables equal those recorded in step 4;
+   - the runtime roles keep exactly their table grants (the privilege query in
+     `deploy/tests/title-rename-migration-smoke.sh`).
+6. Decide here.
+   - If anything in step 5 failed, restore the dump and start the previous images, tagged `pre-v7`.
+   - Otherwise start the new backend and worker, then the edge: `$C up -d --no-build backend worker`, then
+     `$C up -d --no-build`.
+
+   Once the new backend or worker has started, the only way back is forward.
 
 ## First Administrator
 
