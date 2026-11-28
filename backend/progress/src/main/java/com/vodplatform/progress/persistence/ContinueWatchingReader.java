@@ -20,7 +20,7 @@ public class ContinueWatchingReader {
             SELECT p.movie_id, p.current_seconds, p.duration_seconds, p.finished, p.last_played_at,
                    a.duration_seconds AS current_duration
             FROM playback_progress p
-            JOIN movies m ON m.id = p.movie_id
+            JOIN titles m ON m.id = p.movie_id
             JOIN LATERAL (
                 SELECT v.duration_seconds FROM video_assets v
                 WHERE v.movie_id = p.movie_id AND v.status = :ready

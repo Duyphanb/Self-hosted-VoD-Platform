@@ -29,7 +29,7 @@ class NewmanUploadFixturesTest(unittest.TestCase):
         in_flight_movie = uuid.uuid4()
         sql = fixtures.seed_sql(upload_movie, in_flight_movie)
         self.assertTrue(sql.startswith("BEGIN;") and sql.rstrip().endswith("COMMIT;"))
-        self.assertEqual(sql.count("INSERT INTO movies"), 2)
+        self.assertEqual(sql.count("INSERT INTO titles"), 2)
         self.assertIn(f"'{in_flight_movie}', 'vod-raw'", sql)
         self.assertIn("'QUEUED', 1, now(), now()", sql)
         self.assertNotIn(f"'{upload_movie}', 'vod-raw'", sql)

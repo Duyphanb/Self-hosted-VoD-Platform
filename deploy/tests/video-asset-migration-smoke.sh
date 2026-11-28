@@ -25,6 +25,7 @@ until docker exec "$container" pg_isready -U fixture -d fixture >/dev/null 2>&1;
     sleep 1
 done
 sql() { docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 -U fixture -d fixture -Atc "$1"; }
+# This rehearsal covers the V4-to-V5 transition and its pre-rename fixtures.
 migrate() {
     docker run --rm --network "container:$container" \
         -v "$root/backend/common/src/main/resources/db/migration:/flyway/sql:ro" \
@@ -75,7 +76,7 @@ FROM generate_series(10,29) n CROSS JOIN generate_series(1,2) s;" >/dev/null
 
 before_assets="$(assets)"
 before_jobs="$(jobs)"
-if migrate; then
+if migrate -target=5; then
     printf '%s\n' 'FAIL: V5 accepted legacy in-flight conflicts' >&2
     exit 1
 fi
@@ -96,7 +97,7 @@ printf '%s\n' 'PASS: V5 abort reports 21 movies with a 20-id sample and preserve
 # Explicit repair belongs only to this disposable fixture, never to V5 itself.
 sql "UPDATE video_assets SET status = 'FAILED' WHERE status = 'UPLOADED';" >/dev/null
 repaired_assets="$(assets)"
-migrate
+migrate -target=5
 [ "$(assets)" = "$repaired_assets" ]
 [ "$(jobs)" = "$before_jobs" ]
 [ "$(sql "SELECT count(*) FROM flyway_schema_history WHERE version = '5' AND success;")" = 1 ]

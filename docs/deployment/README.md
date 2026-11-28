@@ -52,6 +52,109 @@ Set `CORS_ALLOWED_ORIGINS` to the browser-visible public origin (include a non-d
 Auth-state read failures return 503 `AUTH_STATE_UNAVAILABLE` and preserve the cookie. An unconfirmed logout stays
 pending in the SPA and must be retried. A rejected refresh returns 401 and clears the cookie.
 
+## Catalog Rename Upgrade (Flyway V7)
+
+Issue 7.1 (#259) renames `movies`, `movie_genres` and `movie_credits` to `titles`, `title_genres` and `title_credits`.
+The backend maps those tables, so a backend built before V7 fails against V7, and the reverse. The worker only uses
+`encoding_jobs` and `video_assets`, which V7 does not change, but it is drained and stopped too. That way PostgreSQL,
+RabbitMQ and object storage cross the cutover together. The release follows the fenced sequence of
+[ADR-013](../architecture/adr/ADR-013.md) D13 ("Deployment of every migration slice"). It was rehearsed on a disposable
+stack for #259. Set `C` to the Compose command of the deployment, as in
+[Production Credential Preflight](#production-credential-preflight), and `PROJECT` to its project name.
+
+**Before the window**
+
+- These steps assume one deployment directory whose checkout is switched between releases with Git. The deployed
+  `nginx.conf` and the environment file stay in place, so every Compose command resolves the same bind sources. The
+  application database is not named `postgres` (the Compose default is `vod_platform`). A production layout with its
+  own files, such as an HTTPS listener or an overlay, is defined by #136 and adapts these steps.
+- Check that PostgreSQL, RabbitMQ and MinIO are healthy and that their init services have completed. The commands
+  below use `--no-deps`, so nothing is started implicitly.
+- Record the commit of the running release (V6). A rollback switches the checkout back to it, so that its Compose file
+  and migration bundle are used.
+- Tag the image each running service uses, for example
+  `docker image tag "$(docker inspect --format '{{.Image}}' "$($C ps -q backend)")" "$PROJECT-backend:pre-v7"`, and the
+  same for `worker` and `frontend`.
+- Switch the checkout to the V7 release and build the new images with `$C build backend worker frontend`.
+
+**The window**
+
+1. **Stop new uploads.**
+   - Keep a copy of the deployed Nginx configuration file. Compose bind-mounts it from the host, so the change below
+     outlives a restart until it is undone.
+   - Close the upload location in that file so that it answers 503. Compose mounts it as a single file, so change it by
+     overwriting its content in place (for example `cp` a prepared copy over it), never by moving or renaming a file
+     into its place: the running container keeps seeing the old file. The same applies whenever the saved copy is put
+     back below.
+   - Check the configuration the container sees with `$C exec nginx nginx -T`, then reload gracefully with
+     `$C exec nginx nginx -s reload`.
+   - A new upload `POST` must now get 503, while `/api/v1/health` still returns 200.
+   - Uploads already accepted finish on the previous Nginx worker generation. Wait until those worker processes have
+     exited. Do not cut an accepted upload. If the drain takes longer than the window allows, abort the cutover:
+     copy the saved content back in place, reload, and check that an unauthenticated upload `POST` gets the backend's
+     401 again, not 503.
+2. **Stop the edge and the backend:** `$C stop nginx backend`. No job is published any more; the worker keeps
+   consuming what the broker already holds.
+3. **Drain the worker.**
+   - Watch the encoding queue (named by `RABBITMQ_ENCODING_QUEUE`, default `video-encoding-queue`, not its dead-letter
+     queue) with `$C exec rabbitmq rabbitmqctl --quiet list_queues -p / name messages_ready messages_unacknowledged consumers`.
+   - Watch the database with `SELECT count(*) FROM encoding_jobs WHERE status = 'PROCESSING'`.
+   - Wait until `messages_ready` and `messages_unacknowledged` are both 0 and no job is `PROCESSING`, then run
+     `$C stop worker`.
+   - Record the jobs that are `QUEUED` with `published_at IS NULL`. These are the outbox: the new release's relay
+     publishes them after the decision.
+   - If you cannot wait, stopping the worker interrupts one encode. It fails as `WORKER_INTERRUPTED` at the next
+     start and needs a retry or a new upload ([Encoding Recovery](#encoding-recovery)).
+4. **Record, dump and prove the restore.**
+   - Record the row counts of `movies`, `movie_genres`, `movie_credits`, `ratings` and `watchlist_items`, and the
+     database-level privileges of the runtime roles (`has_database_privilege(<role>, current_database(), 'CONNECT')`
+     and `'TEMP'`).
+   - Take `pg_dump --format=custom` of the application database. With `pg_restore --create`, the dump also carries the
+     database's own ACL and settings. Roles are cluster-wide and are not in it.
+   - Prove that it restores:
+     - use a disposable PostgreSQL of the same image and ICU settings, started without the application database: leave
+       its `POSTGRES_DB` at the default `postgres`;
+     - create the owner and the runtime login roles first, as `deploy/postgres-init.sh` does;
+     - as the bootstrap superuser (`POSTGRES_USER`), run `pg_restore --create --exit-on-error -d postgres <dump>`.
+       This connects to the maintenance database and creates the archived database with its owner, ACL and settings;
+     - require exit code 0, a Flyway history ending at 6, the recorded row counts and the recorded database-level
+       privileges.
+5. **Apply the migration alone:** `$C run --rm --no-deps flyway`.
+   - V7 runs in one transaction, so a failed V7 leaves V6 unchanged.
+   - The `afterMigrate` grants callback runs in its own transaction after V7. If it fails, V7 can stay committed with
+     incomplete grants. Run the same command again (the callback is idempotent) and continue only after it succeeds.
+
+   Then check before starting anything:
+   - `flyway_schema_history` shows version 7 as successful;
+   - the schema matches the committed snapshot:
+     `python3 deploy/tests/schema-snapshot.py --container <postgres container> --user <owner> --database <db>`;
+   - the row counts of the renamed tables equal those recorded in step 4;
+   - the runtime roles keep exactly their table grants (the privilege query in
+     `deploy/tests/title-rename-migration-smoke.sh`).
+6. **Decide here,** before any new backend or worker runs.
+   - On either path, copy the saved Nginx configuration back in place (as in step 1) before the edge starts.
+   - **Roll forward** if step 5 passed:
+     - `$C up -d --no-build --no-deps --wait backend worker frontend`;
+     - then `$C up -d --no-build --no-deps --wait nginx`.
+
+     `--no-deps` keeps Compose from running `postgres-init` and Flyway again after this point.
+   - **Roll back** if anything in step 5 failed:
+     - as the bootstrap superuser, connected to the maintenance database `postgres`, drop the application database,
+       then run
+       `pg_restore --create --exit-on-error -d postgres <dump>`, the same command step 4 proved. It recreates the
+       database with its V6 owner, ACL and settings in the same cluster, where the roles already exist. Stop on any
+       error;
+     - on that database, verify that the Flyway history ends at 6, that the schema matches the V6 snapshot
+       (`schema-snapshot.py` from the V6 checkout), that the table grants are exact, and that the database-level
+       privileges equal those recorded in step 4;
+     - switch the checkout back to the recorded V6 commit, point the image tags back with `docker image tag "$PROJECT-backend:pre-v7" "$PROJECT-backend"`
+       and the same for `worker` and `frontend`;
+     - start with the same two `--no-deps` commands.
+   - After the edge is up on either path, check that uploads are open again: an unauthenticated upload `POST` gets 401
+     from the backend, not the 503 of step 1.
+
+   Once the new backend or worker has started, the only way back is forward.
+
 ## First Administrator
 
 Registration always assigns `ROLE_USER`, and no administrator account or
@@ -595,7 +698,7 @@ WITH ranked AS (
 SELECT a.id, a.movie_id, a.status, a.raw_bucket, a.raw_object_key,
        a.hls_bucket, a.hls_master_object_key
 FROM ranked a
-JOIN movies m ON m.id = a.movie_id
+JOIN titles m ON m.id = a.movie_id
 LEFT JOIN current_ready c ON c.movie_id = a.movie_id
 WHERE m.status <> 'ARCHIVED'
   AND ((a.status = 'READY' AND a.id IS DISTINCT FROM c.id)

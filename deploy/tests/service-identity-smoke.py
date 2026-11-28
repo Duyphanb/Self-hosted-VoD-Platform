@@ -67,10 +67,10 @@ allow backend-dml backend "BEGIN;
   UPDATE genres SET name = 'Audit 106' WHERE slug = 'audit-106';
   DELETE FROM genres WHERE slug = 'audit-106';
   SELECT count(*) FROM users; SELECT count(*) FROM video_assets; ROLLBACK;"
-allow backend-row-locks backend "BEGIN; SELECT id FROM movies FOR UPDATE; SELECT id FROM refresh_tokens FOR UPDATE; ROLLBACK;"
+allow backend-row-locks backend "BEGIN; SELECT id FROM titles FOR UPDATE; SELECT id FROM refresh_tokens FOR UPDATE; ROLLBACK;"
 allow backend-sequences backend "SELECT last_value FROM roles_id_seq"
 deny backend-cannot-create-tables backend -c "CREATE TABLE audit_probe (id int)"
-deny backend-cannot-alter-tables backend -c "ALTER TABLE movies ADD COLUMN audit_probe int"
+deny backend-cannot-alter-tables backend -c "ALTER TABLE titles ADD COLUMN audit_probe int"
 deny backend-cannot-drop-tables backend -c "DROP TABLE ratings"
 deny backend-cannot-truncate backend -c "TRUNCATE genres"
 deny backend-cannot-read-migration-history backend -c "SELECT count(*) FROM flyway_schema_history"
@@ -82,7 +82,7 @@ allow worker-claims-and-finishes-encoding-rows worker "BEGIN;
   UPDATE video_assets SET status = 'PROCESSING' WHERE false; ROLLBACK;"
 deny worker-cannot-read-users worker -c "SELECT count(*) FROM users"
 deny worker-cannot-read-refresh-tokens worker -c "SELECT count(*) FROM refresh_tokens"
-deny worker-cannot-read-movies worker -c "SELECT count(*) FROM movies"
+deny worker-cannot-read-titles worker -c "SELECT count(*) FROM titles"
 deny worker-cannot-insert-jobs worker -c "INSERT INTO encoding_jobs (id, video_asset_id, status, attempt, queued_at)
   VALUES (gen_random_uuid(), gen_random_uuid(), 'QUEUED', 1, now())"
 deny worker-cannot-delete-assets worker -c "DELETE FROM video_assets"

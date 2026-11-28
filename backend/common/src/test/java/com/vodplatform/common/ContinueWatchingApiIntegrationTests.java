@@ -60,7 +60,7 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
 
     @AfterEach
     void cleanup() {
-        for (UUID id : movies) jdbc.update("delete from movies where id=?", id);
+        for (UUID id : movies) jdbc.update("delete from titles where id=?", id);
         for (UUID id : genres) jdbc.update("delete from genres where id=?", id);
         for (UUID id : users) jdbc.update("delete from users where id=?", id);
     }
@@ -172,7 +172,7 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
         for (int i = 0; i < 10; i++) {
             UUID id = valid(40, 100, T0.plusSeconds(100 + i));
             switch (i % 3) {
-                case 0 -> jdbc.update("update movies set status='DRAFT' where id=?", id);
+                case 0 -> jdbc.update("update titles set status='DRAFT' where id=?", id);
                 case 1 -> jdbc.update("update playback_progress set finished=true where movie_id=?", id);
                 default -> jdbc.update("update video_assets set status='QUEUED' where movie_id=?", id);
             }
@@ -269,7 +269,7 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
     private UUID movie(UUID id, String status) {
         movies.add(id);
         jdbc.update("""
-                insert into movies(id,title,slug,description,release_year,status,created_at,updated_at)
+                insert into titles(id,title,slug,description,release_year,status,created_at,updated_at)
                 values(?,'Continue fixture',?,'Continue fixture',2026,?,?,?)
                 """, id, "continue-" + id, status, Timestamp.from(T0), Timestamp.from(T0));
         return id;
@@ -305,7 +305,7 @@ class ContinueWatchingApiIntegrationTests implements PostgresTestDatabase {
             UUID id = UUID.randomUUID();
             genres.add(id);
             jdbc.update("insert into genres(id,name,slug) values(?,?,?)", id, name, name.toLowerCase() + "-" + id);
-            jdbc.update("insert into movie_genres(movie_id,genre_id) values(?,?)", movie, id);
+            jdbc.update("insert into title_genres(title_id,genre_id) values(?,?)", movie, id);
         }
     }
 

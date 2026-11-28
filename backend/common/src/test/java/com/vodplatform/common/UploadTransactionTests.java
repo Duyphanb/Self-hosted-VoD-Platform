@@ -95,7 +95,7 @@ class UploadTransactionTests implements PostgresTestDatabase {
     UUID movie(String status) {
         UUID id = UUID.randomUUID();
         jdbc.update(
-                "insert into movies (id,title,slug,description,status,created_at,updated_at) values"
+                "insert into titles (id,title,slug,description,status,created_at,updated_at) values"
                         + " (?,?,?,? ,?,?,?)",
                 id,
                 "Upload fixture",
@@ -121,7 +121,7 @@ class UploadTransactionTests implements PostgresTestDatabase {
                             + "(select id from video_assets where movie_id=?)",
                     id);
             jdbc.update("delete from video_assets where movie_id=?", id);
-            jdbc.update("delete from movies where id=?", id);
+            jdbc.update("delete from titles where id=?", id);
         }
     }
 
@@ -199,7 +199,7 @@ class UploadTransactionTests implements PostgresTestDatabase {
         UUID id = movie("DRAFT");
         doAnswer(
                         call -> {
-                            jdbc.update("delete from movies where id=?", id);
+                            jdbc.update("delete from titles where id=?", id);
                             return null;
                         })
                 .when(storage)

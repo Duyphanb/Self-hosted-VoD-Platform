@@ -65,8 +65,8 @@ def main():
     def sql(statement):
         return psql('psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At', statement).strip()
 
-    assert sql("SELECT (SELECT count(*) FROM movies) + (SELECT count(*) FROM genres) + (SELECT count(*) FROM people);") == "0", \
-        "Catalog must be fresh"
+    assert sql("SELECT (SELECT count(*) FROM titles) + (SELECT count(*) FROM genres) "
+               "+ (SELECT count(*) FROM people);") == "0", "Catalog must be fresh"
 
     def request(path, body=None, token=None, method=None, raw=None, cookie=None):
         data = raw if raw is not None else None if body is None else json.dumps(body).encode()
@@ -149,7 +149,7 @@ def main():
         ]:
             assert is_api_error(call(path, body, token, method, raw), 403, "FORBIDDEN"), f"{method} must be 403"
     assert is_api_error(call(MOVIES, movie("smoke-anonymous")), 401, "UNAUTHORIZED")
-    assert sql("SELECT count(*) FROM movies;") == "0"
+    assert sql("SELECT count(*) FROM titles;") == "0"
     print("PASS ROLE_USER gets 403 on admin movie writes, even with NUL, malformed or missing targets")
 
     # ---- promote the candidate with the documented first-administrator SQL ----
@@ -180,7 +180,7 @@ def main():
     published_id = str(uuid.UUID(published["id"]))
     draft = create(movie("smoke-draft", status="DRAFT"), admin)
     draft_id = str(uuid.UUID(draft["id"]))
-    assert sql(f"SELECT status FROM movies WHERE id = '{published_id}';") == "PUBLISHED"
+    assert sql(f"SELECT status FROM titles WHERE id = '{published_id}';") == "PUBLISHED"
     print("PASS admin creates movies with genres and credits (201 MovieDetail)")
 
     # ---- NUL and other control characters ----
@@ -204,7 +204,7 @@ def main():
         for method, path in (("POST", MOVIES), ("PUT", f"{MOVIES}/{published_id}")):
             assert is_api_error(call(path, body, admin, method), 400, "MALFORMED_REQUEST"), \
                 f"{method} with an enum ordinal must be 400 MALFORMED_REQUEST"
-    assert sql("SELECT count(*) FROM movies;") == "2"
+    assert sql("SELECT count(*) FROM titles;") == "2"
     assert sql("SELECT count(*) FROM genres;") == "3" and sql("SELECT count(*) FROM people;") == "2"
     assert call(f"{MOVIES}/{published_id}", token=admin)[1] == published, "A rejected PUT changed the movie"
     print("PASS NUL and control characters return 400 VALIDATION_ERROR and store nothing")
@@ -232,9 +232,9 @@ def main():
     for _ in range(2):
         status, _, content = request(f"{MOVIES}/{published_id}", token=admin, method="DELETE")
         assert status == 204 and content == b"", "Archive must return 204 without a body, also when repeated"
-    assert sql(f"SELECT status FROM movies WHERE id = '{published_id}';") == "ARCHIVED"
-    assert sql(f"SELECT (SELECT count(*) FROM movie_genres WHERE movie_id = '{published_id}') || ',' || "
-               f"(SELECT count(*) FROM movie_credits WHERE movie_id = '{published_id}');") == "2,2"
+    assert sql(f"SELECT status FROM titles WHERE id = '{published_id}';") == "ARCHIVED"
+    assert sql(f"SELECT (SELECT count(*) FROM title_genres WHERE title_id = '{published_id}') || ',' || "
+               f"(SELECT count(*) FROM title_credits WHERE title_id = '{published_id}');") == "2,2"
     assert hidden_like_missing(published_id, viewer)
     assert call(f"{MOVIES}/{published_id}", token=admin) == (200, dict(published, status="ARCHIVED"))
     for token in (viewer, admin):
@@ -250,7 +250,7 @@ def main():
     assert is_api_error(call(f"{MOVIES}/{missing_id}", token=admin, method="DELETE"), 404, "MOVIE_NOT_FOUND")
     print("PASS admin versus user visibility, idempotent soft archive and restore")
 
-    # ---- slug conflicts, including writes racing on ux_movies_slug ----
+    # ---- slug conflicts, including writes racing on ux_titles_slug ----
     assert is_api_error(call(MOVIES, movie("smoke-published"), admin), 409, "MOVIE_SLUG_CONFLICT")
     assert is_api_error(call(f"{MOVIES}/{draft_id}", movie("smoke-published"), admin, "PUT"), 409, "MOVIE_SLUG_CONFLICT")
     for round_number in range(3):
@@ -260,7 +260,7 @@ def main():
                      people=[{"name": f"Race Person {round_number}", "role": "ACTOR"}])
         statuses = sorted(status for status, _ in concurrent([lambda: call(MOVIES, body, admin)] * 4))
         assert statuses == [201, 409, 409, 409], f"Concurrent creates returned {statuses}"
-        assert sql(f"SELECT count(*) FROM movies WHERE slug = '{slug}';") == "1"
+        assert sql(f"SELECT count(*) FROM titles WHERE slug = '{slug}';") == "1"
         left, right = (create(movie(f"smoke-race-{round_number}-{side}"), admin)["id"] for side in ("left", "right"))
         target = movie(f"smoke-race-{round_number}-target")
         statuses = sorted(status for status, _ in concurrent(
@@ -293,8 +293,8 @@ def main():
         assert_no_server_error(responses, {200})
         final = call(f"{MOVIES}/{published_id}", token=admin)[1]
         assert final in [body for _, body in responses], "The stored movie is not one of the written versions"
-        assert sql(f"SELECT count(*) FROM movie_genres WHERE movie_id = '{published_id}';") == str(len(final["genres"]))
-        assert sql(f"SELECT count(*) FROM movie_credits WHERE movie_id = '{published_id}';") == str(len(final["people"]))
+        assert sql(f"SELECT count(*) FROM title_genres WHERE title_id = '{published_id}';") == str(len(final["genres"]))
+        assert sql(f"SELECT count(*) FROM title_credits WHERE title_id = '{published_id}';") == str(len(final["people"]))
 
     # PUTs of different movies that create the same new genres and people in different orders.
     movie_ids = [create(movie(f"smoke-parallel-{index}"), admin)["id"] for index in range(4)]
@@ -340,7 +340,7 @@ def main():
             f"Genre rename returned {genre_rename[0]}"
         final_status = call(f"{MOVIES}/{published_id}", token=admin)[1]["status"]
         assert final_status in ("PUBLISHED", "ARCHIVED")
-        assert sql(f"SELECT status FROM movies WHERE id = '{published_id}';") == final_status
+        assert sql(f"SELECT status FROM titles WHERE id = '{published_id}';") == final_status
         assert sql(f"SELECT count(*) FROM genres WHERE slug = 'rename-genre-{round_number}';") == "1"
     print("PASS concurrent PUTs (one movie, shared new genres and people, archive and renames) never return 500")
 

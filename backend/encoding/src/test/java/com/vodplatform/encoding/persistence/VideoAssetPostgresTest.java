@@ -119,7 +119,7 @@ class VideoAssetPostgresTest {
     void cleanUp() throws InterruptedException {
         executor.shutdownNow();
         assertThat(executor.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
-        for (UUID movie : movies) jdbc.update("delete from movies where id = ?", movie);
+        for (UUID movie : movies) jdbc.update("delete from titles where id = ?", movie);
     }
 
     @ParameterizedTest
@@ -305,7 +305,7 @@ class VideoAssetPostgresTest {
 
     private UUID movie() {
         UUID id = UUID.randomUUID();
-        jdbc.update("insert into movies (id,title,slug,description,status,created_at,updated_at) "
+        jdbc.update("insert into titles (id,title,slug,description,status,created_at,updated_at) "
                         + "values (?,? ,?,?,'PUBLISHED',?,?)", id, "Encoding fixture", "encoding-" + id,
                 "Disposable test fixture", Timestamp.from(T0), Timestamp.from(T0));
         movies.add(id);

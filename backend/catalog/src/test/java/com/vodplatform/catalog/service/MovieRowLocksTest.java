@@ -91,7 +91,7 @@ class MovieRowLocksTest {
         try {
             Future<?> holder = executor.submit(() -> transaction().executeWithoutResult(tx -> {
                 locks.lockForMediaWrite(movieId);
-                jdbc.update("update movies set status = 'PUBLISHED' where id = ?", movieId);
+                jdbc.update("update titles set status = 'PUBLISHED' where id = ?", movieId);
                 holderReady.countDown();
                 await(releaseHolder);
             }));
@@ -139,7 +139,7 @@ class MovieRowLocksTest {
                     "select executing_statement from information_schema.sessions"
                             + " where session_state = 'BLOCKED' and blocker_id is not null", String.class)
                     .stream().map(sql -> sql.toLowerCase(Locale.ROOT))
-                    .anyMatch(sql -> sql.contains(" from movies ") && sql.contains(" for update"));
+                    .anyMatch(sql -> sql.contains(" from titles ") && sql.contains(" for update"));
             if (blocked) {
                 return;
             }

@@ -291,7 +291,7 @@ def prepare_admin_and_movie(port, postgres, env):
     user_id, movie_id = uuid.UUID(profile["id"]), uuid.uuid4()
     sql = ("BEGIN;\nINSERT INTO user_roles (user_id, role_id) SELECT '" + str(user_id)
            + "', id FROM roles WHERE name = 'ROLE_ADMIN' ON CONFLICT DO NOTHING;\n"
-           "INSERT INTO movies (id, title, slug, description, status, created_at, updated_at) VALUES ('"
+           "INSERT INTO titles (id, title, slug, description, status, created_at, updated_at) VALUES ('"
            + str(movie_id) + "', 'Synthetic rehearsal', 'synthetic-" + movie_id.hex
            + "', 'Transport/storage fixture only', 'DRAFT', now(), now());\nCOMMIT;\n")
     database_sql(postgres, sql, env)

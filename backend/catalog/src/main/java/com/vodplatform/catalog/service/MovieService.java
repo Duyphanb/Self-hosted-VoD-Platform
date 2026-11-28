@@ -37,7 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
  * (ADR-009 name matching included, see {@link MovieAssignmentResolver}). They then write the movie
  * row and flush it before resolving genres and creating the people of name-only credits, which may
  * insert rows, and finally write the genre and credit assignments. A duplicate slug that slips past
- * the pre-check because another transaction wrote it concurrently fails on {@code ux_movies_slug}
+ * the pre-check because another transaction wrote it concurrently fails on {@code ux_titles_slug}
  * at that first flush and is reported as the same 409. Flushing the movie row first keeps that
  * true when both requests also bring the same new genre or person: the losing request fails on the
  * slug before it inserts anything else, so the 409 is never replaced by another outcome. Update
@@ -319,14 +319,14 @@ public class MovieService {
     }
 
     /**
-     * Runs a write that flushes, reporting a {@code ux_movies_slug} violation as 409. Any other
+     * Runs a write that flushes, reporting a {@code ux_titles_slug} violation as 409. Any other
      * integrity violation is rethrown unchanged.
      */
     private static Movie writeOrSlugConflict(Supplier<Movie> write) {
         try {
             return write.get();
         } catch (DataIntegrityViolationException exception) {
-            if (CatalogConstraints.isViolationOf(exception, CatalogConstraints.MOVIES_SLUG)) {
+            if (CatalogConstraints.isViolationOf(exception, CatalogConstraints.TITLES_SLUG)) {
                 throw new MovieSlugConflictException();
             }
             throw exception;

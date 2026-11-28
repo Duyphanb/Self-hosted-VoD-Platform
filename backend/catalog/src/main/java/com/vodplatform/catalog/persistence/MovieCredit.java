@@ -11,15 +11,15 @@ import jakarta.persistence.MapsId;
 import jakarta.persistence.Table;
 
 /**
- * Row of {@code movie_credits}, keyed by (movie, person, credit role). Created through
+ * Row of {@code title_credits}, keyed by (movie, person, credit role). Created through
  * {@link Movie#addCredit(Person, CreditRole, Integer)} or {@link Movie#replaceCredits(java.util.List)}.
  */
 @Entity
 @Table(
-        name = "movie_credits",
+        name = "title_credits",
         indexes = {
-                @Index(name = "ix_movie_credits_person_id", columnList = "person_id"),
-                @Index(name = "ix_movie_credits_role", columnList = "credit_role")
+                @Index(name = "ix_title_credits_person_id", columnList = "person_id"),
+                @Index(name = "ix_title_credits_role", columnList = "credit_role")
         }
 )
 public class MovieCredit {
@@ -29,7 +29,7 @@ public class MovieCredit {
 
     @MapsId("movieId")
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "movie_id", nullable = false)
+    @JoinColumn(name = "title_id", nullable = false)
     private Movie movie;
 
     @MapsId("personId")

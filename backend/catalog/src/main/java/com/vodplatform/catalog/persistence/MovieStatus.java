@@ -1,7 +1,7 @@
 package com.vodplatform.catalog.persistence;
 
 /**
- * Movie lifecycle status; the values match the {@code movies.status} CHECK constraint in V1.
+ * Movie lifecycle status; the values match the {@code titles.status} CHECK constraint.
  */
 public enum MovieStatus {
     DRAFT,

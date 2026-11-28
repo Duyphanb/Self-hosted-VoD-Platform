@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.mockito.Mockito.doReturn;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -57,9 +58,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.json.JsonAssert;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.json.JsonComparator;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.ResultMatcher;
@@ -130,7 +133,7 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
     @RegisterExtension
     final BearerSessionFixture bearerSessions = new BearerSessionFixture();
 
-    @Autowired
+    @MockitoSpyBean
     private MovieRepository movieRepository;
 
     @Autowired
@@ -579,6 +582,23 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
         perform(get(MOVIES + "/" + movieId), admin)
                 .andExpect(jsonPath("$.slug").value("mat-biec"))
                 .andExpect(jsonPath("$.genres").value(contains("Tình Cảm")));
+    }
+
+    @Test
+    void aSlugTakenAfterThePrecheckMapsThePostgresConstraintToConflict() throws Exception {
+        persistPeopleGenresAndExistingMovie();
+        String admin = bearerToken("ROLE_ADMIN");
+        // Emulate the stale precheck of a racing request while leaving the real INSERT and constraint in place.
+        doReturn(false).when(movieRepository).existsBySlug("existing-movie");
+
+        try {
+            perform(json(post(MOVIES), body(movie -> movie.put("slug", "existing-movie"))), admin)
+                    .andExpect(status().isConflict())
+                    .andExpect(apiError(409, "MOVIE_SLUG_CONFLICT", "Slug is already used by another movie", null));
+        } finally {
+            // PostgreSQL aborts the transaction on a duplicate. Roll it back before fixture teardown.
+            TestTransaction.end();
+        }
     }
 
     // ---- archive and visibility ----

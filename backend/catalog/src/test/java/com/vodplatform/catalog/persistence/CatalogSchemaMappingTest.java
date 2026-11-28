@@ -64,39 +64,39 @@ class CatalogSchemaMappingTest {
         // V1 declares status, maturity_rating and credit_role as varchar(20) with CHECK value lists;
         // H2 stores an @Enumerated(STRING) column as a native ENUM restricted to the same values.
         assertThat(columns).containsExactlyInAnyOrder(
-                "movies.id uuid NOT NULL",
-                "movies.title varchar(255) NOT NULL",
-                "movies.slug varchar(255) NOT NULL",
-                "movies.description text NOT NULL",
-                "movies.release_year int NULL",
-                "movies.maturity_rating enum NULL",
-                "movies.poster_object_key varchar(512) NULL",
-                "movies.status enum NOT NULL",
-                "movies.created_at timestamptz NOT NULL",
-                "movies.updated_at timestamptz NOT NULL",
+                "titles.id uuid NOT NULL",
+                "titles.title varchar(255) NOT NULL",
+                "titles.slug varchar(255) NOT NULL",
+                "titles.description text NOT NULL",
+                "titles.release_year int NULL",
+                "titles.maturity_rating enum NULL",
+                "titles.poster_object_key varchar(512) NULL",
+                "titles.status enum NOT NULL",
+                "titles.created_at timestamptz NOT NULL",
+                "titles.updated_at timestamptz NOT NULL",
                 "genres.id uuid NOT NULL",
                 "genres.name varchar(100) NOT NULL",
                 "genres.slug varchar(120) NOT NULL",
-                "movie_genres.movie_id uuid NOT NULL",
-                "movie_genres.genre_id uuid NOT NULL",
+                "title_genres.title_id uuid NOT NULL",
+                "title_genres.genre_id uuid NOT NULL",
                 "people.id uuid NOT NULL",
                 "people.name varchar(255) NOT NULL",
                 "people.slug varchar(255) NOT NULL",
-                "movie_credits.movie_id uuid NOT NULL",
-                "movie_credits.person_id uuid NOT NULL",
-                "movie_credits.credit_role enum NOT NULL",
-                "movie_credits.sort_order int NULL"
+                "title_credits.title_id uuid NOT NULL",
+                "title_credits.person_id uuid NOT NULL",
+                "title_credits.credit_role enum NOT NULL",
+                "title_credits.sort_order int NULL"
         );
     }
 
     @Test
     void primaryKeysMatchV1() {
         assertThat(constraintColumns("PRIMARY KEY")).containsExactlyInAnyOrderEntriesOf(Map.of(
-                "movies", Set.of("id"),
+                "titles", Set.of("id"),
                 "genres", Set.of("id"),
                 "people", Set.of("id"),
-                "movie_genres", Set.of("movie_id", "genre_id"),
-                "movie_credits", Set.of("movie_id", "person_id", "credit_role")
+                "title_genres", Set.of("title_id", "genre_id"),
+                "title_credits", Set.of("title_id", "person_id", "credit_role")
         ));
     }
 
@@ -114,7 +114,7 @@ class CatalogSchemaMappingTest {
                 .collect(Collectors.toSet());
 
         assertThat(uniqueConstraints).containsExactlyInAnyOrder(
-                "movies.ux_movies_slug(slug)",
+                "titles.ux_titles_slug(slug)",
                 "genres.ux_genres_name(name)",
                 "genres.ux_genres_slug(slug)",
                 "people.ux_people_slug(slug)"
@@ -135,7 +135,7 @@ class CatalogSchemaMappingTest {
         Throwable failure = catchThrowable(() -> movieRepository.saveAndFlush(movie(2, "dat-rung-phuong-nam")));
 
         assertThat(failure).isInstanceOf(DataIntegrityViolationException.class);
-        assertThat(CatalogConstraints.isViolationOf(failure, CatalogConstraints.MOVIES_SLUG)).isTrue();
+        assertThat(CatalogConstraints.isViolationOf(failure, CatalogConstraints.TITLES_SLUG)).isTrue();
         assertThat(CatalogConstraints.isViolationOf(failure, CatalogConstraints.PEOPLE_SLUG)).isFalse();
     }
 
@@ -169,7 +169,7 @@ class CatalogSchemaMappingTest {
 
         assertThat(failure).isInstanceOf(DataIntegrityViolationException.class);
         assertThat(CatalogConstraints.isViolationOf(failure, CatalogConstraints.PEOPLE_SLUG)).isTrue();
-        assertThat(CatalogConstraints.isViolationOf(failure, CatalogConstraints.MOVIES_SLUG)).isFalse();
+        assertThat(CatalogConstraints.isViolationOf(failure, CatalogConstraints.TITLES_SLUG)).isFalse();
     }
 
     @Test

@@ -11,9 +11,9 @@ class CatalogConstraintsTest {
 
     @Test
     void matchesTheBareNameReportedByPostgresql() {
-        Throwable failure = wrapped(violation("ux_movies_slug"));
+        Throwable failure = wrapped(violation("ux_titles_slug"));
 
-        assertThat(CatalogConstraints.isViolationOf(failure, CatalogConstraints.MOVIES_SLUG)).isTrue();
+        assertThat(CatalogConstraints.isViolationOf(failure, CatalogConstraints.TITLES_SLUG)).isTrue();
         assertThat(CatalogConstraints.isViolationOf(failure, CatalogConstraints.GENRES_SLUG)).isFalse();
     }
 
@@ -33,11 +33,13 @@ class CatalogConstraintsTest {
 
     @Test
     void doesNotMatchAPrefixOrAnUnknownConstraint() {
-        assertThat(CatalogConstraints.isViolationOf(violation("ux_movies_slug_old"), CatalogConstraints.MOVIES_SLUG)).isFalse();
-        assertThat(CatalogConstraints.isViolationOf(violation(null), CatalogConstraints.MOVIES_SLUG)).isFalse();
-        assertThat(CatalogConstraints.isViolationOf(new IllegalStateException("ux_movies_slug"), CatalogConstraints.MOVIES_SLUG))
+        assertThat(CatalogConstraints.isViolationOf(violation("ux_titles_slug_old"), CatalogConstraints.TITLES_SLUG))
                 .isFalse();
-        assertThat(CatalogConstraints.isViolationOf(null, CatalogConstraints.MOVIES_SLUG)).isFalse();
+        assertThat(CatalogConstraints.isViolationOf(violation(null), CatalogConstraints.TITLES_SLUG)).isFalse();
+        assertThat(CatalogConstraints.isViolationOf(
+                new IllegalStateException("ux_titles_slug"), CatalogConstraints.TITLES_SLUG))
+                .isFalse();
+        assertThat(CatalogConstraints.isViolationOf(null, CatalogConstraints.TITLES_SLUG)).isFalse();
     }
 
     private static ConstraintViolationException violation(String constraintName) {

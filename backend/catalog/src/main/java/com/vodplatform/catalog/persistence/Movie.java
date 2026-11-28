@@ -30,19 +30,19 @@ import java.util.UUID;
 import org.hibernate.Length;
 
 /**
- * Row of {@code movies}, the catalog aggregate root. Genre assignments ({@code movie_genres}) and
- * credits ({@code movie_credits}) are managed through this entity.
+ * Row of {@code titles}, the catalog aggregate root. Genre assignments ({@code title_genres}) and
+ * credits ({@code title_credits}) are managed through this entity.
  *
- * <p>{@code search_vector} is intentionally not mapped: search (Issue 7.2) owns it, and Hibernate
+ * <p>{@code search_vector} is intentionally not mapped: search owns it, and Hibernate
  * schema validation ignores unmapped columns.
  */
 @Entity
 @Table(
-        name = "movies",
-        uniqueConstraints = @UniqueConstraint(name = CatalogConstraints.MOVIES_SLUG, columnNames = "slug"),
+        name = "titles",
+        uniqueConstraints = @UniqueConstraint(name = CatalogConstraints.TITLES_SLUG, columnNames = "slug"),
         indexes = {
-                @Index(name = "ix_movies_status", columnList = "status"),
-                @Index(name = "ix_movies_release_year", columnList = "release_year")
+                @Index(name = "ix_titles_status", columnList = "status"),
+                @Index(name = "ix_titles_release_year", columnList = "release_year")
         }
 )
 public class Movie {
@@ -83,8 +83,8 @@ public class Movie {
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
-            name = "movie_genres",
-            joinColumns = @JoinColumn(name = "movie_id", nullable = false),
+            name = "title_genres",
+            joinColumns = @JoinColumn(name = "title_id", nullable = false),
             inverseJoinColumns = @JoinColumn(name = "genre_id", nullable = false)
     )
     private Set<Genre> genres = new LinkedHashSet<>();
@@ -123,7 +123,7 @@ public class Movie {
     public void addGenre(Genre genre) {
         Objects.requireNonNull(genre, "genre");
         // Genre has no value equality, so deduplicate by id: a detached or reloaded instance of an
-        // assigned genre must not add a second movie_genres row.
+        // assigned genre must not add a second title_genres row.
         boolean assigned = genres.stream().anyMatch(existing -> existing.getId().equals(genre.getId()));
         if (!assigned) {
             genres.add(genre);
@@ -132,7 +132,7 @@ public class Movie {
 
     /**
      * Credits a person in a role. Each (person, role) pair may appear once per movie, matching
-     * the {@code movie_credits} primary key.
+     * the {@code title_credits} primary key.
      *
      * @throws IllegalArgumentException if the person already has this role in the movie
      */
@@ -183,7 +183,7 @@ public class Movie {
 
     /**
      * Makes the given genres the movie's only genre assignments. Assignments that remain keep
-     * their {@code movie_genres} row; only removed and added genres change rows.
+     * their {@code title_genres} row; only removed and added genres change rows.
      */
     public void replaceGenres(Collection<Genre> replacement) {
         Set<UUID> replacementIds = new HashSet<>();

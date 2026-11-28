@@ -89,7 +89,7 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
         when(publisher.publish(any(), any())).thenReturn(new PublishOutcome.Confirmed());
         movie = UUID.randomUUID();
         jdbc.update(
-                "insert into movies (id,title,slug,description,status,created_at,updated_at)"
+                "insert into titles (id,title,slug,description,status,created_at,updated_at)"
                         + " values (?,?,?,?,?,?,?)",
                 movie,
                 "Upload race fixture",
@@ -107,7 +107,7 @@ class UploadEndpointPostgresTests implements PostgresTestDatabase {
                         + "(select id from video_assets where movie_id=?)",
                 movie);
         jdbc.update("delete from video_assets where movie_id=?", movie);
-        jdbc.update("delete from movies where id=?", movie);
+        jdbc.update("delete from titles where id=?", movie);
     }
 
     private String admin() {
