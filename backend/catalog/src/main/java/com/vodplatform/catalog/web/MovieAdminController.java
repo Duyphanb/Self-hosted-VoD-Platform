@@ -14,13 +14,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Admin movie list in any status ({@code GET /api/v1/admin/movies}). The URL rule for
+ * Admin movie list in any status ({@code GET /api/v1/admin/titles}). The URL rule for
  * {@code /api/v1/admin/**} authorizes {@code ROLE_ADMIN} first; {@code @PreAuthorize} is the
  * second layer. Without {@code status}, movies in every status are listed. Only the contract's
  * query parameters are bound; Spring Data {@code Pageable} and {@code Sort} are not.
  */
 @RestController
-@RequestMapping("/api/v1/admin/movies")
+@RequestMapping("/api/v1/admin/titles")
 @PreAuthorize("hasRole('ADMIN')")
 public class MovieAdminController {
 

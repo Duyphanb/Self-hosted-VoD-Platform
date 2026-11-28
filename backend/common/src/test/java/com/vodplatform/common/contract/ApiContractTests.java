@@ -36,15 +36,19 @@ class ApiContractTests {
     private static final String MOVIE_SUMMARY = """
             {"id": "%s", "title": "Spirited Away", "slug": "spirited-away", "description": "A girl.",
              "releaseYear": null, "posterUrl": null, "genres": ["Animation"], "averageRating": null,
-             "status": "PUBLISHED", "videoStatus": null}
+             "status": "PUBLISHED", "contentType": "MOVIE", "partLabel": null, "episodeCount": 1,
+             "playableEpisodeCount": 0, "availability": "UNAVAILABLE"}
             """.formatted(MOVIE_ID);
     private static final String MOVIE_DETAIL = """
             {"id": "%s", "title": "Spirited Away", "slug": "spirited-away", "description": "A girl.",
              "releaseYear": 2001, "posterUrl": null, "genres": ["Animation"], "averageRating": 4.5,
-             "status": "DRAFT", "videoStatus": "READY", "maturityRating": null,
+             "status": "PUBLISHED", "contentType": "MOVIE", "partLabel": null, "episodeCount": 1,
+             "playableEpisodeCount": 1, "availability": "PLAYABLE", "maturityRating": null,
+             "episode": {"id": "4457772d-cf31-4c4b-866d-3a9f05f84914", "titleId": "%s", "ordinal": 1,
+                         "displayLabel": "1", "name": null, "videoStatus": "READY", "progress": null},
              "people": [{"personId": "%s", "name": "Hayao Miyazaki", "role": "DIRECTOR"}],
              "userRating": null, "inWatchlist": false}
-            """.formatted(MOVIE_ID, USER_ID);
+            """.formatted(MOVIE_ID, MOVIE_ID, USER_ID);
     private static final String API_ERROR = """
             {"timestamp": "2026-10-26T10:15:30.123456Z", "status": 400, "code": "VALIDATION_ERROR",
              "message": "Request validation failed", "fieldErrors": [{"field": "email", "message": "must not be blank"}]}
@@ -95,14 +99,14 @@ class ApiContractTests {
 
     @Test
     void nullableFieldsAllOfCompositionAndNestedItemsAreValidated() {
-        String moviePath = "/api/v1/movies/" + MOVIE_ID;
+        String moviePath = "/api/v1/titles/" + MOVIE_ID;
         assertThat(violations("GET", moviePath, 200, MOVIE_DETAIL)).isEmpty();
         assertThat(violations("GET", moviePath, 200, MOVIE_DETAIL.replace("\"maturityRating\": null", "\"maturityRating\": \"T16\"")))
                 .isEmpty();
         assertThat(violations("GET", moviePath, 200, MOVIE_DETAIL.replace("\"maturityRating\": null", "\"maturityRating\": \"C\"")))
                 .singleElement().asString().startsWith("$.maturityRating");
         assertThat(violations("GET", moviePath, 200, MOVIE_DETAIL.replace("\"videoStatus\": \"READY\"", "\"videoStatus\": \"DONE\"")))
-                .singleElement().asString().startsWith("$.videoStatus");
+                .singleElement().asString().startsWith("$.episode.videoStatus");
         assertThat(violations("GET", moviePath, 200, MOVIE_DETAIL.replace("\"role\": \"DIRECTOR\"", "\"role\": \"WRITER\"")))
                 .singleElement().asString().startsWith("$.people[0].role");
         assertThat(violations("GET", moviePath, 200, MOVIE_DETAIL.replace("\"inWatchlist\": false", "\"inWatchlist\": false, \"budget\": 1")))
@@ -113,10 +117,10 @@ class ApiContractTests {
         String page = """
                 {"items": [%s], "page": {"page": 0, "size": 20, "totalElements": 1, "totalPages": 1}}
                 """.formatted(MOVIE_SUMMARY);
-        assertThat(violations("GET", "/api/v1/movies", 200, page)).isEmpty();
-        assertThat(violations("GET", "/api/v1/movies", 200, page.replace("\"videoStatus\": null", "\"videoStatus\": null, \"extra\": true")))
+        assertThat(violations("GET", "/api/v1/titles", 200, page)).isEmpty();
+        assertThat(violations("GET", "/api/v1/titles", 200, page.replace("\"partLabel\": null", "\"partLabel\": null, \"extra\": true")))
                 .containsExactly("$.items[0].extra: property is not declared by the response schema");
-        assertThat(violations("GET", "/api/v1/movies", 200, page.replace("\"totalPages\": 1", "\"totalPages\": 1.5")))
+        assertThat(violations("GET", "/api/v1/titles", 200, page.replace("\"totalPages\": 1", "\"totalPages\": 1.5")))
                 .singleElement().asString().startsWith("$.page.totalPages");
     }
 

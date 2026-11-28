@@ -1,3 +1,4 @@
+import { titlePayloadFixture } from '../../../test/titleWireFixture';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
@@ -19,34 +20,44 @@ describe('AdminMovieListPage', () => {
   beforeEach(() => { fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock); });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+  it('links only a published title to its viewer page', async () => {
+    fetchMock.mockImplementation(async () => moviePage([movie(3, { status: 'PUBLISHED' })]));
+    renderList();
+
+    const table = await screen.findByRole('table', { name: 'Movies available for administration' }, { timeout: 5_000 });
+
+    expect(within(table).getByRole('link', { name: 'View Movie 3' })).toHaveAttribute('href', `/titles/${movie(3).id}`);
+  });
+
   it('requests all statuses with authentication and renders the admin table actions', async () => {
-    fetchMock.mockImplementation(async () => moviePage([movie(1), movie(2, { status: 'ARCHIVED', videoStatus: 'READY' })]));
+    fetchMock.mockImplementation(async () => moviePage([movie(1), movie(2, { status: 'ARCHIVED', contentType: 'MOVIE', videoStatus: 'READY' })]));
     renderList();
 
     const table = await screen.findByRole('table', { name: 'Movies available for administration' }, { timeout: 5_000 });
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Movies');
-    expect(within(table).getByRole('link', { name: 'Movie 1' })).toHaveAttribute('href', `/admin/movies/${movie(1).id}/edit`);
-    expect(within(table).getByRole('link', { name: 'View Movie 1' })).toHaveAttribute('href', `/movies/${movie(1).id}`);
-    expect(within(table).getByRole('link', { name: 'Edit Movie 1' })).toHaveAttribute('href', `/admin/movies/${movie(1).id}/edit`);
+    expect(within(table).getByRole('link', { name: 'Movie 1' })).toHaveAttribute('href', `/admin/titles/${movie(1).id}/edit`);
+    expect(within(table).queryByRole('link', { name: 'View Movie 1' })).not.toBeInTheDocument();
+    expect(within(table).queryByRole('link', { name: 'View Movie 2' })).not.toBeInTheDocument();
+    expect(within(table).getByRole('link', { name: 'Edit Movie 1' })).toHaveAttribute('href', `/admin/titles/${movie(1).id}/edit`);
     expect(within(table).getByRole('button', { name: 'Archive Movie 1' })).toBeInTheDocument();
     expect(within(table).queryByRole('button', { name: 'Archive Movie 2' })).not.toBeInTheDocument();
     expect(table).toHaveTextContent('Drama');
     expect(table).toHaveTextContent('Draft');
     expect(table).toHaveTextContent('Archived');
     expect(table).toHaveTextContent('Ready');
-    expect(screen.getByRole('link', { name: 'New movie' })).toHaveAttribute('href', '/admin/movies/new');
+    expect(screen.getByRole('link', { name: 'New movie' })).toHaveAttribute('href', '/admin/titles/new');
     expect(apiQueries()).toEqual([{ page: '0', size: '20', sort: 'latest' }]);
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer access-token');
-    expect(new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost').pathname).toBe('/api/v1/admin/movies');
+    expect(new URL(String(fetchMock.mock.calls[0][0]), 'http://localhost').pathname).toBe('/api/v1/admin/titles');
   });
 
   it.each(['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const)('offers Upload video for %s and preserves the list return location', async (status) => {
     fetchMock.mockResolvedValue(moviePage([movie(1, { status })]));
-    const returnTo = `/admin/movies?status=${status}&sort=title&page=2`;
+    const returnTo = `/admin/titles?status=${status}&sort=title&page=2`;
     renderList({ path: returnTo });
     const link = await screen.findByRole('link', { name: 'Upload video for Movie 1' });
-    expect(link).toHaveAttribute('href', `/admin/movies/${movie(1).id}/video`);
+    expect(link).toHaveAttribute('href', `/admin/titles/${movie(1).id}/video`);
     fireEvent.click(link);
     expect(await screen.findByText('Other destination')).toBeInTheDocument();
     expect(screen.getByTestId('location-state')).toHaveTextContent(JSON.stringify({ returnTo }));
@@ -54,14 +65,14 @@ describe('AdminMovieListPage', () => {
 
   it('restores status/sort/page and resets the page when status changes', async () => {
     fetchMock.mockImplementation(async () => moviePage([movie(1)], { page: 2, totalPages: 4, totalElements: 65 }));
-    renderList({ path: '/admin/movies?status=ARCHIVED&sort=title&page=3' });
+    renderList({ path: '/admin/titles?status=ARCHIVED&sort=title&page=3' });
     await screen.findByRole('table');
     expect(apiQueries()[0]).toEqual({ status: 'ARCHIVED', page: '2', size: '20', sort: 'title' });
     const filters = screen.getByRole('group', { name: 'Movie status' });
     expect(within(filters).getByRole('button', { name: 'Archived' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByLabelText('Sort by')).toHaveValue('title');
     fireEvent.click(within(filters).getByRole('button', { name: 'Draft' }));
-    await waitFor(() => expect(currentLocation()).toBe('/admin/movies?status=DRAFT&sort=title'));
+    await waitFor(() => expect(currentLocation()).toBe('/admin/titles?status=DRAFT&sort=title'));
     await waitFor(() => expect(apiQueries().slice(-1)[0]).toEqual({ status: 'DRAFT', page: '0', size: '20', sort: 'title' }));
   });
 
@@ -70,11 +81,11 @@ describe('AdminMovieListPage', () => {
       const page = Number(new URL(String(input), 'http://localhost').searchParams.get('page'));
       return moviePage([movie(page + 1)], { page, totalPages: 3, totalElements: 41 });
     });
-    renderList({ path: '/admin/movies?status=PUBLISHED' });
+    renderList({ path: '/admin/titles?status=PUBLISHED' });
     await screen.findByRole('table');
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await waitFor(() => expect(apiQueries().slice(-1)[0]?.page).toBe('1'));
-    expect(currentLocation()).toBe('/admin/movies?status=PUBLISHED&page=2');
+    expect(currentLocation()).toBe('/admin/titles?status=PUBLISHED&page=2');
     expect(screen.getByRole('heading', { level: 1, name: 'Movies' })).toHaveFocus();
     expect(await screen.findByRole('link', { name: 'Movie 2' })).toBeInTheDocument();
   });
@@ -84,20 +95,20 @@ describe('AdminMovieListPage', () => {
       const page = Number(new URL(String(input), 'http://localhost').searchParams.get('page'));
       return moviePage(page === 8 ? [] : [movie(3)], { page, totalPages: 3, totalElements: 41 });
     });
-    renderList({ path: '/admin/movies?sort=title&page=9' });
+    renderList({ path: '/admin/titles?sort=title&page=9' });
     await screen.findByRole('heading', { name: "This page doesn't exist" });
     fireEvent.click(screen.getByRole('button', { name: 'Go to last page' }));
     expect(await screen.findByRole('link', { name: 'Movie 3' })).toBeInTheDocument();
-    expect(currentLocation()).toBe('/admin/movies?page=3&sort=title');
+    expect(currentLocation()).toBe('/admin/titles?page=3&sort=title');
   });
 
   it('handles empty catalogs and clears an empty status filter', async () => {
     fetchMock.mockImplementation(async () => moviePage([]));
-    renderList({ path: '/admin/movies?status=DRAFT&sort=title' });
+    renderList({ path: '/admin/titles?status=DRAFT&sort=title' });
     await screen.findByRole('heading', { name: 'No movies match this status' });
     fireEvent.click(screen.getByRole('button', { name: 'Show all movies' }));
     expect(await screen.findByRole('heading', { name: 'No movies yet' })).toBeInTheDocument();
-    expect(currentLocation()).toBe('/admin/movies?sort=title');
+    expect(currentLocation()).toBe('/admin/titles?sort=title');
     expect(screen.getByRole('link', { name: 'New movie' })).toBeInTheDocument();
   });
 
@@ -105,9 +116,9 @@ describe('AdminMovieListPage', () => {
     fetchMock.mockImplementation(async (input) => new URL(String(input), 'http://localhost').searchParams.has('status')
       ? apiError(400, 'VALIDATION_ERROR', [{ field: 'status', message: 'Invalid status' }])
       : moviePage([movie(1)]));
-    renderList({ path: '/admin/movies?status=DRAFT&sort=title&page=3' });
+    renderList({ path: '/admin/titles?status=DRAFT&sort=title&page=3' });
     await screen.findByRole('table');
-    expect(currentLocation()).toBe('/admin/movies?sort=title');
+    expect(currentLocation()).toBe('/admin/titles?sort=title');
     expect(apiQueries()).toEqual([
       { status: 'DRAFT', sort: 'title', page: '2', size: '20' }, { sort: 'title', page: '0', size: '20' }
     ]);
@@ -153,7 +164,7 @@ describe('AdminMovieListPage', () => {
     await waitFor(() => expect(currentLocation()).toContain('page=2'));
     expect(screen.queryByText('Movie created')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'History back' }));
-    await waitFor(() => expect(currentLocation()).toBe('/admin/movies'));
+    await waitFor(() => expect(currentLocation()).toBe('/admin/titles'));
     expect(screen.queryByText('Movie created')).not.toBeInTheDocument();
   });
 
@@ -212,7 +223,7 @@ describe('AdminMovieListPage', () => {
     expect(screen.getByRole('dialog')).toHaveAccessibleName("Archive 'Movie 1'?");
     const deletes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE');
     expect(deletes).toHaveLength(1);
-    expect(new URL(String(deletes[0][0]), 'http://localhost').pathname).toBe(`/api/v1/movies/${movie(1).id}`);
+    expect(new URL(String(deletes[0][0]), 'http://localhost').pathname).toBe(`/api/v1/admin/titles/${movie(1).id}`);
     held.release(new Response(null, { status: 204 }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
@@ -251,7 +262,7 @@ describe('AdminMovieListPage', () => {
   it.each(['New movie', 'Edit Movie 1', 'Movie 1'])(
     'carries the current filtered list URL through %s navigation', async (label) => {
       fetchMock.mockResolvedValue(moviePage([movie(1)], { page: 1, totalPages: 3, totalElements: 41 }));
-      const path = '/admin/movies?status=PUBLISHED&page=2&sort=title';
+      const path = '/admin/titles?status=PUBLISHED&page=2&sort=title';
       renderList({ path });
       fireEvent.click(await screen.findByRole('link', { name: label }));
       expect(screen.getByTestId('location-state')).toHaveTextContent(JSON.stringify({ returnTo: path }));
@@ -331,14 +342,14 @@ describe('AdminMovieListPage', () => {
   });
 });
 
-function renderList({ path = '/admin/movies', state = null, user = admin }: { path?: string; state?: unknown; user?: UserProfile } = {}) {
+function renderList({ path = '/admin/titles', state = null, user = admin }: { path?: string; state?: unknown; user?: UserProfile } = {}) {
   const response: AuthResponse = { user, accessToken: 'access-token', expiresInSeconds: 900 };
   writeAuthSession(createAuthSession(response), window.localStorage);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
-    <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }} initialEntries={state ? [{ pathname: '/admin/movies', state }] : [path]}>
+    <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }} initialEntries={state ? [{ pathname: '/admin/titles', state }] : [path]}>
       <QueryClientProvider client={queryClient}><AuthProvider redirectToLogin={vi.fn()}><LocationProbe /><Routes>
-        <Route element={<AdminRoute />}><Route path="/admin/movies" element={<AdminMovieListPage />} /></Route>
+        <Route element={<AdminRoute />}><Route path="/admin/titles" element={<AdminMovieListPage />} /></Route>
         <Route path="/forbidden" element={<p>Forbidden destination</p>} />
         <Route path="*" element={<p>Other destination</p>} />
       </Routes></AuthProvider></QueryClientProvider>
@@ -360,10 +371,10 @@ function deferredResponse() {
   return { promise, release: (response: Response) => act(() => resolveResponse(response)) };
 }
 function movie(index: number, overrides: Partial<MovieSummary> = {}): MovieSummary {
-  return { id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, title: `Movie ${index}`, slug: `movie-${index}`, description: `Description ${index}`, releaseYear: 2020, posterUrl: null, genres: ['Drama'], averageRating: null, status: 'DRAFT', videoStatus: null, ...overrides };
+  return { id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, title: `Movie ${index}`, slug: `movie-${index}`, description: `Description ${index}`, releaseYear: 2020, posterUrl: null, genres: ['Drama'], averageRating: null, status: 'DRAFT', contentType: 'MOVIE', partLabel: null, videoStatus: null, ...overrides };
 }
 function moviePage(items: MovieSummary[], page: Partial<PageMeta> = {}) {
-  return new Response(JSON.stringify({ items, page: { page: 0, size: 20, totalElements: items.length, totalPages: items.length ? 1 : 0, ...page } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify({ items: items.map(titlePayloadFixture), page: { page: 0, size: 20, totalElements: items.length, totalPages: items.length ? 1 : 0, ...page } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 function apiError(status: number, code: string, fieldErrors?: Array<{ field: string; message: string }>) {
   return new Response(JSON.stringify({ timestamp: '2026-10-28T00:00:00Z', status, code, message: 'Request could not be completed', fieldErrors }), { status, headers: { 'Content-Type': 'application/json' } });

@@ -17,7 +17,7 @@ import { UnsavedMovieChanges } from '../components/UnsavedMovieChanges';
 import { createEmptyMovieForm, mapMovieFormError, movieDetailToForm, toMoviePayload, trimCatalogText, validateMovieForm,
   type MovieFormErrors, type MovieFormValues } from '../movieFormModel';
 import { MATURITY_RATINGS, movieKeys, type MovieDetail } from '../moviesApi';
-import { useMovieDetail } from '../movieQueries';
+import { useAdminMovieDetail } from '../adminMovieQueries';
 
 export function AdminMovieFormPage() {
   const movieId = useParams().movieId;
@@ -27,13 +27,13 @@ export function AdminMovieFormPage() {
 }
 
 function EditMovieRequest({ movieId }: { movieId: string }) {
-  const { data, error, isError, isFetching, isFetchedAfterMount, isSuccess, refetch } = useMovieDetail(movieId, { refetchOnMount: 'always' });
+  const { data, error, isError, isFetching, isFetchedAfterMount, isSuccess, refetch } = useAdminMovieDetail(movieId, { refetchOnMount: 'always' });
   const [initialMovie, setInitialMovie] = useState<MovieDetail | null>(null);
   // Only a settled GET from this visit may initialize a full-replacement edit form.
   if (initialMovie === null && isFetchedAfterMount && isSuccess && !isFetching) setInitialMovie(data);
   const failed = isError && !(error instanceof AuthenticationSupersededError);
   if (!isCanonicalUuid(movieId) || (failed && error instanceof ApiRequestError && [400, 404].includes(error.status))) {
-    return <NotFoundPage title="Movie not found" description="The movie could not be found." link={{ to: '/admin/movies', label: 'Back to movies' }} />;
+    return <NotFoundPage title="Movie not found" description="The movie could not be found." link={{ to: '/admin/titles', label: 'Back to movies' }} />;
   }
   if (failed && error instanceof ApiRequestError && error.status === 403) return <ForbiddenPage />;
   if (failed && initialMovie === null) return <ErrorState error={error} headingLevel={1} isRetrying={isFetching} onRetry={() => void refetch()} title="Movie could not be loaded" />;
@@ -83,8 +83,8 @@ function MovieForm({ initialValues, movieId }: { initialValues: MovieFormValues;
     mutationFn: async (payload: UpsertMovieRequest) => {
       // Accepted writes must still update caches when the page unmounts (e.g. session revocation).
       const saved = movieId ? await updateMovie(apiClient, movieId, payload) : await createMovie(apiClient, payload);
-      await queryClient.cancelQueries({ queryKey: movieKeys.detail(saved.id), exact: true });
-      queryClient.setQueryData(movieKeys.detail(saved.id), saved);
+      await queryClient.cancelQueries({ queryKey: movieKeys.adminDetail(saved.id), exact: true });
+      queryClient.setQueryData(movieKeys.adminDetail(saved.id), saved);
       void queryClient.invalidateQueries({ queryKey: movieKeys.all });
       return saved;
     }
@@ -154,7 +154,7 @@ function MovieForm({ initialValues, movieId }: { initialValues: MovieFormValues;
   };
 
   if (forbidden) return <ForbiddenPage />;
-  if (missing) return <NotFoundPage title="Movie not found" description="The movie could not be found." link={{ to: '/admin/movies', label: 'Back to movies' }} />;
+  if (missing) return <NotFoundPage title="Movie not found" description="The movie could not be found." link={{ to: '/admin/titles', label: 'Back to movies' }} />;
 
   const field = (name: 'title' | 'slug' | 'description' | 'releaseYear' | 'maturityRating' | 'status', label: string, control?: ReactNode) => (
     <div>

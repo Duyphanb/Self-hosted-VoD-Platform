@@ -1,7 +1,9 @@
 package com.vodplatform.catalog.dto;
 
+import com.vodplatform.catalog.persistence.ContentType;
 import com.vodplatform.catalog.persistence.MaturityRating;
 import com.vodplatform.catalog.persistence.MovieStatus;
+import com.vodplatform.catalog.service.VideoStatusLookup.Availability;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,11 +26,22 @@ public record MovieDetail(
         List<String> genres,
         List<CreditedPerson> people,
         MovieStatus status,
-        String videoStatus
+        String videoStatus,
+        ContentType contentType,
+        String partLabel,
+        EpisodeSummary episode,
+        Availability availability
 ) {
 
     public MovieDetail {
         genres = List.copyOf(genres);
         people = List.copyOf(people);
+    }
+
+    public MovieDetail(UUID id, String title, String slug, String description, Integer releaseYear,
+                       MaturityRating maturityRating, List<String> genres, List<CreditedPerson> people,
+                       MovieStatus status, String videoStatus) {
+        this(id, title, slug, description, releaseYear, maturityRating, genres, people, status, videoStatus,
+                ContentType.MOVIE, null, null, Availability.singleEpisode(videoStatus));
     }
 }

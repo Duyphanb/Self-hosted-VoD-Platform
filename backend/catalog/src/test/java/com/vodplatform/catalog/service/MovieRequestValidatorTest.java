@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.tuple;
 import com.vodplatform.catalog.dto.MovieCreditInput;
 import com.vodplatform.catalog.dto.UpsertMovieRequest;
 import com.vodplatform.catalog.exception.CatalogValidationException;
+import com.vodplatform.catalog.persistence.ContentType;
 import com.vodplatform.catalog.persistence.CreditRole;
 import com.vodplatform.catalog.persistence.MaturityRating;
 import com.vodplatform.catalog.persistence.MovieStatus;
@@ -71,6 +72,14 @@ class MovieRequestValidatorTest {
         assertThat(movie.releaseYear()).isNull();
         assertThat(movie.maturityRating()).isNull();
         assertThat(movie.people()).isEmpty();
+    }
+
+    @Test
+    void episodeCutoverAcceptsOnlyMovieTitleWrites() {
+        var request = new UpsertMovieRequest("A season", "a-season", "Synopsis", null, null,
+                List.of("Drama"), List.of(), MovieStatus.DRAFT, ContentType.TV_SEASON, null);
+
+        assertThat(fieldErrors(request)).containsExactly(tuple("contentType", "must be MOVIE"));
     }
 
     @Test

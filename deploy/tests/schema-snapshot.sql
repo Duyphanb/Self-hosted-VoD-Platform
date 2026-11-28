@@ -6,6 +6,33 @@ CREATE TABLE public.auth_sessions (
     revoked_at timestamp with time zone
 );
 
+CREATE TABLE public.video_assets (
+    id uuid NOT NULL,
+    episode_id uuid NOT NULL,
+    raw_bucket character varying(100) NOT NULL,
+    raw_object_key character varying(512) NOT NULL,
+    hls_bucket character varying(100),
+    hls_master_object_key character varying(512),
+    status character varying(20) NOT NULL,
+    duration_seconds integer,
+    width integer,
+    height integer,
+    codec character varying(100),
+    bitrate integer,
+    failure_reason text,
+    created_at timestamp with time zone NOT NULL,
+    updated_at timestamp with time zone NOT NULL,
+    CONSTRAINT video_assets_status_check CHECK (((status)::text = ANY ((ARRAY['UPLOADED'::character varying, 'QUEUED'::character varying, 'PROCESSING'::character varying, 'READY'::character varying, 'FAILED'::character varying])::text[])))
+);
+
+CREATE VIEW public.current_episode_assets AS
+ SELECT DISTINCT ON (episode_id) episode_id,
+    id AS asset_id,
+    duration_seconds
+   FROM public.video_assets
+  WHERE ((status)::text = 'READY'::text)
+  ORDER BY episode_id, created_at DESC, id DESC;
+
 CREATE TABLE public.encoding_jobs (
     id uuid NOT NULL,
     video_asset_id uuid NOT NULL,
@@ -18,6 +45,20 @@ CREATE TABLE public.encoding_jobs (
     published_at timestamp with time zone,
     CONSTRAINT encoding_jobs_attempt_check CHECK ((attempt >= 1)),
     CONSTRAINT encoding_jobs_status_check CHECK (((status)::text = ANY ((ARRAY['QUEUED'::character varying, 'PROCESSING'::character varying, 'READY'::character varying, 'FAILED'::character varying])::text[])))
+);
+
+CREATE TABLE public.episodes (
+    id uuid NOT NULL,
+    title_id uuid NOT NULL,
+    ordinal integer NOT NULL,
+    display_label character varying(50),
+    name character varying(255),
+    synopsis text,
+    status character varying(20) NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    updated_at timestamp with time zone NOT NULL,
+    CONSTRAINT episodes_ordinal_check CHECK ((ordinal > 0)),
+    CONSTRAINT episodes_status_check CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'PUBLISHED'::character varying, 'ARCHIVED'::character varying])::text[])))
 );
 
 CREATE TABLE public.genres (
@@ -34,7 +75,7 @@ CREATE TABLE public.people (
 
 CREATE TABLE public.playback_progress (
     user_id uuid NOT NULL,
-    movie_id uuid NOT NULL,
+    episode_id uuid NOT NULL,
     current_seconds integer NOT NULL,
     duration_seconds integer,
     finished boolean DEFAULT false NOT NULL,
@@ -105,6 +146,9 @@ CREATE TABLE public.titles (
     search_vector tsvector,
     created_at timestamp with time zone NOT NULL,
     updated_at timestamp with time zone NOT NULL,
+    content_type character varying(20) NOT NULL,
+    part_label character varying(100),
+    CONSTRAINT ck_titles_content_type CHECK (((content_type)::text = ANY ((ARRAY['MOVIE'::character varying, 'TV_SEASON'::character varying, 'OVA'::character varying, 'ONA'::character varying, 'SPECIAL'::character varying])::text[]))),
     CONSTRAINT titles_status_check CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'PUBLISHED'::character varying, 'ARCHIVED'::character varying])::text[])))
 );
 
@@ -125,29 +169,10 @@ CREATE TABLE public.users (
     CONSTRAINT users_status_check CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'DISABLED'::character varying])::text[])))
 );
 
-CREATE TABLE public.video_assets (
-    id uuid NOT NULL,
-    movie_id uuid NOT NULL,
-    raw_bucket character varying(100) NOT NULL,
-    raw_object_key character varying(512) NOT NULL,
-    hls_bucket character varying(100),
-    hls_master_object_key character varying(512),
-    status character varying(20) NOT NULL,
-    duration_seconds integer,
-    width integer,
-    height integer,
-    codec character varying(100),
-    bitrate integer,
-    failure_reason text,
-    created_at timestamp with time zone NOT NULL,
-    updated_at timestamp with time zone NOT NULL,
-    CONSTRAINT video_assets_status_check CHECK (((status)::text = ANY ((ARRAY['UPLOADED'::character varying, 'QUEUED'::character varying, 'PROCESSING'::character varying, 'READY'::character varying, 'FAILED'::character varying])::text[])))
-);
-
 CREATE TABLE public.watch_history (
     id uuid NOT NULL,
     user_id uuid NOT NULL,
-    movie_id uuid NOT NULL,
+    episode_id uuid NOT NULL,
     started_at timestamp with time zone NOT NULL,
     last_watched_at timestamp with time zone NOT NULL,
     completed_at timestamp with time zone
@@ -168,6 +193,9 @@ ALTER TABLE ONLY public.auth_sessions
 ALTER TABLE ONLY public.encoding_jobs
     ADD CONSTRAINT encoding_jobs_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY public.episodes
+    ADD CONSTRAINT episodes_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY public.genres
     ADD CONSTRAINT genres_pkey PRIMARY KEY (id);
 
@@ -175,7 +203,7 @@ ALTER TABLE ONLY public.people
     ADD CONSTRAINT people_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY public.playback_progress
-    ADD CONSTRAINT playback_progress_pkey PRIMARY KEY (user_id, movie_id);
+    ADD CONSTRAINT playback_progress_pkey PRIMARY KEY (user_id, episode_id);
 
 ALTER TABLE ONLY public.ratings
     ADD CONSTRAINT ratings_pkey PRIMARY KEY (id);
@@ -203,6 +231,9 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.encoding_jobs
     ADD CONSTRAINT ux_encoding_jobs_asset_attempt UNIQUE (video_asset_id, attempt);
+
+ALTER TABLE ONLY public.episodes
+    ADD CONSTRAINT ux_episodes_title_ordinal UNIQUE (title_id, ordinal) DEFERRABLE;
 
 ALTER TABLE ONLY public.genres
     ADD CONSTRAINT ux_genres_name UNIQUE (name);
@@ -232,7 +263,7 @@ ALTER TABLE ONLY public.video_assets
     ADD CONSTRAINT ux_video_assets_raw_object UNIQUE (raw_bucket, raw_object_key);
 
 ALTER TABLE ONLY public.watch_history
-    ADD CONSTRAINT ux_watch_history_user_movie UNIQUE (user_id, movie_id);
+    ADD CONSTRAINT ux_watch_history_user_episode UNIQUE (user_id, episode_id);
 
 ALTER TABLE ONLY public.watchlist_items
     ADD CONSTRAINT ux_watchlist_items_user_title UNIQUE (user_id, title_id);
@@ -256,7 +287,7 @@ CREATE INDEX ix_encoding_jobs_video_asset_id ON public.encoding_jobs USING btree
 
 CREATE INDEX ix_people_name ON public.people USING btree (name);
 
-CREATE INDEX ix_playback_progress_user_last_played ON public.playback_progress USING btree (user_id, last_played_at);
+CREATE INDEX ix_playback_progress_user_last_played ON public.playback_progress USING btree (user_id, last_played_at DESC, episode_id DESC);
 
 CREATE INDEX ix_ratings_title_id ON public.ratings USING btree (title_id);
 
@@ -278,7 +309,9 @@ CREATE INDEX ix_titles_status ON public.titles USING btree (status);
 
 CREATE INDEX ix_users_status ON public.users USING btree (status);
 
-CREATE INDEX ix_video_assets_movie_id ON public.video_assets USING btree (movie_id);
+CREATE INDEX ix_video_assets_episode_id ON public.video_assets USING btree (episode_id);
+
+CREATE INDEX ix_video_assets_episode_ready ON public.video_assets USING btree (episode_id, created_at DESC, id DESC) WHERE ((status)::text = 'READY'::text);
 
 CREATE INDEX ix_video_assets_status ON public.video_assets USING btree (status);
 
@@ -288,9 +321,9 @@ CREATE INDEX ix_watchlist_items_user_created ON public.watchlist_items USING btr
 
 CREATE UNIQUE INDEX ux_users_email_identity ON public.users USING btree (lower((email)::text));
 
-CREATE UNIQUE INDEX ux_video_assets_hls_master ON public.video_assets USING btree (hls_bucket, hls_master_object_key) WHERE (hls_master_object_key IS NOT NULL);
+CREATE UNIQUE INDEX ux_video_assets_episode_in_flight ON public.video_assets USING btree (episode_id) WHERE ((status)::text = ANY ((ARRAY['UPLOADED'::character varying, 'QUEUED'::character varying, 'PROCESSING'::character varying])::text[]));
 
-CREATE UNIQUE INDEX ux_video_assets_movie_in_flight ON public.video_assets USING btree (movie_id) WHERE ((status)::text = ANY ((ARRAY['UPLOADED'::character varying, 'QUEUED'::character varying, 'PROCESSING'::character varying])::text[]));
+CREATE UNIQUE INDEX ux_video_assets_hls_master ON public.video_assets USING btree (hls_bucket, hls_master_object_key) WHERE (hls_master_object_key IS NOT NULL);
 
 ALTER TABLE ONLY public.auth_sessions
     ADD CONSTRAINT auth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
@@ -298,8 +331,11 @@ ALTER TABLE ONLY public.auth_sessions
 ALTER TABLE ONLY public.encoding_jobs
     ADD CONSTRAINT encoding_jobs_video_asset_id_fkey FOREIGN KEY (video_asset_id) REFERENCES public.video_assets(id) ON DELETE CASCADE;
 
+ALTER TABLE ONLY public.episodes
+    ADD CONSTRAINT episodes_title_id_fkey FOREIGN KEY (title_id) REFERENCES public.titles(id) ON DELETE RESTRICT;
+
 ALTER TABLE ONLY public.playback_progress
-    ADD CONSTRAINT playback_progress_movie_id_fkey FOREIGN KEY (movie_id) REFERENCES public.titles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT playback_progress_episode_id_fkey FOREIGN KEY (episode_id) REFERENCES public.episodes(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY public.playback_progress
     ADD CONSTRAINT playback_progress_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
@@ -335,10 +371,10 @@ ALTER TABLE ONLY public.user_roles
     ADD CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY public.video_assets
-    ADD CONSTRAINT video_assets_movie_id_fkey FOREIGN KEY (movie_id) REFERENCES public.titles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT video_assets_episode_id_fkey FOREIGN KEY (episode_id) REFERENCES public.episodes(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY public.watch_history
-    ADD CONSTRAINT watch_history_movie_id_fkey FOREIGN KEY (movie_id) REFERENCES public.titles(id) ON DELETE CASCADE;
+    ADD CONSTRAINT watch_history_episode_id_fkey FOREIGN KEY (episode_id) REFERENCES public.episodes(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY public.watch_history
     ADD CONSTRAINT watch_history_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;

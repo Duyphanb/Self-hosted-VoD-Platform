@@ -1,6 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
+import { isCanonicalUuid } from '../../lib/uuid';
 import { useApiClient } from '../auth/AuthContext';
-import { listAdminGenres, listAdminMovies, searchPeople, type AdminMovieListQuery } from './adminMoviesApi';
+import {
+  getAdminMovie,
+  listAdminGenres,
+  listAdminMovies,
+  searchPeople,
+  type AdminMovieListQuery
+} from './adminMoviesApi';
 import { movieKeys, type MoviePage } from './moviesApi';
 
 export const adminMovieKeys = {
@@ -12,6 +19,16 @@ export const adminCatalogKeys = {
   genres: ['admin-catalog', 'genres'] as const,
   people: (q: string, page: number) => ['admin-catalog', 'people', q, page] as const
 };
+
+export function useAdminMovieDetail(titleId: string, options: { refetchOnMount?: 'always' } = {}) {
+  const apiClient = useApiClient();
+  return useQuery({
+    queryKey: movieKeys.adminDetail(titleId),
+    queryFn: ({ signal }) => getAdminMovie(apiClient, titleId, signal),
+    enabled: isCanonicalUuid(titleId),
+    refetchOnMount: options.refetchOnMount
+  });
+}
 
 export function useAdminMovies(query: AdminMovieListQuery) {
   const apiClient = useApiClient();

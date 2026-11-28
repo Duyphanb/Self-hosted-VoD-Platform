@@ -8,19 +8,19 @@ import { fetchPlaybackInfo, type PlaybackInfo } from './playbackApi';
 /** Every playback query key starts with `playbackKeys.all`. */
 export const playbackKeys = {
   all: ['playback'] as const,
-  info: (movieId: string) => [...playbackKeys.all, movieId] as const
+  info: (episodeId: string) => [...playbackKeys.all, episodeId] as const
 };
 
 /**
  * Playback info for the watch page. The resume position changes while the viewer watches (ADR-011 D11), so
  * every visit fetches it again and no answer is kept after the page closes.
  */
-export function usePlaybackInfo(movieId: string) {
+export function usePlaybackInfo(episodeId: string) {
   const apiClient = useApiClient();
   return useQuery({
-    queryKey: playbackKeys.info(movieId),
-    queryFn: ({ signal }) => fetchPlaybackInfoForVisit(apiClient, movieId, signal),
-    enabled: isCanonicalUuid(movieId),
+    queryKey: playbackKeys.info(episodeId),
+    queryFn: ({ signal }) => fetchPlaybackInfoForVisit(apiClient, episodeId, signal),
+    enabled: isCanonicalUuid(episodeId),
     staleTime: 0,
     gcTime: 0,
     refetchOnMount: 'always',
@@ -36,10 +36,10 @@ export function usePlaybackInfo(movieId: string) {
  */
 export async function fetchPlaybackInfoForVisit(
   client: ApiClient,
-  movieId: string,
+  episodeId: string,
   signal?: AbortSignal
 ): Promise<PlaybackInfo> {
   const viewer = client.getAuthenticationSnapshot();
-  await waitForClosingPlayerSaves(movieId, viewer?.userId ?? null, signal);
-  return fetchPlaybackInfo(client, movieId, signal);
+  await waitForClosingPlayerSaves(episodeId, viewer?.userId ?? null, signal);
+  return fetchPlaybackInfo(client, episodeId, signal);
 }

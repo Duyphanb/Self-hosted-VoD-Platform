@@ -84,7 +84,7 @@ export function ContinueWatchingPage() {
   } else if (data.length === 0) {
     content = (
       <EmptyState description="Movies you start watching will appear here." title="Nothing to continue yet">
-        <Link className={secondaryButtonClass} to="/movies">Browse movies</Link>
+        <Link className={secondaryButtonClass} to="/titles">Browse movies</Link>
       </EmptyState>
     );
   } else {

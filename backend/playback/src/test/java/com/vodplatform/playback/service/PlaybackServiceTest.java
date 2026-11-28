@@ -7,9 +7,10 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.vodplatform.catalog.exception.MovieNotFoundException;
-import com.vodplatform.catalog.service.MovieService;
-import com.vodplatform.catalog.service.MovieVisibility;
+import com.vodplatform.catalog.exception.EpisodeNotFoundException;
+import com.vodplatform.catalog.service.EpisodeService;
+import com.vodplatform.catalog.persistence.Episode;
+import com.vodplatform.catalog.persistence.Movie;
 import com.vodplatform.encoding.exception.VideoNotReadyException;
 import com.vodplatform.encoding.persistence.VideoAsset;
 import com.vodplatform.encoding.persistence.VideoAssetRepository;
@@ -28,10 +29,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class PlaybackServiceTest {
 
-    @Mock private MovieService movies;
+    @Mock private EpisodeService movies;
     @Mock private VideoAssetRepository assets;
     @Mock private ProgressReader progress;
     @Mock private VideoAsset asset;
+    @Mock private Episode episode;
+    @Mock private Movie title;
     private final UUID movieId = UUID.randomUUID();
     private final UUID userId = UUID.randomUUID();
     private PlaybackService playback;
@@ -43,25 +46,29 @@ class PlaybackServiceTest {
 
     @Test
     void visibilityFailureDoesNotReadAssetsOrProgress() {
-        doThrow(new MovieNotFoundException()).when(movies).requireVisible(movieId, MovieVisibility.PUBLISHED_ONLY);
-        assertThatThrownBy(() -> playback.getPlayback(movieId, userId)).isInstanceOf(MovieNotFoundException.class);
+        doThrow(new EpisodeNotFoundException()).when(movies).requireVisible(movieId);
+        assertThatThrownBy(() -> playback.getPlayback(movieId, userId)).isInstanceOf(EpisodeNotFoundException.class);
         verifyNoInteractions(assets, progress);
     }
 
     @Test
     void missingCurrentAssetDoesNotReadProgress() {
-        when(assets.findCurrentReadyByMovieId(movieId)).thenReturn(Optional.empty());
+        when(movies.requireVisible(movieId)).thenReturn(episode);
+        when(episode.getTitle()).thenReturn(title);
+        when(assets.findCurrentReadyByEpisodeId(movieId)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> playback.getPlayback(movieId, userId)).isInstanceOf(VideoNotReadyException.class);
         var order = inOrder(movies, assets);
-        order.verify(movies).requireVisible(movieId, MovieVisibility.PUBLISHED_ONLY);
-        order.verify(assets).findCurrentReadyByMovieId(movieId);
+        order.verify(movies).requireVisible(movieId);
+        order.verify(assets).findCurrentReadyByEpisodeId(movieId);
         order.verifyNoMoreInteractions();
         verifyNoInteractions(progress);
     }
 
     @Test
     void readsCurrentAssetOnceThenOnlyTheCallerMovieProgress() {
-        when(assets.findCurrentReadyByMovieId(movieId)).thenReturn(Optional.of(asset));
+        when(movies.requireVisible(movieId)).thenReturn(episode);
+        when(episode.getTitle()).thenReturn(title);
+        when(assets.findCurrentReadyByEpisodeId(movieId)).thenReturn(Optional.of(asset));
         UUID assetId = UUID.randomUUID();
         when(asset.getId()).thenReturn(assetId);
         when(asset.getDurationSeconds()).thenReturn(100);
@@ -69,8 +76,8 @@ class PlaybackServiceTest {
                 new StoredProgress(90, 999, true, Instant.EPOCH)));
         var result = playback.getPlayback(movieId, userId);
         var order = inOrder(movies, assets, progress);
-        order.verify(movies).requireVisible(movieId, MovieVisibility.PUBLISHED_ONLY);
-        order.verify(assets).findCurrentReadyByMovieId(movieId);
+        order.verify(movies).requireVisible(movieId);
+        order.verify(assets).findCurrentReadyByEpisodeId(movieId);
         order.verify(progress).find(userId, movieId);
         order.verifyNoMoreInteractions();
         assertThat(result.videoAssetId()).isEqualTo(assetId);

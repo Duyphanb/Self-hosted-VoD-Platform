@@ -33,10 +33,12 @@ Status values must match the domain glossary.
 |---|---|---|
 | `users` | `status` | `ACTIVE`, `DISABLED` |
 | `titles` | `status` | `DRAFT`, `PUBLISHED`, `ARCHIVED` |
+| `titles` | `content_type` | `MOVIE`, `TV_SEASON`, `OVA`, `ONA`, `SPECIAL` |
+| `episodes` | `status` | `DRAFT`, `PUBLISHED`, `ARCHIVED` |
 | `video_assets` | `status` | `UPLOADED`, `QUEUED`, `PROCESSING`, `READY`, `FAILED` |
 | `encoding_jobs` | `status` | `QUEUED`, `PROCESSING`, `READY`, `FAILED` |
 
-`encoding_jobs.status = READY` means the job completed successfully and the linked video asset has HLS output; it is playable only while it is the movie's current asset ([ADR-010](adr/ADR-010.md)).
+`encoding_jobs.status = READY` means the job completed successfully and the linked video asset has HLS output; it is playable only while it is the episode's current asset ([ADR-010](adr/ADR-010.md)).
 
 ### Asset and job lifecycle
 
@@ -53,9 +55,9 @@ stateDiagram-v2
 
 The diagram is the asset lifecycle. Each job has QUEUED -> PROCESSING -> READY/FAILED only; retry inserts a new job rather than resetting a terminal job. Claims/finishes update job and asset atomically with expected-state predicates. There is no age-based QUEUED timeout. One non-overlapping worker fails orphaned PROCESSING rows before starting its listener.
 
-Newest means greatest `(created_at, id)` per movie. Current is greatest `(created_at, id)` among READY assets; no pointer column is added to `titles`. `videoStatus` is READY if current exists, otherwise newest status, or null without assets. Superseded means READY but not current, or FAILED but not newest. Retry accepts only newest FAILED.
+Newest means greatest `(created_at, id)` per episode. Current is greatest `(created_at, id)` among the episode's READY assets; no pointer column is added to `episodes`. The view `current_episode_assets` is the one definition of current that every reader uses ([ADR-013 D6](adr/ADR-013.md#d6-media-per-episode-s2)). `videoStatus` is READY if current exists, otherwise newest status, or null without assets. Superseded means READY but not current, or FAILED but not newest. Retry accepts only newest FAILED.
 
-Assign asset `created_at` inside the asset/job insert transaction, after the raw PUT and acquisition of per-movie serialization, never at asset ID generation or request start. This keeps overlapping uploads ordered by the serialized insert when deriving newest/current.
+Assign asset `created_at` inside the asset/job insert transaction, after the raw PUT and acquisition of the per-episode row lock, never at asset ID generation or request start. This keeps overlapping uploads ordered by the serialized insert when deriving newest/current.
 
 ## Logical ERD
 
@@ -71,11 +73,12 @@ erDiagram
     genres ||--o{ title_genres : used_by
     titles ||--o{ title_credits : credited
     people ||--o{ title_credits : contributes
-    titles ||--o{ video_assets : has
+    titles ||--o{ episodes : contains
+    episodes ||--o{ video_assets : has
     video_assets ||--o{ encoding_jobs : processed_by
 
     users ||--o{ playback_progress : tracks
-    titles ||--o{ playback_progress : tracked_for
+    episodes ||--o{ playback_progress : tracked_for
     users ||--o{ watchlist_items : saves
     titles ||--o{ watchlist_items : saved_as
     users ||--o{ watch_history : watches
@@ -170,6 +173,8 @@ Indexes:
 | `maturity_rating` | varchar(20) | null | Optional content rating; the API accepts `P`, `K`, `T13`, `T16`, `T18` (no DB check) |
 | `poster_object_key` | varchar(512) | null | Deferred thumbnail/poster object key |
 | `status` | varchar(20) | not null, check | `DRAFT`, `PUBLISHED`, `ARCHIVED` |
+| `content_type` | varchar(20) | not null, check | `MOVIE`, `TV_SEASON`, `OVA`, `ONA`, `SPECIAL`; V8 backfilled `MOVIE`, no default. Until S3 the API creates only `MOVIE` |
+| `part_label` | varchar(100) | null | Optional label for a franchise strip, such as "Season 2" |
 | `search_vector` | tsvector | null | PostgreSQL FTS vector |
 | `created_at` | timestamptz | not null | Creation timestamp |
 | `updated_at` | timestamptz | not null | Last update timestamp |
@@ -180,6 +185,28 @@ Indexes:
 - GIN `ix_titles_search_vector` on `search_vector`
 - `ix_titles_status` on `status`
 - `ix_titles_release_year` on `release_year`
+
+### `episodes`
+
+The playable unit ([ADR-013 D1](adr/ADR-013.md#d1-hierarchy-and-ownership)). V8 gave every existing title one `PUBLISHED`
+episode at ordinal 1 with a new random UUID, and a new `MOVIE` title is created with that episode in the same
+transaction.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | uuid | PK | Episode ID; never the title's UUID |
+| `title_id` | uuid | FK -> `titles.id` on delete restrict, not null | Never changes after creation |
+| `ordinal` | int | not null, check `ordinal > 0` | Order inside the title |
+| `display_label` | varchar(50) | null | Shown label, for example `12`, `12.5`, `SP1`; V8 wrote `1` |
+| `name` | varchar(255) | null | Episode name |
+| `synopsis` | text | null | Episode synopsis |
+| `status` | varchar(20) | not null, check | `DRAFT`, `PUBLISHED`, `ARCHIVED`; always `PUBLISHED` for the episode of a `MOVIE` title |
+| `created_at` | timestamptz | not null | Creation timestamp |
+| `updated_at` | timestamptz | not null | Last update timestamp |
+
+Constraints:
+
+- unique `ux_episodes_title_ordinal` on (`title_id`, `ordinal`), deferrable, initially immediate
 
 ### `genres`
 
@@ -234,12 +261,12 @@ Indexes:
 
 ### `video_assets`
 
-One new row per upload, never an upsert. Raw key: `{movieId}/{videoAssetId}.{ext}`, with the extension derived from the validated MIME/signature family. HLS keys are attempt scoped: `video-assets/{videoAssetId}/attempt-{n}/master.m3u8` and sibling `segments/*.ts`; HLS fields are written only in the READY transaction. Public HLS URLs do not contain the attempt.
+One new row per upload, never an upsert. Raw key: `{titleId}/{videoAssetId}.{ext}` (titles kept the movie UUIDs, so older keys have the same shape), with the extension derived from the validated MIME/signature family. HLS keys are attempt scoped: `video-assets/{videoAssetId}/attempt-{n}/master.m3u8` and sibling `segments/*.ts`; HLS fields are written only in the READY transaction. Public HLS URLs do not contain the attempt.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | uuid | PK | Video asset ID |
-| `movie_id` | uuid | FK -> `titles.id` on delete cascade, not null | Owning movie |
+| `episode_id` | uuid | FK -> `episodes.id` on delete restrict, not null | Owning episode |
 | `raw_bucket` | varchar(100) | not null | MinIO raw bucket |
 | `raw_object_key` | varchar(512) | not null | Raw video object key |
 | `hls_bucket` | varchar(100) | null | MinIO HLS bucket |
@@ -256,11 +283,13 @@ One new row per upload, never an upsert. Raw key: `{movieId}/{videoAssetId}.{ext
 
 Indexes:
 
-- `ix_video_assets_movie_id` on `movie_id`
+- `ix_video_assets_episode_id` on `episode_id`
+- `ix_video_assets_episode_ready` on (`episode_id`, `created_at` DESC, `id` DESC) where `status = 'READY'`
 - `ix_video_assets_status` on `status`
 - unique `ux_video_assets_raw_object` on (`raw_bucket`, `raw_object_key`)
 - unique `ux_video_assets_hls_master` on (`hls_bucket`, `hls_master_object_key`) where `hls_master_object_key` is not null
-- unique partial `ux_video_assets_movie_in_flight` on `movie_id` where `status IN ('UPLOADED', 'QUEUED', 'PROCESSING')` (V5, Issue 4.3). Match this index name to 409 `VIDEO_UPLOAD_IN_PROGRESS`; compensate the losing request's raw object.
+- unique partial `ux_video_assets_episode_in_flight` on `episode_id` where `status IN ('UPLOADED', 'QUEUED', 'PROCESSING')` (V8). Match this index name to 409 `VIDEO_UPLOAD_IN_PROGRESS`; compensate the losing request's raw object.
+- `current_episode_assets` provides the greatest READY (`created_at`, `id`) tuple per episode.
 
 ### `encoding_jobs`
 
@@ -289,9 +318,9 @@ Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specific
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `user_id` | uuid | PK, FK -> `users.id` on delete cascade | User |
-| `movie_id` | uuid | PK, FK -> `titles.id` on delete cascade | Movie |
+| `episode_id` | uuid | PK, FK -> `episodes.id` on delete restrict | Episode |
 | `current_seconds` | int | not null, check `current_seconds >= 0` | Last saved position, clamped by the server to the current asset's duration |
-| `duration_seconds` | int | null, check `duration_seconds >= 0` | Duration of the movie's current asset when the row was saved; never the client's value |
+| `duration_seconds` | int | null, check `duration_seconds >= 0` | Duration of the episode's current asset when the row was saved; never the client's value |
 | `finished` | boolean | not null default false | Server-derived "counts as watched" flag: the player reported the end (the position is then stored as the duration), or the position reached 90% of the duration. It does not set the resume position |
 | `last_played_at` | timestamptz | not null | Server time of the last accepted update; updates are forward-only on this column |
 | `created_at` | timestamptz | not null | Creation timestamp |
@@ -299,9 +328,9 @@ Issue 4.3 implements the [V5 specification](adr/ADR-010.md#v5-migration-specific
 
 Indexes:
 
-- `ix_playback_progress_user_last_played` on (`user_id`, `last_played_at`)
+- `ix_playback_progress_user_last_played` on (`user_id`, `last_played_at` DESC, `episode_id` DESC)
 
-The progress API writes this table directly in one transaction with `watch_history`; there is no buffer ([ADR-011 D9-D12](adr/ADR-011.md#playback-progress-d9-d14)). One row per user and movie survives a video replacement. No migration is added by this decision.
+The progress API writes this table directly in one transaction with `watch_history`; there is no buffer ([ADR-011 D9-D12](adr/ADR-011.md#playback-progress-d9-d14)). One row per user and episode survives a video replacement. No migration is added by this decision.
 
 ### `watchlist_items`
 
@@ -323,7 +352,7 @@ Constraints and indexes:
 |---|---|---|---|
 | `id` | uuid | PK | History item ID |
 | `user_id` | uuid | FK -> `users.id` on delete cascade, not null | Owner |
-| `movie_id` | uuid | FK -> `titles.id` on delete cascade, not null | Watched movie |
+| `episode_id` | uuid | FK -> `episodes.id` on delete restrict, not null | Watched episode |
 | `started_at` | timestamptz | not null | First accepted progress update |
 | `last_watched_at` | timestamptz | not null | Latest accepted progress update |
 | `completed_at` | timestamptz | null | First time a stored progress update was finished; never cleared |
@@ -331,7 +360,7 @@ Constraints and indexes:
 Indexes:
 
 - `ix_watch_history_user_last_watched` on (`user_id`, `last_watched_at`)
-- unique `ux_watch_history_user_movie` on (`user_id`, `movie_id`)
+- unique `ux_watch_history_user_episode` on (`user_id`, `episode_id`)
 
 ### `ratings`
 
@@ -371,7 +400,7 @@ Planned ([ADR-015](adr/ADR-015.md), #128): this design is replaced before any co
 - Deleting a `users` row cascades to auth sessions, refresh tokens, playback progress, watchlist items, watch history,
   and ratings.
 - Media object cleanup is not automatic on movie archive.
-- Archiving a movie, or any non-`PUBLISHED` status, keeps the related watchlist items, watch history, playback progress, and ratings. They are hidden from user-facing lists and per-movie endpoints by the movie visibility rule in [SECURITY.md](SECURITY.md#movie-visibility), and reappear when the movie is restored.
+- Archiving a movie, or any non-`PUBLISHED` status, keeps the related watchlist items, watch history, playback progress, and ratings. They are hidden from user-facing lists and per-movie endpoints by the movie visibility rule in [SECURITY.md](SECURITY.md#title-and-episode-visibility), and reappear when the movie is restored.
 
 ### Media storage lifecycle
 
@@ -382,7 +411,7 @@ Planned ([ADR-015](adr/ADR-015.md), #128): this design is replaced before any co
 
 ## Planned (ADR-013): content model
 
-The tables above reflect the S1 rename in V7. The diagram below shows the planned content model from
+The tables above reflect the S1 rename (V7) and the S2 episode cutover (V8). The diagram below shows the planned content model from
 [ADR-013](adr/ADR-013.md) (#244). Each schema slice adds a Flyway migration and regenerates the snapshot
 in the same pull request.
 
@@ -406,27 +435,13 @@ and `title_credits`. `title_genres`, `title_credits`, `ratings` and `watchlist_i
 with renamed constraints and indexes. `video_assets`, `playback_progress` and `watch_history` keep
 `movie_id` until S2. All rows and UUIDs are preserved.
 
-**S2, episodes.**
-
-- `titles` gains `content_type varchar(20) NOT NULL` with a check on `MOVIE`, `TV_SEASON`, `OVA`, `ONA` and `SPECIAL` (backfilled `MOVIE`, no default afterwards) and `part_label varchar(100)` null.
-- New `episodes`:
-
-  | Column | Type | Constraints | Notes |
-  |---|---|---|---|
-  | `id` | uuid | PK | New random UUID, also for the backfilled episode of every existing title |
-  | `title_id` | uuid | FK -> `titles.id` restrict delete, not null | Never changes after creation |
-  | `ordinal` | int | not null, check `ordinal > 0` | Order inside the title |
-  | `display_label` | varchar(50) | null | Shown label, for example `12`, `12.5`, `SP1` |
-  | `name` | varchar(255) | null | Episode name |
-  | `synopsis` | text | null | Episode synopsis |
-  | `status` | varchar(20) | not null, check | `DRAFT`, `PUBLISHED`, `ARCHIVED`; always `PUBLISHED` for the episode of a `MOVIE` title |
-  | `created_at`, `updated_at` | timestamptz | not null | Timestamps |
-
-  Constraint `ux_episodes_title_ordinal UNIQUE (title_id, ordinal) DEFERRABLE INITIALLY IMMEDIATE`. The backfill creates one `PUBLISHED` episode at ordinal 1 per title.
-- `video_assets` gains `episode_id uuid NOT NULL` (FK -> `episodes.id` restrict delete, backfilled through each title's episode) and drops `movie_id` with `ix_video_assets_movie_id` and `ux_video_assets_movie_in_flight`. New indexes: unique partial `ux_video_assets_episode_in_flight` on `episode_id` where `status IN ('UPLOADED', 'QUEUED', 'PROCESSING')` (409 `VIDEO_UPLOAD_IN_PROGRESS` matches this name), and `ix_video_assets_episode_ready` on (`episode_id`, `created_at` DESC, `id` DESC) where `status = 'READY'`. The raw key of new uploads is `{titleId}/{videoAssetId}.{ext}`, the same shape as today's keys.
-- `playback_progress` gains `episode_id uuid NOT NULL` (FK -> `episodes.id` restrict delete, backfilled, then made not null), its primary key becomes (`user_id`, `episode_id`), `movie_id` is dropped, and `ix_playback_progress_user_last_played` covers (`user_id`, `last_played_at` DESC, `episode_id` DESC).
-- `watch_history` gains `episode_id uuid NOT NULL` (FK -> `episodes.id` restrict delete, backfilled, then made not null), `ux_watch_history_user_episode` on (`user_id`, `episode_id`) replaces `ux_watch_history_user_movie`, `movie_id` is dropped, and row IDs are kept.
-- User foreign keys keep `ON DELETE CASCADE`.
+**S2, episode cutover (V8).** `titles` gained `content_type` and `part_label`, and the new `episodes` table holds
+one `PUBLISHED` episode at ordinal 1 per title. `video_assets`, `playback_progress` and `watch_history` were re-keyed in
+place: `movie_id` became `episode_id`, now `ON DELETE RESTRICT` to `episodes`, with row IDs, object keys and timestamps
+kept. Their indexes and constraints follow under the new names (`ix_video_assets_episode_id`,
+`ux_video_assets_episode_in_flight`, `ux_watch_history_user_episode`), and V8 added `ix_video_assets_episode_ready`,
+the view `current_episode_assets` and the progress index on (`user_id`, `last_played_at` DESC, `episode_id` DESC). User
+foreign keys keep `ON DELETE CASCADE`.
 
 **S3, franchises.**
 

@@ -6,6 +6,7 @@ export const MOVIE_STATUSES = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
 export const VIDEO_ASSET_STATUSES = ['UPLOADED', 'QUEUED', 'PROCESSING', 'READY', 'FAILED'] as const;
 export type MovieStatus = typeof MOVIE_STATUSES[number];
 export type VideoAssetStatus = typeof VIDEO_ASSET_STATUSES[number];
+export const CONTENT_TYPES = ['MOVIE', 'TV_SEASON', 'OVA', 'ONA', 'SPECIAL'] as const;
 export type MovieSort = 'latest' | 'title';
 /** Vietnamese film classification; null means not classified. */
 export const MATURITY_RATINGS = ['P', 'K', 'T13', 'T16', 'T18'] as const;
@@ -37,6 +38,9 @@ export interface MovieSummary {
   genres: string[];
   averageRating: number | null;
   status: MovieStatus | UnknownEnumValue;
+  contentType: typeof CONTENT_TYPES[number] | UnknownEnumValue;
+  /** The admin's optional label for a part, such as "Season 2"; null when none. */
+  partLabel: string | null;
   /** Playback availability; READY can remain while a replacement upload is processed. Null when no asset exists. */
   videoStatus: VideoAssetStatus | UnknownEnumValue | null;
 }
@@ -48,14 +52,25 @@ export interface MovieCredit {
 }
 
 export interface PlaybackProgress {
-  movieId: string;
+  episodeId: string;
   currentSeconds: number;
   durationSeconds: number | null;
   finished: boolean;
   lastPlayedAt: string | null;
 }
 
+export interface EpisodeSummary {
+  id: string;
+  titleId: string;
+  ordinal: number;
+  displayLabel: string;
+  name: string | null;
+  videoStatus: MovieSummary['videoStatus'];
+  progress: PlaybackProgress | null;
+}
+
 export interface MovieDetail extends MovieSummary {
+  episode: EpisodeSummary | null;
   maturityRating: MaturityRating | UnknownEnumValue | null;
   /** Credits in the display order the API returns. */
   people: MovieCredit[];
@@ -84,7 +99,9 @@ export interface MovieListQuery {
 export const movieKeys = {
   all: ['movies'] as const,
   list: (query: MovieListQuery) => [...movieKeys.all, 'list', query] as const,
-  detail: (movieId: string) => [...movieKeys.all, 'detail', movieId] as const
+  detail: (movieId: string) => [...movieKeys.all, 'detail', movieId] as const,
+  adminDetail: (titleId: string) => [...movieKeys.all, 'admin-detail', titleId] as const,
+  watchedTitle: (episodeId: string) => [...movieKeys.all, 'watch', episodeId] as const
 };
 
 export async function listMovies(
@@ -103,19 +120,16 @@ export async function listMovies(
   if (query.year !== null) {
     search.set('year', String(query.year));
   }
-  const response = await client.request<unknown>(`/movies?${search.toString()}`, {
+  const response = await client.request<unknown>(`/titles?${search.toString()}`, {
     authenticated: true,
     signal
   });
   return decodeMoviePage(response);
 }
 
-/**
- * Movie detail; `movieId` must be a UUID. The API answers 404 MOVIE_NOT_FOUND alike for a missing
- * movie and, unless the caller is an admin, for one that is not published.
- */
+/** Viewer title detail requires a UUID and published visibility. */
 export async function getMovie(client: ApiClient, movieId: string, signal?: AbortSignal): Promise<MovieDetail> {
-  const response = await client.request<unknown>(`/movies/${encodeURIComponent(movieId)}`, {
+  const response = await client.request<unknown>(`/titles/${encodeURIComponent(movieId)}`, {
     authenticated: true,
     signal
   });
@@ -174,7 +188,11 @@ export function decodeMovieSummary(value: unknown): MovieSummary | null {
     || !value.genres.every((genre) => typeof genre === 'string')
     || !(value.averageRating === null || typeof value.averageRating === 'number')
     || typeof value.status !== 'string'
-    || !(value.videoStatus === null || typeof value.videoStatus === 'string')) {
+    || typeof value.contentType !== 'string'
+    || !(value.partLabel === null || typeof value.partLabel === 'string')
+    || !nonNegativeInteger(value.episodeCount) || !nonNegativeInteger(value.playableEpisodeCount)
+    || value.playableEpisodeCount > value.episodeCount
+    || typeof value.availability !== 'string') {
     return null;
   }
   return {
@@ -187,8 +205,19 @@ export function decodeMovieSummary(value: unknown): MovieSummary | null {
     genres: [...value.genres] as string[],
     averageRating: value.averageRating,
     status: knownOrUnknown(MOVIE_STATUSES, value.status),
-    videoStatus: value.videoStatus === null ? null : knownOrUnknown(VIDEO_ASSET_STATUSES, value.videoStatus)
+    contentType: knownOrUnknown(CONTENT_TYPES, value.contentType),
+    partLabel: value.partLabel as string | null,
+    videoStatus: statusFromAvailability(value.availability)
   };
+}
+
+function statusFromAvailability(value: string): MovieSummary['videoStatus'] {
+  switch (value) {
+    case 'PLAYABLE': return 'READY';
+    case 'PROCESSING': return 'PROCESSING';
+    case 'UNAVAILABLE': return null;
+    default: return UNKNOWN_ENUM_VALUE;
+  }
 }
 
 export function decodeMovieDetail(value: unknown): MovieDetail | null {
@@ -202,21 +231,60 @@ export function decodeMovieDetail(value: unknown): MovieDetail | null {
     return null;
   }
   const people = value.people.map(decodeMovieCredit);
-  // Omitted when there is no saved progress; null is read the same way.
-  const playbackProgress = value.playbackProgress === undefined || value.playbackProgress === null
-    ? null
-    : decodePlaybackProgress(value.playbackProgress);
-  if (people.some((credit) => credit === null) || playbackProgress === undefined) {
+  const episode = value.episode === undefined ? null : decodeEpisodeSummary(value.episode);
+  if (people.some((credit) => credit === null)
+    || (summary.contentType === 'MOVIE' && !episode) || (episode && episode.titleId !== summary.id)) {
     return null;
   }
   return {
     ...summary,
+    episode,
+    videoStatus: episode ? episode.videoStatus : summary.videoStatus,
     maturityRating: value.maturityRating === null ? null : knownOrUnknown(MATURITY_RATINGS, value.maturityRating),
     people: people as MovieCredit[],
     userRating: value.userRating,
     inWatchlist: value.inWatchlist,
-    playbackProgress
+    playbackProgress: episode?.progress ?? null
   };
+}
+
+export function decodeEpisodeSummary(value: unknown): EpisodeSummary | null {
+  if (!isRecord(value) || !isCanonicalUuid(value.id) || !isCanonicalUuid(value.titleId)
+    || !nonNegativeInteger(value.ordinal) || value.ordinal < 1 || typeof value.displayLabel !== 'string'
+    || !(value.name === null || typeof value.name === 'string')
+    || !(value.videoStatus === null || typeof value.videoStatus === 'string')) {
+    return null;
+  }
+  const progress = value.progress === null ? null : decodePlaybackProgress(value.progress);
+  if (progress === undefined || (progress && progress.episodeId !== value.id)) {
+    return null;
+  }
+  return {
+    id: value.id,
+    titleId: value.titleId,
+    ordinal: value.ordinal,
+    displayLabel: value.displayLabel,
+    name: value.name,
+    videoStatus: value.videoStatus === null ? null : knownOrUnknown(VIDEO_ASSET_STATUSES, value.videoStatus),
+    progress
+  };
+}
+
+/** The title of a visible episode, for the watch page (`GET /episodes/{episodeId}`). */
+export async function getWatchedTitle(
+  client: ApiClient,
+  episodeId: string,
+  signal?: AbortSignal
+): Promise<MovieSummary> {
+  const value = await client.request<unknown>(`/episodes/${encodeURIComponent(episodeId)}`, {
+    authenticated: true, signal
+  });
+  const episode = isRecord(value) ? decodeEpisodeSummary(value.episode) : null;
+  const title = isRecord(value) ? decodeMovieSummary(value.title) : null;
+  if (!title || episode?.id !== episodeId || episode.titleId !== title.id) {
+    throw new InvalidMovieResponseError('Server returned an invalid episode');
+  }
+  return { ...title, videoStatus: episode.videoStatus };
 }
 
 function decodeMovieCredit(value: unknown): MovieCredit | null {
@@ -232,7 +300,7 @@ function decodeMovieCredit(value: unknown): MovieCredit | null {
 // Undefined marks an invalid value, because null is a valid "no progress".
 export function decodePlaybackProgress(value: unknown): PlaybackProgress | undefined {
   if (!isRecord(value)
-    || !isCanonicalUuid(value.movieId)
+    || !isCanonicalUuid(value.episodeId)
     || !nonNegativeInteger(value.currentSeconds)
     || !(value.durationSeconds === undefined || value.durationSeconds === null
       || nonNegativeInteger(value.durationSeconds))
@@ -241,7 +309,7 @@ export function decodePlaybackProgress(value: unknown): PlaybackProgress | undef
     return undefined;
   }
   return {
-    movieId: value.movieId,
+    episodeId: value.episodeId,
     currentSeconds: value.currentSeconds,
     durationSeconds: (value.durationSeconds ?? null) as number | null,
     finished: value.finished,

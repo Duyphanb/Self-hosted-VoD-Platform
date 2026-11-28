@@ -35,5 +35,5 @@ export function MovieCard({ movie }: { movie: MovieSummary }) {
 
 // The decoder accepts only canonical UUIDs; encoding the segment keeps the path safe regardless.
 function movieDetailPath(movieId: string): string {
-  return `/movies/${encodeURIComponent(movieId)}`;
+  return `/titles/${encodeURIComponent(movieId)}`;
 }

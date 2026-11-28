@@ -21,9 +21,9 @@ public class ProgressWrites {
     public Optional<StoredProgress> upsert(UUID user, UUID movie, ProgressWriteValues value, Instant now) {
         return jdbc.query("""
                 INSERT INTO playback_progress
-                  (user_id,movie_id,current_seconds,duration_seconds,finished,last_played_at,created_at,updated_at)
+                  (user_id,episode_id,current_seconds,duration_seconds,finished,last_played_at,created_at,updated_at)
                 VALUES (?,?,?,?,?,?,?,?)
-                ON CONFLICT (user_id,movie_id) DO UPDATE
+                ON CONFLICT (user_id,episode_id) DO UPDATE
                 SET current_seconds=EXCLUDED.current_seconds, duration_seconds=EXCLUDED.duration_seconds,
                     finished=EXCLUDED.finished, last_played_at=EXCLUDED.last_played_at, updated_at=EXCLUDED.updated_at
                 WHERE playback_progress.last_played_at <= EXCLUDED.last_played_at
@@ -35,7 +35,7 @@ public class ProgressWrites {
     /** Fresh JDBC read avoids stale JPA state after a native upsert or a rejected concurrent save. */
     public StoredProgress stored(UUID user, UUID movie) {
         return jdbc.query("select current_seconds,duration_seconds,finished,last_played_at "
-                + "from playback_progress where user_id=? and movie_id=?", ProgressWrites::row, user, movie)
+                + "from playback_progress where user_id=? and episode_id=?", ProgressWrites::row, user, movie)
                 .getFirst();
     }
 

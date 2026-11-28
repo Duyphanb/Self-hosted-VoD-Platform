@@ -55,9 +55,9 @@ public class VideoUploadService {
     }
 
     public VideoAssetStatusResponse upload(
-            UUID movieId, MultipartFile file, Optional<String> requestId) {
+            UUID episodeId, MultipartFile file, Optional<String> requestId) {
         EncodingJobService.requireNoTransaction();
-        Objects.requireNonNull(movieId, "movieId");
+        Objects.requireNonNull(episodeId, "episodeId");
         Optional<String> safeRequestId =
                 Objects.requireNonNull(requestId, "requestId").flatMap(RequestIds::sanitize);
         if (file == null || file.isEmpty() || file.getSize() <= 0) {
@@ -97,7 +97,7 @@ public class VideoUploadService {
         } catch (IOException failure) {
             throw new UploadStorageException();
         }
-        jobs.precheck(movieId);
+        UUID titleId = jobs.precheck(episodeId);
         UUID assetId = UUID.randomUUID();
         UUID jobId = UUID.randomUUID();
         String extension =
@@ -107,31 +107,31 @@ public class VideoUploadService {
                     case "video/webm" -> "webm";
                     default -> "mkv";
                 };
-        String key = movieId + "/" + assetId + "." + extension;
+        String key = titleId + "/" + assetId + "." + extension;
         try (var input = file.getInputStream()) {
             storage.put(properties.rawBucket(), key, input, file.getSize(), mime);
         } catch (IOException | RuntimeException failure) {
-            compensate(movieId, assetId, jobId, key, safeRequestId);
+            compensate(episodeId, assetId, jobId, key, safeRequestId);
             throw new UploadStorageException();
         }
         log.info(
-                "raw object stored movieId={} videoAssetId={} encodingJobId={} requestId={}",
-                movieId,
+                "raw object stored episodeId={} videoAssetId={} encodingJobId={} requestId={}",
+                episodeId,
                 assetId,
                 jobId,
                 safeRequestId.orElse(null));
         try {
-            jobs.commitNewUpload(movieId, assetId, jobId, properties.rawBucket(), key);
+            jobs.commitNewUpload(episodeId, assetId, jobId, properties.rawBucket(), key);
         } catch (UploadCommitUnknownException unknown) {
             throw unknown;
         } catch (RuntimeException failure) {
-            compensate(movieId, assetId, jobId, key, safeRequestId);
+            compensate(episodeId, assetId, jobId, key, safeRequestId);
             throw failure;
         }
         jobs.publish(new EncodingJobMessage(jobId, assetId, 1), safeRequestId);
         log.info(
-                "upload accepted movieId={} videoAssetId={} encodingJobId={} requestId={}",
-                movieId,
+                "upload accepted episodeId={} videoAssetId={} encodingJobId={} requestId={}",
+                episodeId,
                 assetId,
                 jobId,
                 safeRequestId.orElse(null));
@@ -139,20 +139,20 @@ public class VideoUploadService {
     }
 
     private void compensate(
-            UUID movieId, UUID assetId, UUID jobId, String key, Optional<String> requestId) {
+            UUID episodeId, UUID assetId, UUID jobId, String key, Optional<String> requestId) {
         try {
             storage.delete(properties.rawBucket(), key);
             log.warn(
-                    "upload compensated movieId={} videoAssetId={} encodingJobId={} requestId={}",
-                    movieId,
+                    "upload compensated episodeId={} videoAssetId={} encodingJobId={} requestId={}",
+                    episodeId,
                     assetId,
                     jobId,
                     requestId.orElse(null));
         } catch (IOException | RuntimeException failure) {
             log.warn(
-                    "upload compensation failed movieId={} videoAssetId={} encodingJobId={}"
+                    "upload compensation failed episodeId={} videoAssetId={} encodingJobId={}"
                             + " requestId={}",
-                    movieId,
+                    episodeId,
                     assetId,
                     jobId,
                     requestId.orElse(null));

@@ -1,5 +1,6 @@
 package com.vodplatform.catalog.dto;
 
+import com.vodplatform.catalog.persistence.ContentType;
 import com.vodplatform.catalog.persistence.MaturityRating;
 import com.vodplatform.catalog.persistence.MovieStatus;
 import java.util.List;
@@ -20,6 +21,13 @@ public record UpsertMovieRequest(
         MaturityRating maturityRating,
         List<String> genres,
         List<MovieCreditInput> people,
-        MovieStatus status
+        MovieStatus status,
+        ContentType contentType,
+        String partLabel
 ) {
+    public UpsertMovieRequest(String title, String slug, String description, Integer releaseYear,
+                              MaturityRating maturityRating, List<String> genres, List<MovieCreditInput> people,
+                              MovieStatus status) {
+        this(title, slug, description, releaseYear, maturityRating, genres, people, status, ContentType.MOVIE, null);
+    }
 }

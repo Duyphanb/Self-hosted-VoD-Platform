@@ -861,7 +861,7 @@ async function renderPlayer({
       <AuthProvider redirectToLogin={() => undefined}>
         <SessionControls />
         <MountedOnceSignedIn>
-          <HlsPlayer movieId={MOVIE_ID} title={TITLE} playbackInfo={info} reloadPlaybackInfo={reloadPlaybackInfo} />
+          <HlsPlayer episodeId={MOVIE_ID} title={TITLE} playbackInfo={info} reloadPlaybackInfo={reloadPlaybackInfo} />
         </MountedOnceSignedIn>
       </AuthProvider>
     </QueryClientProvider>
@@ -1039,7 +1039,7 @@ function progressRequestUrls(): string[] {
 }
 
 function progressUrl(): string {
-  return `PUT /api/v1/movies/${MOVIE_ID}/progress`;
+  return `PUT /api/v1/episodes/${MOVIE_ID}/progress`;
 }
 
 function save(currentSeconds: number, finished = false) {
@@ -1049,7 +1049,8 @@ function save(currentSeconds: number, finished = false) {
 function playbackInfo(overrides: Partial<PlaybackInfo> = {}): PlaybackInfo {
   const videoAssetId = overrides.videoAssetId ?? ASSET_ID;
   return {
-    movieId: MOVIE_ID,
+    episodeId: MOVIE_ID,
+    titleId: MOVIE_ID,
     videoAssetId,
     hlsManifestUrl: `/hls/video-assets/${videoAssetId}/master.m3u8`,
     resumeSeconds: 0,
@@ -1063,7 +1064,7 @@ function authResponse(user: UserProfile, accessToken: string) {
 }
 
 function progressResponse() {
-  return { movieId: MOVIE_ID, currentSeconds: 0, durationSeconds: 600, finished: false, lastPlayedAt: null };
+  return { episodeId: MOVIE_ID, currentSeconds: 0, durationSeconds: 600, finished: false, lastPlayedAt: null };
 }
 
 function apiError(status: number, code: string) {

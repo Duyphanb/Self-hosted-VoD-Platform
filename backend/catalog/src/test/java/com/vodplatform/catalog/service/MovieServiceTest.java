@@ -144,8 +144,8 @@ class MovieServiceTest {
                 .containsExactlyElementsOf(movieService.listPublished(null, null, 0, 10, MovieSort.LATEST).getContent());
         assertThat(movieService.summaries(List.of(uuid(1)), MovieVisibility.PUBLISHED_ONLY).getFirst().genres())
                 .containsExactly("Action", "Drama");
-        assertThat(movieService.summaries(List.of(uuid(1)), MovieVisibility.PUBLISHED_ONLY).getFirst().videoStatus())
-                .isEqualTo("READY");
+        assertThat(movieService.summaries(List.of(uuid(1)), MovieVisibility.PUBLISHED_ONLY).getFirst()
+                .availability().label()).isEqualTo("PLAYABLE");
     }
 
     @Test
@@ -890,7 +890,8 @@ class MovieServiceTest {
         // Equal creation times fall back to the id, descending.
         assertThat(ids).containsExactly(uuid(4), uuid(3), uuid(2), uuid(1));
         assertThat(first.getContent().get(1)).isEqualTo(new MovieSummary(
-                uuid(3), "Phim 3", "phim-3", "Mô tả", null, List.of("Hài", "Hành Động"), PUBLISHED, null));
+                uuid(3), "Phim 3", "phim-3", "Mô tả", null, List.of("Hài", "Hành Động"), PUBLISHED,
+                com.vodplatform.catalog.persistence.ContentType.MOVIE, null, VideoStatusLookup.Availability.EMPTY));
     }
 
     @Test
@@ -1050,16 +1051,16 @@ class MovieServiceTest {
         Page<MovieSummary> published = movieService.listPublished(null, null, 0, 10, MovieSort.LATEST);
 
         assertThat(videoStatusLookup.calls).containsExactly(List.of(uuid(2), uuid(1)));
-        assertThat(published.getContent()).extracting(MovieSummary::id, MovieSummary::videoStatus)
-                .containsExactly(tuple(uuid(2), null), tuple(uuid(1), "READY"));
-        assertThat(MovieSummaryResponse.of(published.getContent().get(1)).videoStatus()).isEqualTo("READY");
+        assertThat(published.getContent()).extracting(MovieSummary::id, summary -> summary.availability().label())
+                .containsExactly(tuple(uuid(2), "UNAVAILABLE"), tuple(uuid(1), "PLAYABLE"));
+        assertThat(MovieSummaryResponse.of(published.getContent().get(1)).availability()).isEqualTo("PLAYABLE");
 
         videoStatusLookup.calls.clear();
         Page<MovieSummary> admin = movieService.listForAdmin(null, 0, 2, MovieSort.LATEST);
 
         assertThat(videoStatusLookup.calls).containsExactly(List.of(uuid(3), uuid(2)));
-        assertThat(admin.getContent()).extracting(MovieSummary::id, MovieSummary::videoStatus)
-                .containsExactly(tuple(uuid(3), "QUEUED"), tuple(uuid(2), null));
+        assertThat(admin.getContent()).extracting(MovieSummary::id, summary -> summary.availability().label())
+                .containsExactly(tuple(uuid(3), "PROCESSING"), tuple(uuid(2), "UNAVAILABLE"));
     }
 
     @Test
@@ -1072,13 +1073,13 @@ class MovieServiceTest {
         MovieDetail detail = movieService.getMovie(created.id(), MovieVisibility.ANY_STATUS);
 
         assertThat(detail.videoStatus()).isEqualTo("READY");
-        assertThat(MovieDetailResponse.of(detail).videoStatus()).isEqualTo("READY");
+        assertThat(MovieDetailResponse.of(detail).episode().videoStatus()).isEqualTo("READY");
         assertThat(videoStatusLookup.calls).containsExactly(List.of(created.id()));
         videoStatusLookup.calls.clear();
         MovieDetail updated = movieService.update(created.id(), new MovieRequestBuilder().title("Phim Mới").build());
 
         assertThat(updated.videoStatus()).isEqualTo("READY");
-        assertThat(MovieDetailResponse.of(updated).videoStatus()).isEqualTo("READY");
+        assertThat(MovieDetailResponse.of(updated).episode().videoStatus()).isEqualTo("READY");
         assertThat(videoStatusLookup.calls).containsExactly(List.of(created.id()));
     }
 
@@ -1186,14 +1187,14 @@ class MovieServiceTest {
     private static void assertSlugConflict(MovieSlugConflictException conflict) {
         assertThat(conflict).isNotNull();
         assertThat(conflict.getStatus()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(conflict.getCode()).isEqualTo("MOVIE_SLUG_CONFLICT");
+        assertThat(conflict.getCode()).isEqualTo("TITLE_SLUG_CONFLICT");
     }
 
     private static void assertMovieNotFound(ApiException exception) {
         assertThat(exception).isInstanceOf(MovieNotFoundException.class);
         assertThat(exception.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(exception.getCode()).isEqualTo("MOVIE_NOT_FOUND");
-        assertThat(exception.getMessage()).isEqualTo("Movie not found");
+        assertThat(exception.getCode()).isEqualTo("TITLE_NOT_FOUND");
+        assertThat(exception.getMessage()).isEqualTo("Title not found");
         assertThat(exception.getFieldErrors()).isEmpty();
     }
 

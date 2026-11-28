@@ -75,6 +75,17 @@ public class Movie {
     @Column(name = "status", nullable = false, length = 20)
     private MovieStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "content_type", nullable = false, length = 20)
+    private ContentType contentType;
+
+    @Column(name = "part_label", length = 100)
+    private String partLabel;
+
+    @OneToMany(mappedBy = "title", cascade = {CascadeType.PERSIST, CascadeType.MERGE})
+    @OrderBy("ordinal ASC")
+    private List<Episode> episodes = new ArrayList<>();
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -115,6 +126,8 @@ public class Movie {
         this.status = Objects.requireNonNull(status, "status");
         this.createdAt = Objects.requireNonNull(createdAt, "createdAt");
         this.updatedAt = createdAt;
+        this.contentType = ContentType.MOVIE;
+        this.episodes.add(new Episode(this));
     }
 
     /**
@@ -259,6 +272,23 @@ public class Movie {
 
     public MovieStatus getStatus() {
         return status;
+    }
+
+    public ContentType getContentType() {
+        return contentType;
+    }
+
+    public String getPartLabel() {
+        return partLabel;
+    }
+
+    public void setPartLabel(String partLabel) {
+        this.partLabel = partLabel;
+    }
+
+    /** The single episode of a {@code MOVIE} title (ADR-013 D1), or null for any other type. */
+    public Episode movieEpisode() {
+        return contentType == ContentType.MOVIE ? episodes.getFirst() : null;
     }
 
     public Instant getCreatedAt() {

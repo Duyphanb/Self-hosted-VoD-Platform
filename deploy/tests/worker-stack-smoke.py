@@ -155,7 +155,7 @@ class Stack:
             return response.status, response.headers, content
 
 
-def verify_hls(stack, movie, asset, token):
+def verify_hls(stack, movie, episode, asset, token):
     """Probe the real edge and scoped backend storage; never include URLs or bodies in failures."""
     master = f"/hls/video-assets/{asset}/master.m3u8"
     status, headers, body = stack.raw_request(master, token)
@@ -163,7 +163,7 @@ def verify_hls(stack, movie, asset, token):
           "DRAFT HLS must be hidden with 404")
     check(headers.get("Cache-Control") == "no-store", "DRAFT HLS cache policy")
     stack.sql(f"UPDATE titles SET status='PUBLISHED', updated_at=now() WHERE id='{movie}';")
-    status, playback = stack.request(f"/api/v1/movies/{movie}/playback", token)
+    status, playback = stack.request(f"/api/v1/episodes/{episode}/playback", token)
     check(status == 200 and playback.get("videoAssetId") == asset and playback.get("hlsManifestUrl") == master,
           "Playback must select the worker's READY asset")
     status, headers, body = stack.raw_request(master, token)
@@ -252,16 +252,21 @@ def end_to_end(stack, image, pids_limit, timeout):
 
     token = admin_token()
 
-    movie = uuid.uuid4()
-    stack.sql("INSERT INTO titles (id, title, slug, description, status, created_at, updated_at) VALUES "
-              f"('{movie}', 'Worker stack smoke {movie.hex[:8]}', 'worker-stack-smoke-{movie}', "
-              "'Issue 5.8 worker stack smoke fixture.', 'DRAFT', now(), now());")
+    suffix = uuid.uuid4().hex[:8]
+    movie_payload = {"title": f"Worker stack smoke {suffix}", "slug": f"worker-stack-smoke-{suffix}",
+                     "description": "Issue 5.8 worker stack smoke fixture.", "genres": ["Smoke"],
+                     "people": [], "status": "DRAFT", "contentType": "MOVIE"}
+    status, created = stack.request("/api/v1/admin/titles", token, json.dumps(movie_payload).encode(),
+                                    "application/json")
+    check(status == 201 and created and created.get("episode"), "Draft title and single episode were not created")
+    movie = uuid.UUID(created["id"])
+    episode = uuid.UUID(created["episode"]["id"])
     with tempfile.TemporaryDirectory(prefix="vod-worker-smoke-") as directory:
         directory = os.path.realpath(directory)
         os.chmod(directory, 0o777)
         clip = generate_clip(image, directory)
     content_type, body = multipart("file", "clip.mp4", "video/mp4", clip)
-    status, accepted = stack.request(f"/api/v1/admin/movies/{movie}/video", token, body, content_type, timeout=120)
+    status, accepted = stack.request(f"/api/v1/admin/episodes/{episode}/video", token, body, content_type, timeout=120)
     check(status == 202 and accepted and accepted.get("status") == "QUEUED", f"Upload was not accepted ({status})")
     asset = str(uuid.UUID(accepted["videoAssetId"]))
     print(f"PASS clip of {len(clip)} bytes accepted through Nginx as asset {asset}", flush=True)
@@ -293,14 +298,14 @@ def end_to_end(stack, image, pids_limit, timeout):
 
     # Job polling can outlast the access token. Authenticate the independent read phase freshly.
     token = admin_token()
-    status, detail = stack.request(f"/api/v1/movies/{movie}", token)
-    check(status == 200 and detail and detail.get("videoStatus") == "READY", "The movie does not report READY")
+    status, detail = stack.request(f"/api/v1/admin/titles/{movie}", token)
+    check(status == 200 and detail and detail["episode"]["videoStatus"] == "READY", "The episode does not report READY")
     leftovers = stack.exec(stack.worker, 'find "$WORKER_TEMP_DIR" -mindepth 1 -maxdepth 1 -name "job-*"',
                            "job directories").strip()
     check(leftovers == "", "A job directory remains in WORKER_TEMP_DIR")
     print("PASS movie reports videoStatus READY and the worker removed its job directory", flush=True)
 
-    verify_hls(stack, movie, asset, token)
+    verify_hls(stack, movie, episode, asset, token)
 
     peak = pids_peak(stack)
     if peak is None:

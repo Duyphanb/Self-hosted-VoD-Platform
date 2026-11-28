@@ -43,8 +43,8 @@ export function MovieDetails({ movie }: { movie: MovieDetail }) {
           <MetadataField label="Availability">
             <div className="flex flex-wrap items-center gap-3">
               <VideoStatusBadge status={movie.videoStatus} />
-              {availability.canWatch && movie.status === 'PUBLISHED' ? (
-                <Link className={primaryButtonClass} to={`/movies/${movie.id}/watch`}>Watch</Link>
+              {availability.canWatch && movie.status === 'PUBLISHED' && movie.episode ? (
+                <Link className={primaryButtonClass} to={`/watch/${movie.episode.id}`}>Watch</Link>
               ) : null}
             </div>
           </MetadataField>
@@ -127,7 +127,7 @@ function MovieAdministration({ movie }: { movie: MovieDetail }) {
         <MetadataField label="Slug">{movie.slug}</MetadataField>
         <MetadataField label="Video status">{movie.videoStatus ?? 'None'}</MetadataField>
       </dl>
-      <Link className={`${secondaryButtonClass} justify-self-start`} to={`/admin/movies/${movie.id}/edit`}>Edit movie</Link>
+      <Link className={`${secondaryButtonClass} justify-self-start`} to={`/admin/titles/${movie.id}/edit`}>Edit movie</Link>
     </section>
   );
 }

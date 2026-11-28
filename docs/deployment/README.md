@@ -126,7 +126,7 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
 
    Then check before starting anything:
    - `flyway_schema_history` shows version 7 as successful;
-   - the schema matches the committed snapshot:
+   - the schema matches the snapshot from the V7 checkout:
      `python3 deploy/tests/schema-snapshot.py --container <postgres container> --user <owner> --database <db>`;
    - the row counts of the renamed tables equal those recorded in step 4;
    - the runtime roles keep exactly their table grants (the privilege query in
@@ -154,6 +154,68 @@ stack for #259. Set `C` to the Compose command of the deployment, as in
      from the backend, not the 503 of step 1.
 
    Once the new backend or worker has started, the only way back is forward.
+
+## Episode Cutover Upgrade (Flyway V8)
+
+Issue 7.2 (#260) adds `episodes` and re-keys `video_assets`, `playback_progress` and `watch_history` from the title to
+its episode. The V8 backend cannot run against V7 and the reverse, the worker is drained for the same reason as in V7,
+and the Nginx upload location in `deploy/nginx/nginx.conf` moves from `/api/v1/admin/movies/{id}/video` to
+`/api/v1/admin/episodes/{id}/video`. The backend, worker, Nginx configuration and SPA of V8 therefore ship as one
+release. Follow the [V7 procedure](#catalog-rename-upgrade-flyway-v7) with the differences below. This sequence was
+rehearsed on a disposable stack for #260.
+
+**Before the window**
+
+- Record the commit of the running release (V7) and tag the image of each running service `pre-v8`, as for V7.
+- Build the V8 images without switching the deployment checkout. Check out the V8 release in a separate directory and
+  run `docker compose --env-file <the deployment's env file> -p "$PROJECT" -f <V8 directory>/deploy/docker-compose.yml
+  build backend worker frontend`. The new images take the project's tags, while the running containers keep the V7
+  images. The deployment checkout stays on V7 until Nginx is stopped: Compose bind-mounts `nginx.conf` as a single
+  file, and a Git checkout replaces that file with a new one, which a running container does not see. A fence written
+  into the V8 file would then never reach the V7 edge.
+
+**The window**
+
+1. **Stop new uploads** as for V7, in the V7 file, whose upload location is
+   `location ~ ^/api/v1/admin/movies/[^/]+/video$`.
+2. **Stop the edge and the backend**, and 3. **drain the worker**, as for V7. Record the outbox jobs (`QUEUED` with
+   `published_at IS NULL`); the V8 relay publishes them after the decision.
+4. **Record, dump and prove the restore** as for V7. Record the row counts of `titles`, `title_genres`,
+   `title_credits`, `ratings`, `watchlist_items`, `video_assets`, `encoding_jobs`, `playback_progress` and
+   `watch_history`. The restored dump must show a Flyway history ending at 7.
+5. **Switch the checkout and apply the migration alone.**
+   - Copy the saved V7 Nginx configuration back in place, so the working tree is clean, and switch the deployment
+     checkout to the V8 release. Nginx is stopped, so nothing reads the file until step 6.
+   - Run `$C run --rm --no-deps flyway`. V8 runs in one transaction, so a failed V8 leaves V7 unchanged. If only the
+     `afterMigrate` callback fails, run the same command again while every writer is still stopped.
+
+   Then check before starting anything:
+   - `flyway_schema_history` shows version 8 as successful;
+   - the schema matches the snapshot of the V8 checkout (`schema-snapshot.py`, as for V7);
+   - the row counts equal those recorded in step 4;
+   - every title has exactly one episode, at ordinal 1, `PUBLISHED`, with its own UUID, and `content_type` is
+     `MOVIE`: `SELECT count(*) FROM titles t LEFT JOIN episodes e ON e.title_id = t.id WHERE e.id IS NULL OR e.id =
+     t.id OR e.ordinal <> 1 OR e.status <> 'PUBLISHED' OR t.content_type <> 'MOVIE'` returns 0;
+   - the runtime roles keep exactly their table grants (the privilege query in
+     `deploy/tests/episode-cutover-migration-smoke.py`, with the deployment's role names), and the backend role, not
+     the worker role, can read the view `current_episode_assets`.
+6. **Decide here,** before any V8 backend or worker runs.
+   - **Roll forward** if step 5 passed: start with the same two `--no-deps` commands as for V7. Nginx now reads the
+     V8 configuration of the checkout. Then check:
+     - the outbox jobs of step 3 get `published_at` and finish;
+     - an unauthenticated upload `POST` to `/api/v1/admin/episodes/{id}/video` gets 401 from the backend;
+     - the removed path `/api/v1/admin/movies/{id}/video` stores nothing: a multipart body within the 1 MiB edge
+       limit gets 400 `MALFORMED_REQUEST` and a larger one 413.
+   - **Roll back** if anything in step 5 failed: restore the dump as for V7, switch the checkout back to the recorded
+     V7 commit, which also brings back the V7 Nginx configuration, point the image tags back to `pre-v8`, and start
+     with the same two commands.
+
+   Once a V8 backend or worker has started, the only way back is forward: PostgreSQL, the broker and object storage
+   then move together. Never collapse episodes back into movies and never delete media.
+
+An admin tab of the V7 SPA left open across the window sends no upload body to the removed path: its upload first
+reads `GET /api/v1/movies/{id}`, which V8 answers with 404, so it reports that the movie was not found. Reloading the
+tab loads the V8 SPA. Old `/movies/...` bookmarks redirect to the new routes.
 
 ## First Administrator
 
@@ -687,23 +749,20 @@ For an authorized purge, stop uploads/retries, the backend relay and worker, and
 ```sql
 WITH ranked AS (
     SELECT a.*, row_number() OVER (
-        PARTITION BY movie_id ORDER BY created_at DESC, id DESC
+        PARTITION BY episode_id ORDER BY created_at DESC, id DESC
     ) AS newest_rank
     FROM video_assets a
-), current_ready AS (
-    SELECT DISTINCT ON (movie_id) movie_id, id
-    FROM video_assets WHERE status = 'READY'
-    ORDER BY movie_id, created_at DESC, id DESC
 )
-SELECT a.id, a.movie_id, a.status, a.raw_bucket, a.raw_object_key,
+SELECT a.id, e.title_id, a.episode_id, a.status, a.raw_bucket, a.raw_object_key,
        a.hls_bucket, a.hls_master_object_key
 FROM ranked a
-JOIN titles m ON m.id = a.movie_id
-LEFT JOIN current_ready c ON c.movie_id = a.movie_id
-WHERE m.status <> 'ARCHIVED'
-  AND ((a.status = 'READY' AND a.id IS DISTINCT FROM c.id)
+JOIN episodes e ON e.id = a.episode_id
+JOIN titles t ON t.id = e.title_id
+LEFT JOIN current_episode_assets c ON c.episode_id = a.episode_id
+WHERE t.status <> 'ARCHIVED' AND e.status <> 'ARCHIVED'
+  AND ((a.status = 'READY' AND a.id IS DISTINCT FROM c.asset_id)
        OR (a.status = 'FAILED' AND a.newest_rank > 1))
-ORDER BY a.movie_id, a.created_at, a.id;
+ORDER BY a.episode_id, a.created_at, a.id;
 ```
 
 Exclude every archived movie, current asset, newest FAILED raw and in-flight asset from deletion. Re-run the candidate query after quiescing and immediately before deletion. For each reviewed asset, enumerate attempts from DB rather than object-list guesses:

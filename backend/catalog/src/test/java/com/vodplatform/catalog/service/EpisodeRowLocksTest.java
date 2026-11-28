@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.fail;
 
 import com.vodplatform.catalog.config.CatalogConfiguration;
-import com.vodplatform.catalog.exception.MovieNotFoundException;
+import com.vodplatform.catalog.exception.EpisodeNotFoundException;
 import com.vodplatform.catalog.persistence.Movie;
 import com.vodplatform.catalog.persistence.MovieRepository;
 import com.vodplatform.catalog.persistence.MovieStatus;
@@ -34,15 +34,16 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** The public lock boundary joins its caller's transaction and serializes competing media writes. */
 @DataJpaTest
-@ContextConfiguration(classes = {CatalogConfiguration.class, MovieRowLocks.class})
+@ContextConfiguration(classes = {CatalogConfiguration.class, EpisodeRowLocks.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-class MovieRowLocksTest {
+class EpisodeRowLocksTest {
 
     private static final long TIMEOUT_SECONDS = 20;
     private final UUID movieId = UUID.randomUUID();
+    private UUID episodeId;
 
     @Autowired
-    private MovieRowLocks locks;
+    private EpisodeRowLocks locks;
 
     @Autowired
     private MovieRepository movies;
@@ -55,6 +56,7 @@ class MovieRowLocksTest {
 
     @AfterEach
     void cleanUp() {
+        new JdbcTemplate(dataSource).update("delete from episodes where title_id=?", movieId);
         movies.deleteById(movieId);
     }
 
@@ -65,20 +67,20 @@ class MovieRowLocksTest {
     }
 
     @Test
-    void missingMovieUsesTheCatalogNotFoundOutcome() {
-        assertThatExceptionOfType(MovieNotFoundException.class)
+    void missingEpisodeUsesTheCatalogNotFoundOutcome() {
+        assertThatExceptionOfType(EpisodeNotFoundException.class)
                 .isThrownBy(() -> transaction().execute(status -> locks.lockForMediaWrite(movieId)));
     }
 
     @ParameterizedTest
     @EnumSource(MovieStatus.class)
-    void locksMoviesInEveryStatus(MovieStatus status) {
+    void locksEpisodesRegardlessOfTitleStatus(MovieStatus status) {
         insertMovie(status);
 
-        LockedMovie locked = transaction().execute(tx -> locks.lockForMediaWrite(movieId));
+        LockedEpisode locked = transaction().execute(tx -> locks.lockForMediaWrite(episodeId));
 
-        assertThat(locked.movieId()).isEqualTo(movieId);
-        assertThat(locked.status()).isEqualTo(status);
+        assertThat(locked.episodeId()).isEqualTo(episodeId);
+        assertThat(locked.titleId()).isEqualTo(movieId);
     }
 
     @Test
@@ -90,21 +92,23 @@ class MovieRowLocksTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<?> holder = executor.submit(() -> transaction().executeWithoutResult(tx -> {
-                locks.lockForMediaWrite(movieId);
-                jdbc.update("update titles set status = 'PUBLISHED' where id = ?", movieId);
+                locks.lockForMediaWrite(episodeId);
+                jdbc.update("update episodes set status = 'ARCHIVED' where id = ?", episodeId);
                 holderReady.countDown();
                 await(releaseHolder);
             }));
             assertThat(holderReady.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
-            Future<LockedMovie> contender = executor.submit(
-                    () -> transaction().execute(tx -> locks.lockForMediaWrite(movieId)));
+            Future<String> contender = executor.submit(() -> transaction().execute(tx -> {
+                locks.lockForMediaWrite(episodeId);
+                return jdbc.queryForObject("select status from episodes where id=?", String.class, episodeId);
+            }));
 
             awaitBlocked(jdbc);
             assertThat(contender.isDone()).isFalse();
             releaseHolder.countDown();
             holder.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
-            assertThat(contender.get(TIMEOUT_SECONDS, TimeUnit.SECONDS).status()).isEqualTo(MovieStatus.PUBLISHED);
+            assertThat(contender.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo("ARCHIVED");
         } finally {
             releaseHolder.countDown();
             executor.shutdownNow();
@@ -113,8 +117,9 @@ class MovieRowLocksTest {
     }
 
     private void insertMovie(MovieStatus status) {
-        transaction().executeWithoutResult(tx -> movies.saveAndFlush(new Movie(
-                movieId, "Phim", "media-lock-" + movieId, "Mô tả", null, null, status, Instant.EPOCH)));
+        episodeId = transaction().execute(tx -> movies.saveAndFlush(new Movie(
+                movieId, "Phim", "media-lock-" + movieId, "Mô tả", null, null, status, Instant.EPOCH))
+                .movieEpisode().getId());
     }
 
     private TransactionTemplate transaction() {
@@ -139,12 +144,12 @@ class MovieRowLocksTest {
                     "select executing_statement from information_schema.sessions"
                             + " where session_state = 'BLOCKED' and blocker_id is not null", String.class)
                     .stream().map(sql -> sql.toLowerCase(Locale.ROOT))
-                    .anyMatch(sql -> sql.contains(" from titles ") && sql.contains(" for update"));
+                    .anyMatch(sql -> sql.contains(" from episodes ") && sql.contains(" for update"));
             if (blocked) {
                 return;
             }
             Thread.sleep(10);
         }
-        fail("The competing media transaction never waited for the movie row lock");
+        fail("The competing media transaction never waited for the episode row lock");
     }
 }

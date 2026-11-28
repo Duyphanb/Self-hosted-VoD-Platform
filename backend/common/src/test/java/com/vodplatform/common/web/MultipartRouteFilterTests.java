@@ -33,7 +33,7 @@ import java.util.stream.Stream;
 class MultipartRouteFilterTests {
 
     private static final String UPLOAD =
-            "/api/v1/admin/movies/6f1d2a4e-8c3b-4a5f-9e7d-1b2c3d4e5f60/video";
+            "/api/v1/admin/episodes/6f1d2a4e-8c3b-4a5f-9e7d-1b2c3d4e5f60/video";
 
     private final JsonMapper mapper = JsonMapper.builder().build();
 

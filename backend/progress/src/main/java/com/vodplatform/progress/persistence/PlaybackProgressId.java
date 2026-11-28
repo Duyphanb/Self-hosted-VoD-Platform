@@ -6,32 +6,32 @@ import java.io.Serializable;
 import java.util.Objects;
 import java.util.UUID;
 
-/** V1's (user_id, movie_id) primary key; no cross-module entity associations. */
+/** V1's (user_id, episode_id) primary key; no cross-module entity associations. */
 @Embeddable
 public class PlaybackProgressId implements Serializable {
 
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
-    @Column(name = "movie_id", nullable = false)
-    private UUID movieId;
+    @Column(name = "episode_id", nullable = false)
+    private UUID episodeId;
 
     protected PlaybackProgressId() {
     }
 
-    public PlaybackProgressId(UUID userId, UUID movieId) {
+    public PlaybackProgressId(UUID userId, UUID episodeId) {
         this.userId = Objects.requireNonNull(userId, "userId");
-        this.movieId = Objects.requireNonNull(movieId, "movieId");
+        this.episodeId = Objects.requireNonNull(episodeId, "episodeId");
     }
 
     @Override
     public boolean equals(Object other) {
         return this == other || other instanceof PlaybackProgressId that
-                && Objects.equals(userId, that.userId) && Objects.equals(movieId, that.movieId);
+                && Objects.equals(userId, that.userId) && Objects.equals(episodeId, that.episodeId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(userId, movieId);
+        return Objects.hash(userId, episodeId);
     }
 }

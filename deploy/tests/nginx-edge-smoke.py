@@ -22,7 +22,7 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
-UPLOAD = "/api/v1/admin/movies/11111111-1111-1111-1111-111111111111/video"
+UPLOAD = "/api/v1/admin/episodes/11111111-1111-1111-1111-111111111111/video"
 MIB = 1024 * 1024
 SECURITY_HEADERS = {"x-content-type-options": "nosniff", "x-frame-options": "DENY",
                     "referrer-policy": "no-referrer"}
@@ -144,7 +144,7 @@ def exercise(port):
                                            ("localhost", "localhost", 80),
                                            ("[2001:db8::1]:8088", "[2001:db8::1]", 8088),
                                            ("[2001:db8::1]", "[2001:db8::1]", 80)):
-        for path in ("/api/v1/movies", UPLOAD, "/hls/video-assets/smoke/master.m3u8", "/actuator/health"):
+        for path in ("/api/v1/titles", UPLOAD, "/hls/video-assets/smoke/master.m3u8", "/actuator/health"):
             status, headers, body = request(port, path, headers={
                 "Host": authority, "X-Smoke-Echo-Headers": "yes",
                 "X-Forwarded-For": "198.51.100.1, 203.0.113.2", "X-Forwarded-Host": "forged.example",
@@ -159,11 +159,11 @@ def exercise(port):
             assert payload["forwardedProto"] == "http" and payload["forwarded"] is None, "Forged scheme/Forwarded survived"
     print("PASS all backend routes overwrite forged forwarded headers; published/default ports and bracketed IPv6", flush=True)
 
-    for path in ("/api/v1/auth/login", "/api/v1/movies", UPLOAD + "/", UPLOAD + "s",
+    for path in ("/api/v1/auth/login", "/api/v1/titles", UPLOAD + "/", UPLOAD + "s",
                  UPLOAD.replace("/video", "/VIDEO")):
         assert_edge_error(header_only_request(port, path, MIB + 1), 413, "PAYLOAD_TOO_LARGE")
     normal = b"a" * MIB
-    status, headers, body = request(port, "/api/v1/movies", normal, method="POST")
+    status, headers, body = request(port, "/api/v1/titles", normal, method="POST")
     assert status == 200 and json.loads(body)["bytes"] == MIB, "Exactly 1 MiB ordinary request was rejected"
     assert_security(headers)
     assert_edge_error(header_only_request(port, UPLOAD, 2048 * MIB + 1), 413, "PAYLOAD_TOO_LARGE")

@@ -9,6 +9,7 @@ import { AuthProvider } from '../../auth/AuthContext';
 import * as authApi from '../../auth/authApi';
 import { AUTH_GENERATION_STORAGE_KEY, createAuthSession } from '../../auth/authStorage';
 import type { MovieSummary, PlaybackProgress } from '../../movies/moviesApi';
+import { continueFixture, filmEpisodeId } from '../../../test/titleWireFixture';
 import { progressKeys } from '../continueWatchingQueries';
 
 const FIRST_MOVIE_ID = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
@@ -83,8 +84,8 @@ describe('ContinueWatchingPage through AppRoutes', () => {
       renderPage();
 
       const cards = await findCards();
-      expect(cards[0]).toHaveAttribute('href', `/movies/${FIRST_MOVIE_ID}/watch`);
-      expect(cards[1]).toHaveAttribute('href', `/movies/${SECOND_MOVIE_ID}/watch`);
+      expect(cards[0]).toHaveAttribute('href', `/watch/${filmEpisodeId(FIRST_MOVIE_ID)}`);
+      expect(cards[1]).toHaveAttribute('href', `/watch/${filmEpisodeId(SECOND_MOVIE_ID)}`);
       // The poster repeats the title but is hidden, so the title is read once.
       expect(cards[0]).toHaveAccessibleName('The Long Night Resume at 12:34 48 min left');
     });
@@ -128,7 +129,7 @@ describe('ContinueWatchingPage through AppRoutes', () => {
     });
 
     it('is reached from the primary navigation', async () => {
-      renderPage('/movies');
+      renderPage('/titles');
       const navigation = await screen.findByRole('navigation', { name: 'Primary navigation' }, LOAD_TIMEOUT);
 
       fireEvent.click(within(navigation).getByRole('link', { name: 'Continue watching' }));
@@ -173,7 +174,7 @@ describe('ContinueWatchingPage through AppRoutes', () => {
 
       expect(await screen.findByRole('heading', { level: 2, name: 'You are offline' }, LOAD_TIMEOUT))
         .toBeInTheDocument();
-      expect(screen.queryByText('Loading continue watching…')).not.toBeInTheDocument();
+      expect(screen.queryByText('Loading continue watchingâ€¦')).not.toBeInTheDocument();
       expect(listRequests()).toBe(0);
       act(() => {
         onlineManager.setOnline(true);
@@ -192,7 +193,7 @@ describe('ContinueWatchingPage through AppRoutes', () => {
 
       expect(await screen.findByRole('heading', { level: 2, name: 'Nothing to continue yet' }, LOAD_TIMEOUT))
         .toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Browse movies' })).toHaveAttribute('href', '/movies');
+      expect(screen.getByRole('link', { name: 'Browse movies' })).toHaveAttribute('href', '/titles');
       expect(screen.getByText('0 movies')).toBeInTheDocument();
     });
   });
@@ -445,20 +446,17 @@ function item(movieId: string, title: string, progress: Partial<PlaybackProgress
     posterUrl: null,
     genres: ['Drama'],
     averageRating: null,
-    status: 'PUBLISHED',
+    status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null,
     videoStatus: 'READY'
   };
-  return {
-    movie,
-    progress: {
-      movieId,
-      currentSeconds: 754,
-      durationSeconds: 3600,
-      finished: false,
-      lastPlayedAt: '2026-11-22T10:00:00Z',
-      ...progress
-    }
-  };
+  return continueFixture(movie, {
+    episodeId: filmEpisodeId(movieId),
+    currentSeconds: 754,
+    durationSeconds: 3600,
+    finished: false,
+    lastPlayedAt: '2026-11-22T10:00:00Z',
+    ...progress
+  });
 }
 
 function apiError(status: number, code: string, message: string): Response {

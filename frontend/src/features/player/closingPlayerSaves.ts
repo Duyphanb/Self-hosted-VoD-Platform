@@ -13,8 +13,8 @@ export const CLOSING_SAVE_WAIT_MS = 3_000;
 const closingSaves = new Map<string, Set<Promise<void>>>();
 
 /** Called by a player as it unmounts, with the promise that its saves are done. */
-export function registerClosingPlayerSaves(movieId: string, userId: string, saved: Promise<void>): void {
-  const key = closingKey(movieId, userId);
+export function registerClosingPlayerSaves(episodeId: string, userId: string, saved: Promise<void>): void {
+  const key = closingKey(episodeId, userId);
   const saves = closingSaves.get(key) ?? new Set<Promise<void>>();
   const doneOrExpired = new Promise<void>((resolve) => {
     const expiry = setTimeout(resolve, CLOSING_SAVE_WAIT_MS);
@@ -39,11 +39,11 @@ export function registerClosingPlayerSaves(movieId: string, userId: string, save
  * never waits, and an aborted request stops waiting at once.
  */
 export async function waitForClosingPlayerSaves(
-  movieId: string,
+  episodeId: string,
   userId: string | null,
   signal?: AbortSignal
 ): Promise<void> {
-  const saves = userId === null ? undefined : closingSaves.get(closingKey(movieId, userId));
+  const saves = userId === null ? undefined : closingSaves.get(closingKey(episodeId, userId));
   if (!saves || saves.size === 0 || signal?.aborted) {
     return;
   }
@@ -59,6 +59,6 @@ export async function waitForClosingPlayerSaves(
   }
 }
 
-function closingKey(movieId: string, userId: string): string {
-  return `${userId}:${movieId}`;
+function closingKey(episodeId: string, userId: string): string {
+  return `${userId}:${episodeId}`;
 }

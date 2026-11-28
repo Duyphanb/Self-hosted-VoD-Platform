@@ -19,9 +19,9 @@ public class PlaybackController {
         this.playback = playback;
     }
 
-    @GetMapping("/api/v1/movies/{movieId}/playback")
-    public PlaybackInfo getPlayback(@PathVariable UUID movieId,
+    @GetMapping("/api/v1/episodes/{episodeId}/playback")
+    public PlaybackInfo getPlayback(@PathVariable UUID episodeId,
                                     @AuthenticationPrincipal AuthenticatedUserPrincipal principal) {
-        return playback.getPlayback(movieId, principal.userId());
+        return playback.getPlayback(episodeId, principal.userId());
     }
 }

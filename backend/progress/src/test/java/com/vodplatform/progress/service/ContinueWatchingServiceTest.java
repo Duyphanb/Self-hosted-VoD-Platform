@@ -26,15 +26,15 @@ class ContinueWatchingServiceTest {
         Instant played = Instant.parse("2026-11-01T00:00:00Z");
         StoredProgress stored = new StoredProgress(40, 999, false, played);
         when(reader.find(user, MovieVisibility.PUBLISHED_ONLY)).thenReturn(List.of(
-                new ContinueWatchingReader.Selection(first, stored, 100),
-                new ContinueWatchingReader.Selection(hidden, stored, 100),
-                new ContinueWatchingReader.Selection(last, stored, 200)));
+                new ContinueWatchingReader.Selection(first, first, 1, "1", null, false, stored, 100),
+                new ContinueWatchingReader.Selection(hidden, hidden, 1, "1", null, false, stored, 100),
+                new ContinueWatchingReader.Selection(last, last, 1, "1", null, false, stored, 200)));
         // A concurrent archive made the middle movie disappear from the catalog batch read.
         when(catalog.summaries(List.of(first, hidden, last), MovieVisibility.PUBLISHED_ONLY))
                 .thenReturn(List.of(summary(last), summary(first)));
         var result = service.get(user);
-        assertThat(result).extracting(item -> item.movie().id()).containsExactly(first, last);
-        assertThat(result).extracting(item -> item.progress().movieId()).containsExactly(first, last);
+        assertThat(result).extracting(item -> item.title().id()).containsExactly(first, last);
+        assertThat(result).extracting(item -> item.progress().episodeId()).containsExactly(first, last);
         assertThat(result).extracting(item -> item.progress().durationSeconds()).containsExactly(100, 200);
         assertThat(result).allSatisfy(item -> {
             assertThat(item.progress().currentSeconds()).isEqualTo(40);
@@ -45,6 +45,8 @@ class ContinueWatchingServiceTest {
 
     private MovieSummary summary(UUID id) {
         return new MovieSummary(id, "Fixture", "fixture-" + id, "Fixture", 2026,
-                List.of("Action"), MovieStatus.PUBLISHED, "READY");
+                List.of("Action"), MovieStatus.PUBLISHED,
+                com.vodplatform.catalog.persistence.ContentType.MOVIE, null,
+                new com.vodplatform.catalog.service.VideoStatusLookup.Availability(1, 1, false));
     }
 }

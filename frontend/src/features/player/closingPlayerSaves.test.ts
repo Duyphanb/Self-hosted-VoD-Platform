@@ -74,11 +74,11 @@ describe('waitForClosingPlayerSaves', () => {
     });
   });
 
-  function registerSave(movieId: string, userId: string): void {
+  function registerSave(episodeId: string, userId: string): void {
     const saved = new Promise<void>((resolve) => {
       releases.push(resolve);
     });
-    registerClosingPlayerSaves(movieId, userId, saved);
+    registerClosingPlayerSaves(episodeId, userId, saved);
   }
 });
 

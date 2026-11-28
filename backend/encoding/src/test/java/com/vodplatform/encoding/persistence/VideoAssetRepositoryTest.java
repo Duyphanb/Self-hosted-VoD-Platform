@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import com.vodplatform.catalog.config.CatalogConfiguration;
 import com.vodplatform.catalog.persistence.Movie;
 import com.vodplatform.catalog.persistence.MovieStatus;
-import com.vodplatform.catalog.service.MovieRowLocks;
+import com.vodplatform.catalog.service.EpisodeRowLocks;
 import com.vodplatform.encoding.config.EncodingConfiguration;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
@@ -28,19 +28,19 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ContextConfiguration;
 
 @DataJpaTest
-@ContextConfiguration(classes = {EncodingConfiguration.class, CatalogConfiguration.class, MovieRowLocks.class})
+@ContextConfiguration(classes = {EncodingConfiguration.class, CatalogConfiguration.class, EpisodeRowLocks.class})
 class VideoAssetRepositoryTest {
 
     @Autowired VideoAssetRepository assets;
     @Autowired EncodingJobRepository jobs;
-    @Autowired MovieRowLocks locks;
+    @Autowired EpisodeRowLocks locks;
     @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
 
     @Test
     void newestAndCurrentAreEmptyWithoutAssets() {
-        assertThat(assets.findNewestByMovieId(uuid(10))).isEmpty();
-        assertThat(assets.findCurrentReadyByMovieId(uuid(10))).isEmpty();
+        assertThat(assets.findNewestByEpisodeId(uuid(10))).isEmpty();
+        assertThat(assets.findCurrentReadyByEpisodeId(uuid(10))).isEmpty();
     }
 
     @Test
@@ -49,8 +49,9 @@ class VideoAssetRepositoryTest {
                 asset(uuid(1), uuid(10), VideoAssetStatus.FAILED, T0.plusSeconds(1)),
                 asset(uuid(100), uuid(20), VideoAssetStatus.QUEUED, T0.plusSeconds(2))));
 
-        assertThat(assets.findNewestByMovieId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(1));
-        assertThat(assets.findCurrentReadyByMovieId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(99));
+        assertThat(assets.findNewestByEpisodeId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(1));
+        assertThat(assets.findCurrentReadyByEpisodeId(uuid(10))).get()
+                .extracting(VideoAsset::getId).isEqualTo(uuid(99));
     }
 
     @Test
@@ -62,8 +63,8 @@ class VideoAssetRepositoryTest {
                 asset(higher, uuid(10), VideoAssetStatus.READY, T0),
                 asset(uuid(1), uuid(10), VideoAssetStatus.READY, T0.minusSeconds(1))));
 
-        assertThat(assets.findNewestByMovieId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(higher);
-        assertThat(assets.findCurrentReadyByMovieId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(higher);
+        assertThat(assets.findNewestByEpisodeId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(higher);
+        assertThat(assets.findCurrentReadyByEpisodeId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(higher);
     }
 
     @ParameterizedTest
@@ -73,8 +74,8 @@ class VideoAssetRepositoryTest {
                 asset(uuid(2), uuid(10), VideoAssetStatus.READY, T0.plusSeconds(1)),
                 asset(uuid(3), uuid(10), replacement, T0.plusSeconds(2))));
 
-        assertThat(assets.findCurrentReadyByMovieId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(2));
-        assertThat(assets.findNewestByMovieId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(3));
+        assertThat(assets.findCurrentReadyByEpisodeId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(2));
+        assertThat(assets.findNewestByEpisodeId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(3));
     }
 
     @Test
@@ -82,9 +83,9 @@ class VideoAssetRepositoryTest {
         assets.saveAllAndFlush(List.of(asset(uuid(1), uuid(10), VideoAssetStatus.FAILED, T0),
                 asset(uuid(2), uuid(10), VideoAssetStatus.QUEUED, T0.plusSeconds(1))));
 
-        assertThat(assets.findCurrentReadyByMovieId(uuid(10))).isEmpty();
+        assertThat(assets.findCurrentReadyByEpisodeId(uuid(10))).isEmpty();
         // Retry must inspect this newest result, never select an older FAILED row by status.
-        assertThat(assets.findNewestByMovieId(uuid(10))).get().extracting(VideoAsset::getStatus).isEqualTo(VideoAssetStatus.QUEUED);
+        assertThat(assets.findNewestByEpisodeId(uuid(10))).get().extracting(VideoAsset::getStatus).isEqualTo(VideoAssetStatus.QUEUED);
     }
 
     @Test
@@ -92,12 +93,12 @@ class VideoAssetRepositoryTest {
         assets.saveAllAndFlush(List.of(asset(uuid(1), uuid(10), VideoAssetStatus.READY, T0),
                 asset(uuid(2), uuid(10), VideoAssetStatus.FAILED, T0.plusSeconds(1))));
 
-        assertThat(assets.findNewestByMovieId(uuid(10))).get()
+        assertThat(assets.findNewestByEpisodeId(uuid(10))).get()
                 .satisfies(asset -> {
                     assertThat(asset.getId()).isEqualTo(uuid(2));
                     assertThat(asset.getStatus()).isEqualTo(VideoAssetStatus.FAILED);
                 });
-        assertThat(assets.findCurrentReadyByMovieId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(1));
+        assertThat(assets.findCurrentReadyByEpisodeId(uuid(10))).get().extracting(VideoAsset::getId).isEqualTo(uuid(1));
     }
 
     @Test
@@ -107,10 +108,10 @@ class VideoAssetRepositoryTest {
                 asset(uuid(3), uuid(10), VideoAssetStatus.READY, T0.plusSeconds(1)),
                 asset(uuid(4), uuid(20), VideoAssetStatus.FAILED, T0.plusSeconds(2))));
 
-        var first = assets.findByMovieId(uuid(10), PageRequest.of(0, 2, VideoAssetSort.NEWEST_FIRST));
+        var first = assets.findByEpisodeId(uuid(10), PageRequest.of(0, 2, VideoAssetSort.NEWEST_FIRST));
         assertThat(first.getTotalElements()).isEqualTo(3);
         assertThat(first.getContent()).extracting(VideoAsset::getId).containsExactly(uuid(3), uuid(2));
-        assertThat(assets.findByMovieId(uuid(10), PageRequest.of(1, 2, VideoAssetSort.NEWEST_FIRST)).getContent())
+        assertThat(assets.findByEpisodeId(uuid(10), PageRequest.of(1, 2, VideoAssetSort.NEWEST_FIRST)).getContent())
                 .extracting(VideoAsset::getId).containsExactly(uuid(1));
         var failed = assets.findByStatus(VideoAssetStatus.FAILED, PageRequest.of(0, 2, VideoAssetSort.NEWEST_FIRST));
         assertThat(failed.getTotalElements()).isEqualTo(3);
@@ -122,8 +123,8 @@ class VideoAssetRepositoryTest {
     void advisoryInFlightCheckUsesTheExactFrozenPredicate(VideoAssetStatus status) {
         assets.saveAndFlush(asset(uuid(1), uuid(10), status, T0));
 
-        assertThat(assets.existsInFlightByMovieId(uuid(10))).isEqualTo(VideoAssetStatus.IN_FLIGHT.contains(status));
-        assertThat(assets.existsInFlightByMovieId(uuid(20))).isFalse();
+        assertThat(assets.existsInFlightByEpisodeId(uuid(10))).isEqualTo(VideoAssetStatus.IN_FLIGHT.contains(status));
+        assertThat(assets.existsInFlightByEpisodeId(uuid(20))).isFalse();
     }
 
     @Test
@@ -136,7 +137,7 @@ class VideoAssetRepositoryTest {
         Instant putFinishedAt = T0.plusSeconds(42).plusNanos(123_456_789);
         clock.set(putFinishedAt);
 
-        var locked = locks.lockForMediaWrite(movie.getId());
+        var locked = locks.lockForMediaWrite(movie.movieEpisode().getId());
         VideoAsset created = VideoAsset.queued(locked, prePutAssetId, "raw", "movie/asset.mp4", clock);
         assertThat(created.isNew()).isTrue();
         assets.saveAndFlush(created);
@@ -151,7 +152,7 @@ class VideoAssetRepositoryTest {
         Instant expected = Instant.parse("2026-10-01T08:00:42.123456Z");
         VideoAsset loaded = assets.findById(prePutAssetId).orElseThrow();
         assertThat(loaded.isNew()).isFalse();
-        assertThat(loaded.getMovieId()).isEqualTo(movie.getId());
+        assertThat(loaded.getEpisodeId()).isEqualTo(movie.movieEpisode().getId());
         assertThat(loaded.getCreatedAt()).isEqualTo(expected).isAfter(T0);
         assertThat(loaded.getUpdatedAt()).isEqualTo(expected);
         assertThat(loaded.getStatus()).isEqualTo(VideoAssetStatus.QUEUED);

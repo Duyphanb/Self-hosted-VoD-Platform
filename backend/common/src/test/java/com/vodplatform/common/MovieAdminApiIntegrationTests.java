@@ -73,8 +73,8 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * The admin movie writes ({@code POST /api/v1/movies}, {@code PUT} and {@code DELETE
- * /api/v1/movies/{movieId}}, Issue 3.5) through the assembled application: the bearer security
+ * The admin movie writes ({@code POST /api/v1/titles}, {@code PUT} and {@code DELETE
+ * /api/v1/titles/{movieId}}, Issue 3.5) through the assembled application: the bearer security
  * chain, the controller, the movie service and the test PostgreSQL. Every response is
  * also checked against the API contract.
  *
@@ -94,8 +94,8 @@ import tools.jackson.databind.node.ObjectNode;
 @Transactional
 class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
 
-    private static final String MOVIES = "/api/v1/movies";
-    private static final String ADMIN_MOVIES = "/api/v1/admin/movies";
+    private static final String MOVIES = "/api/v1/admin/titles";
+    private static final String VIEWER_TITLES = "/api/v1/titles";
     private static final Instant T0 = Instant.parse("2026-10-01T08:00:00Z");
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final JsonComparator STRICT_WITH_ANY_TIMESTAMP = JsonAssert.comparator(new CustomComparator(
@@ -253,7 +253,13 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
                 {
                   "id": "%s", "title": "Mắt Biếc", "slug": "mat-biec", "description": "Line one\\n\\tLine two",
                   "releaseYear": 2019, "posterUrl": null, "genres": ["Hành Động", "Tình Cảm"], "averageRating": null,
-                  "status": "PUBLISHED", "videoStatus": null, "maturityRating": "T13",
+                  "status": "PUBLISHED", "maturityRating": "T13",
+                  "contentType": "MOVIE", "partLabel": null, "episodeCount": 1,
+                  "playableEpisodeCount": 0, "availability": "UNAVAILABLE",
+                  "episode": {
+                    "id": "%s", "titleId": "%s", "ordinal": 1, "displayLabel": "1",
+                    "name": null, "videoStatus": null, "progress": null
+                  },
                   "people": [
                     {"personId": "%s", "name": "Victor Vũ", "role": "DIRECTOR"},
                     {"personId": "%s", "name": "Trúc Anh", "role": "ACTOR"},
@@ -261,14 +267,14 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
                   ],
                   "userRating": null, "inWatchlist": false
                 }
-                """.formatted(movieId, DIRECTOR, newPerson, DIRECTOR);
+                """.formatted(movieId, episodeId(movieId), movieId, DIRECTOR, newPerson, DIRECTOR);
         JsonAssert.comparator(JsonCompareMode.STRICT).assertIsMatch(expected, created);
 
         clearPersistenceContext();
         perform(get(MOVIES + "/" + movieId), admin)
                 .andExpect(status().isOk())
                 .andExpect(content().json(expected, JsonCompareMode.STRICT));
-        perform(get(MOVIES + "/" + movieId), bearerToken("ROLE_USER"))
+        perform(get(VIEWER_TITLES + "/" + movieId), bearerToken("ROLE_USER"))
                 .andExpect(status().isOk())
                 .andExpect(content().json(expected, JsonCompareMode.STRICT));
         assertThat(genreRepository.findAll()).extracting(Genre::getSlug).containsExactlyInAnyOrder("hanh-dong", "tinh-cam");
@@ -288,14 +294,29 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
 
+        UUID movieId = UUID.fromString(JsonPath.read(created, "$.id"));
         JsonAssert.comparator(JsonCompareMode.STRICT).assertIsMatch("""
                 {
                   "id": "%s", "title": "Mắt Biếc", "slug": "mat-biec", "description": "A story of first love.",
                   "releaseYear": null, "posterUrl": null, "genres": ["Tình Cảm"], "averageRating": null,
-                  "status": "DRAFT", "videoStatus": null, "maturityRating": null, "people": [],
+                  "status": "DRAFT", "maturityRating": null, "people": [],
+                  "contentType": "MOVIE", "partLabel": null, "episodeCount": 1,
+                  "playableEpisodeCount": 0, "availability": "UNAVAILABLE",
+                  "episode": {
+                    "id": "%s", "titleId": "%s", "ordinal": 1, "displayLabel": "1",
+                    "name": null, "videoStatus": null, "progress": null
+                  },
                   "userRating": null, "inWatchlist": false
                 }
-                """.formatted((String) JsonPath.read(created, "$.id")), created);
+                """.formatted(movieId, episodeId(movieId), movieId), created);
+    }
+
+    private UUID episodeId(UUID titleId) {
+        var episode = movieRepository.findById(titleId).orElseThrow().movieEpisode();
+        assertThat(episode.getId()).isNotEqualTo(titleId);
+        assertThat(episode.getOrdinal()).isEqualTo(1);
+        assertThat(episode.getStatus()).isEqualTo(MovieStatus.PUBLISHED);
+        return episode.getId();
     }
 
     // ---- update ----
@@ -324,14 +345,20 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
                 {
                   "id": "%s", "title": "Mắt Biếc (Bản Đặc Biệt)", "slug": "mat-biec-ban-dac-biet",
                   "description": "Updated.", "releaseYear": null, "posterUrl": null, "genres": ["Hành Động"],
-                  "averageRating": null, "status": "DRAFT", "videoStatus": null, "maturityRating": null,
+                  "averageRating": null, "status": "DRAFT", "maturityRating": null,
+                  "contentType": "MOVIE", "partLabel": null, "episodeCount": 1,
+                  "playableEpisodeCount": 0, "availability": "UNAVAILABLE",
+                  "episode": {
+                    "id": "%s", "titleId": "%s", "ordinal": 1, "displayLabel": "1",
+                    "name": null, "videoStatus": null, "progress": null
+                  },
                   "people": [
                     {"personId": "%s", "name": "Trúc Anh", "role": "DIRECTOR"},
                     {"personId": "%s", "name": "Victor Vũ", "role": "ACTOR"}
                   ],
                   "userRating": null, "inWatchlist": false
                 }
-                """.formatted(movieId, trucAnh, DIRECTOR);
+                """.formatted(movieId, episodeId(movieId), movieId, trucAnh, DIRECTOR);
         JsonAssert.comparator(JsonCompareMode.STRICT).assertIsMatch(expected, updated);
         // The name-only credit reused the person the create made instead of adding another one.
         assertThat(personRepository.findAllByNameIgnoringCase("trúc anh")).extracting(Person::getId).containsExactly(trucAnh);
@@ -526,10 +553,10 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
         for (String movieId : List.of("not-a-uuid", "a-b-c-d-e", "0000000a-000b-000c-000d-0000000000e")) {
             perform(json(put(MOVIES + "/" + movieId), VALID_BODY), admin)
                     .andExpect(status().isBadRequest())
-                    .andExpect(validationError("movieId", "must be a valid UUID"));
+                    .andExpect(validationError("titleId", "must be a valid UUID"));
             perform(delete(MOVIES + "/" + movieId), admin)
                     .andExpect(status().isBadRequest())
-                    .andExpect(validationError("movieId", "must be a valid UUID"));
+                    .andExpect(validationError("titleId", "must be a valid UUID"));
         }
     }
 
@@ -542,10 +569,10 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
 
         perform(json(put(MOVIES + "/" + missing), VALID_BODY), admin)
                 .andExpect(status().isNotFound())
-                .andExpect(apiError(404, "MOVIE_NOT_FOUND", "Movie not found", null));
+                .andExpect(apiError(404, "TITLE_NOT_FOUND", "Title not found", null));
         perform(delete(MOVIES + "/" + missing), admin)
                 .andExpect(status().isNotFound())
-                .andExpect(apiError(404, "MOVIE_NOT_FOUND", "Movie not found", null));
+                .andExpect(apiError(404, "TITLE_NOT_FOUND", "Title not found", null));
         assertThat(movieRepository.count()).isZero();
         assertThat(genreRepository.count()).isZero();
         assertThat(personRepository.count()).isZero();
@@ -564,7 +591,7 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
         for (String slug : List.of("existing-movie", "archived-movie")) {
             perform(json(post(MOVIES), body(movie -> movie.put("slug", slug))), admin)
                     .andExpect(status().isConflict())
-                    .andExpect(apiError(409, "MOVIE_SLUG_CONFLICT", "Slug is already used by another movie", null));
+                    .andExpect(apiError(409, "TITLE_SLUG_CONFLICT", "Slug is already used by another title", null));
         }
         UUID movieId = create(admin, VALID_BODY);
         perform(json(put(MOVIES + "/" + movieId), body(movie -> {
@@ -572,7 +599,7 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
             movie.putArray("genres").add("Kinh Dị");
         })), admin)
                 .andExpect(status().isConflict())
-                .andExpect(apiError(409, "MOVIE_SLUG_CONFLICT", "Slug is already used by another movie", null));
+                .andExpect(apiError(409, "TITLE_SLUG_CONFLICT", "Slug is already used by another title", null));
 
         clearPersistenceContext();
         // The conflicts wrote nothing: only the created movie and its new genre and person were added.
@@ -594,7 +621,7 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
         try {
             perform(json(post(MOVIES), body(movie -> movie.put("slug", "existing-movie"))), admin)
                     .andExpect(status().isConflict())
-                    .andExpect(apiError(409, "MOVIE_SLUG_CONFLICT", "Slug is already used by another movie", null));
+                    .andExpect(apiError(409, "TITLE_SLUG_CONFLICT", "Slug is already used by another title", null));
         } finally {
             // PostgreSQL aborts the transaction on a duplicate. Roll it back before fixture teardown.
             TestTransaction.end();
@@ -649,22 +676,22 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
         String admin = bearerToken("ROLE_ADMIN");
         String user = bearerToken("ROLE_USER");
         UUID movieId = create(admin, VALID_BODY);
-        perform(get(MOVIES + "/" + movieId), user).andExpect(status().isOk());
+        perform(get(VIEWER_TITLES + "/" + movieId), user).andExpect(status().isOk());
 
         perform(delete(MOVIES + "/" + movieId), admin).andExpect(status().isNoContent());
         clearPersistenceContext();
 
         MovieVisibilityRule.assertHiddenLikeMissing(
                 new MovieVisibilityRule.Fixtures(fixtures.published(), fixtures.draft(), movieId, fixtures.missing()),
-                id -> perform(get(MOVIES + "/" + id), user));
+                id -> perform(get(VIEWER_TITLES + "/" + id), user));
         perform(get(MOVIES + "/" + movieId), admin)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ARCHIVED"));
         for (String caller : List.of(user, admin)) {
-            perform(get(MOVIES), caller)
+            perform(get(VIEWER_TITLES), caller)
                     .andExpect(jsonPath("$.items[*].id").value(contains(fixtures.published().toString())));
         }
-        perform(get(ADMIN_MOVIES + "?status=ARCHIVED"), admin)
+        perform(get(MOVIES + "?status=ARCHIVED"), admin)
                 .andExpect(jsonPath("$.items[*].id")
                         .value(containsInAnyOrder(movieId.toString(), fixtures.archived().toString())));
     }
@@ -679,7 +706,7 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
 
         MovieVisibilityRule.assertHiddenLikeMissing(
                 new MovieVisibilityRule.Fixtures(fixtures.published(), movieId, fixtures.archived(), fixtures.missing()),
-                id -> perform(get(MOVIES + "/" + id), user));
+                id -> perform(get(VIEWER_TITLES + "/" + id), user));
         perform(get(MOVIES + "/" + movieId), admin).andExpect(jsonPath("$.status").value("DRAFT"));
 
         perform(json(put(MOVIES + "/" + movieId), body(movie -> movie.put("status", "ARCHIVED"))), admin)
@@ -688,16 +715,16 @@ class MovieAdminApiIntegrationTests implements PostgresTestDatabase {
         clearPersistenceContext();
         MovieVisibilityRule.assertHiddenLikeMissing(
                 new MovieVisibilityRule.Fixtures(fixtures.published(), fixtures.draft(), movieId, fixtures.missing()),
-                id -> perform(get(MOVIES + "/" + id), user));
+                id -> perform(get(VIEWER_TITLES + "/" + id), user));
 
         perform(json(put(MOVIES + "/" + movieId), VALID_BODY), admin)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PUBLISHED"));
         clearPersistenceContext();
-        perform(get(MOVIES + "/" + movieId), user)
+        perform(get(VIEWER_TITLES + "/" + movieId), user)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PUBLISHED"));
-        perform(get(MOVIES), user)
+        perform(get(VIEWER_TITLES), user)
                 .andExpect(jsonPath("$.items[*].id")
                         .value(containsInAnyOrder(movieId.toString(), fixtures.published().toString())));
     }

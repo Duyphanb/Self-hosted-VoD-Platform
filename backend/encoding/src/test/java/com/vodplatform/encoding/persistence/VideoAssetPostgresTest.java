@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.vodplatform.catalog.config.CatalogConfiguration;
-import com.vodplatform.catalog.service.LockedMovie;
-import com.vodplatform.catalog.service.MovieRowLocks;
+import com.vodplatform.catalog.service.LockedEpisode;
+import com.vodplatform.catalog.service.EpisodeRowLocks;
 import com.vodplatform.encoding.config.EncodingConfiguration;
 import com.vodplatform.encoding.service.EncodingVideoStatusLookup;
 import com.vodplatform.shared.time.TimeConfiguration;
@@ -53,7 +53,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @DataJpaTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @ContextConfiguration(classes = {EncodingConfiguration.class, CatalogConfiguration.class,
-        MovieRowLocks.class, EncodingVideoStatusLookup.class, TimeConfiguration.class})
+        EpisodeRowLocks.class, EncodingVideoStatusLookup.class, TimeConfiguration.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @EnabledIf("postgresConfigured")
 class VideoAssetPostgresTest {
@@ -65,7 +65,7 @@ class VideoAssetPostgresTest {
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private VideoAssetRepository assets;
     @Autowired private EncodingJobRepository jobs;
-    @Autowired private MovieRowLocks locks;
+    @Autowired private EpisodeRowLocks locks;
     @Autowired private EncodingVideoStatusLookup lookup;
     @Autowired private Clock appClock;
     @Autowired private EntityManager entityManager;
@@ -119,7 +119,12 @@ class VideoAssetPostgresTest {
     void cleanUp() throws InterruptedException {
         executor.shutdownNow();
         assertThat(executor.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
-        for (UUID movie : movies) jdbc.update("delete from titles where id = ?", movie);
+        for (UUID title : movies) {
+            jdbc.update("delete from video_assets where episode_id in "
+                    + "(select id from episodes where title_id=?)", title);
+            jdbc.update("delete from episodes where title_id=?", title);
+            jdbc.update("delete from titles where id=?", title);
+        }
     }
 
     @ParameterizedTest
@@ -134,9 +139,9 @@ class VideoAssetPostgresTest {
         }));
 
         assertThat(failure).isInstanceOf(DataIntegrityViolationException.class);
-        assertConstraint(failure, EncodingConstraints.VIDEO_ASSETS_MOVIE_IN_FLIGHT,
+        assertConstraint(failure, EncodingConstraints.VIDEO_ASSETS_EPISODE_IN_FLIGHT,
                 EncodingConstraints.VIDEO_ASSETS_RAW_OBJECT);
-        assertThat(jdbc.queryForObject("select count(*) from video_assets where movie_id = ?",
+        assertThat(jdbc.queryForObject("select count(*) from video_assets where episode_id = ?",
                 Integer.class, movie)).isEqualTo(1);
     }
 
@@ -152,13 +157,13 @@ class VideoAssetPostgresTest {
             Throwable failure = catchThrowable(() -> assets.saveAndFlush(duplicate));
             assertThat(failure).isInstanceOf(DataIntegrityViolationException.class);
             assertConstraint(failure, EncodingConstraints.VIDEO_ASSETS_RAW_OBJECT,
-                    EncodingConstraints.VIDEO_ASSETS_MOVIE_IN_FLIGHT);
+                    EncodingConstraints.VIDEO_ASSETS_EPISODE_IN_FLIGHT);
             // 4.4 must roll back and perform ambiguous-commit readback in a fresh transaction.
             Throwable aborted = catchThrowable(() -> jdbc.queryForObject("select 1", Integer.class));
             assertThat(sqlState(aborted)).isEqualTo("25P02");
             status.setRollbackOnly();
         });
-        assertThat(jdbc.queryForObject("select count(*) from video_assets where movie_id = ?",
+        assertThat(jdbc.queryForObject("select count(*) from video_assets where episode_id = ?",
                 Integer.class, secondMovie)).isZero();
     }
 
@@ -173,7 +178,7 @@ class VideoAssetPostgresTest {
                 entityManager.createNativeQuery("update video_assets set status = 'QUEUED' "
                         + "where id = :id and status = 'FAILED'")
                         .setParameter("id", failed).executeUpdate()));
-        assertConstraint(failure, EncodingConstraints.VIDEO_ASSETS_MOVIE_IN_FLIGHT,
+        assertConstraint(failure, EncodingConstraints.VIDEO_ASSETS_EPISODE_IN_FLIGHT,
                 EncodingConstraints.VIDEO_ASSETS_RAW_OBJECT);
         assertThat(jdbc.queryForObject("select status from video_assets where id = ?", String.class, failed))
                 .isEqualTo("FAILED");
@@ -188,11 +193,11 @@ class VideoAssetPostgresTest {
         fixture(movie, low, "FAILED", T0);
         fixture(movie, high, "QUEUED", T0);
 
-        assertThat(assets.findNewestByMovieId(movie)).get().extracting(VideoAsset::getId).isEqualTo(high);
-        assertThat(lookup.videoStatus(movie)).isEqualTo("QUEUED");
-        jdbc.update("update video_assets set status = 'READY' where movie_id = ?", movie);
-        assertThat(assets.findCurrentReadyByMovieId(movie)).get().extracting(VideoAsset::getId).isEqualTo(high);
-        assertThat(lookup.videoStatus(movie)).isEqualTo("READY");
+        assertThat(assets.findNewestByEpisodeId(movie)).get().extracting(VideoAsset::getId).isEqualTo(high);
+        assertThat(lookup.videoStatus(titleId(movie))).isEqualTo("QUEUED");
+        jdbc.update("update video_assets set status = 'READY' where episode_id = ?", movie);
+        assertThat(assets.findCurrentReadyByEpisodeId(movie)).get().extracting(VideoAsset::getId).isEqualTo(high);
+        assertThat(lookup.videoStatus(titleId(movie))).isEqualTo("READY");
     }
 
     @Test
@@ -214,14 +219,14 @@ class VideoAssetPostgresTest {
         fixture(newestFailed, newest, "FAILED", T0.plusSeconds(1));
         requested.add(newestFailed);
 
-        Map<UUID, String> statuses = lookup.videoStatuses(requested);
-        assertThat(statuses).doesNotContainKey(empty).containsEntry(newestFailed, "FAILED");
+        Map<UUID, String> statuses = lookup.videoStatuses(requested.stream().map(this::titleId).toList());
+        assertThat(statuses).doesNotContainKey(titleId(empty)).containsEntry(titleId(newestFailed), "FAILED");
         for (UUID movie : requested.subList(1, requested.size() - 1)) {
-            assertThat(statuses).containsEntry(movie, "READY");
+            assertThat(statuses).containsEntry(titleId(movie), "READY");
         }
-        assertThat(assets.findNewestByMovieId(newestFailed)).get()
+        assertThat(assets.findNewestByEpisodeId(newestFailed)).get()
                 .extracting(VideoAsset::getId).isEqualTo(newest).isNotEqualTo(olderFailed);
-        assertThat(assets.findCurrentReadyByMovieId(newestFailed)).isEmpty();
+        assertThat(assets.findCurrentReadyByEpisodeId(newestFailed)).isEmpty();
         assertThat(lookup.videoStatuses(List.of())).isEmpty();
     }
 
@@ -230,7 +235,7 @@ class VideoAssetPostgresTest {
     void aSingleAssetHasTheSameAvailabilityOnPostgres(String status) {
         UUID movie = movie();
         fixture(movie, UUID.randomUUID(), status, T0);
-        assertThat(lookup.videoStatus(movie)).isEqualTo(status);
+        assertThat(lookup.videoStatus(titleId(movie))).isEqualTo(status);
     }
 
     @Test
@@ -257,13 +262,13 @@ class VideoAssetPostgresTest {
         try {
             await(started);
             Instant holderTime = tx().execute(status -> {
-                LockedMovie lock = locks.lockForMediaWrite(movie);
+                LockedEpisode lock = locks.lockForMediaWrite(movie);
                 tryLock.countDown();
                 waitForLock(waiterPid.get());
                 // Terminal fixture represents the earlier completed asset, leaving room for the waiter.
                 Instant created = appClock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
                 assertThat(created).isAfter(waiterStart.get());
-                assets.saveAndFlush(new VideoAsset(UUID.randomUUID(), lock.movieId(), "raw-fixture",
+                assets.saveAndFlush(new VideoAsset(UUID.randomUUID(), lock.episodeId(), "raw-fixture",
                         UUID.randomUUID().toString(), null, null, VideoAssetStatus.READY,
                         null, null, null, null, null, null, created, created));
                 return created;
@@ -271,7 +276,7 @@ class VideoAssetPostgresTest {
             VideoAsset inserted = waiter.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             assertThat(inserted.getCreatedAt()).isAfter(holderTime);
             assertThat(waiterStart.get()).isBefore(holderTime);
-            assertThat(assets.findNewestByMovieId(movie)).get().extracting(VideoAsset::getId)
+            assertThat(assets.findNewestByEpisodeId(movie)).get().extracting(VideoAsset::getId)
                     .isEqualTo(inserted.getId());
         } finally {
             tryLock.countDown();
@@ -305,15 +310,24 @@ class VideoAssetPostgresTest {
 
     private UUID movie() {
         UUID id = UUID.randomUUID();
-        jdbc.update("insert into titles (id,title,slug,description,status,created_at,updated_at) "
-                        + "values (?,? ,?,?,'PUBLISHED',?,?)", id, "Encoding fixture", "encoding-" + id,
+        UUID episode = UUID.randomUUID();
+        jdbc.update("insert into titles (id,title,slug,description,status,created_at,updated_at,content_type) "
+                        + "values (?,? ,?,?,'PUBLISHED',?,?,'MOVIE')", id, "Encoding fixture", "encoding-" + id,
                 "Disposable test fixture", Timestamp.from(T0), Timestamp.from(T0));
+        jdbc.update("""
+                insert into episodes (id,title_id,ordinal,display_label,status,created_at,updated_at)
+                values (?, ?, 1, '1', 'PUBLISHED', now(), now())
+                """, episode, id);
         movies.add(id);
-        return id;
+        return episode;
+    }
+
+    private UUID titleId(UUID episode) {
+        return jdbc.queryForObject("select title_id from episodes where id=?", UUID.class, episode);
     }
 
     private void fixture(UUID movie, UUID id, String status, Instant created) {
-        jdbc.update("insert into video_assets (id,movie_id,raw_bucket,raw_object_key,status,created_at,updated_at) "
+        jdbc.update("insert into video_assets (id,episode_id,raw_bucket,raw_object_key,status,created_at,updated_at) "
                         + "values (?,?,'raw-fixture',?,?,?,?)", id, movie, id.toString(), status,
                 Timestamp.from(created), Timestamp.from(created));
     }

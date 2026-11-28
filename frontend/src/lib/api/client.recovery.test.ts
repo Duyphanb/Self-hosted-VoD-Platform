@@ -145,7 +145,7 @@ describe('ApiClient shared authentication recovery', () => {
     it('sends nothing for a request bound to another identity', async () => {
       current = snapshot('bob', 'bob-token', 2);
 
-      const request = client.request('/movies/movie-1/progress', {
+      const request = client.request('/episodes/movie-1/progress', {
         method: 'PUT',
         authenticated: true,
         identity: snapshot('alice', 'token-1', 1),
@@ -181,14 +181,14 @@ describe('ApiClient shared authentication recovery', () => {
       current = snapshot('alice', 'token-2', 1);
 
       const sent = client.sendOnUnload(
-        '/movies/movie-1/progress',
+        '/episodes/movie-1/progress',
         { method: 'PUT', json: { currentSeconds: 42 } },
         snapshot('alice', 'token-1', 1)
       );
 
       expect(sent).toBe(true);
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('/api/v1/movies/movie-1/progress');
+      expect(url).toBe('/api/v1/episodes/movie-1/progress');
       expect(String(url)).not.toContain('token');
       expect(init?.method).toBe('PUT');
       expect(init?.keepalive).toBe(true);

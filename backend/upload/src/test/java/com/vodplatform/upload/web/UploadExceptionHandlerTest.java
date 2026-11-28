@@ -70,7 +70,7 @@ class UploadExceptionHandlerTest {
         when(service.upload(eq(MOVIE), any(), any())).thenThrow(failure.get());
         var file = new MockPart("file", "movie.mp4", new byte[] {0, 0, 0, 8, 'f', 't', 'y', 'p'});
         file.getHeaders().setContentType(MediaType.parseMediaType("video/mp4"));
-        return mvc.perform(multipart("/api/v1/admin/movies/{movieId}/video", MOVIE).part(file));
+        return mvc.perform(multipart("/api/v1/admin/episodes/{episodeId}/video", MOVIE).part(file));
     }
 
     @Test
@@ -120,7 +120,7 @@ class UploadExceptionHandlerTest {
                     .thenThrow(new IllegalStateException("secret key vod-raw/abc"));
             var file = new MockPart("file", "movie.mp4", new byte[] {0, 0, 0, 8, 'f', 't', 'y', 'p'});
             mvc.perform(
-                            multipart("/api/v1/admin/movies/{movieId}/video", MOVIE)
+                            multipart("/api/v1/admin/episodes/{episodeId}/video", MOVIE)
                                     .part(file)
                                     .header(RequestIds.HEADER, "upload.log_1")
                                     .with(
@@ -147,7 +147,7 @@ class UploadExceptionHandlerTest {
     void acceptedUploadIsAcceptedStatus() throws Exception {
         when(service.upload(eq(MOVIE), any(), any())).thenReturn(VideoAssetStatusResponse.queued(UUID.randomUUID()));
         var file = new MockPart("file", "movie.mp4", new byte[] {0, 0, 0, 8, 'f', 't', 'y', 'p'});
-        mvc.perform(multipart("/api/v1/admin/movies/{movieId}/video", MOVIE).part(file))
+        mvc.perform(multipart("/api/v1/admin/episodes/{episodeId}/video", MOVIE).part(file))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("QUEUED"));
     }

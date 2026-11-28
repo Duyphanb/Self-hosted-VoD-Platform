@@ -26,7 +26,7 @@ describe('fetchPlaybackInfoForVisit', () => {
 
     releaseSave();
     expect((await playbackInfo).resumeSeconds).toBe(57);
-    expect(requests).toEqual([`/movies/${MOVIE_ID}/playback`]);
+    expect(requests).toEqual([`/episodes/${MOVIE_ID}/playback`]);
   });
 
   it('asks at once when no player of this movie is closing', async () => {
@@ -35,7 +35,7 @@ describe('fetchPlaybackInfoForVisit', () => {
     void fetchPlaybackInfoForVisit(fakeClient(requests), MOVIE_ID);
     await flushMicrotasks();
 
-    expect(requests).toEqual([`/movies/${MOVIE_ID}/playback`]);
+    expect(requests).toEqual([`/episodes/${MOVIE_ID}/playback`]);
   });
 });
 
@@ -46,7 +46,8 @@ function fakeClient(requests: string[]): ApiClient {
     request: async (path: string) => {
       requests.push(path);
       return {
-        movieId: MOVIE_ID,
+        episodeId: MOVIE_ID,
+        titleId: MOVIE_ID,
         videoAssetId: ASSET_ID,
         hlsManifestUrl: `/hls/video-assets/${ASSET_ID}/master.m3u8`,
         resumeSeconds: 57,

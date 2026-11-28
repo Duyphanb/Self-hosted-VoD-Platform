@@ -25,9 +25,9 @@ import org.springframework.test.web.servlet.ResultActions;
 
 /**
  * Fixtures and assertions for the movie visibility rule (ADR-009,
- * {@code SECURITY.md#movie-visibility}): an endpoint that takes a {@code movieId} answers a
+ * {@code SECURITY.md#title-and-episode-visibility}): an endpoint that takes a {@code movieId} answers a
  * {@code DRAFT} or {@code ARCHIVED} movie exactly as it answers a missing one, with 404
- * {@code MOVIE_NOT_FOUND}, so the response never reveals that the movie exists. ADR-009 requires
+ * {@code TITLE_NOT_FOUND}, so the response never reveals that the movie exists. ADR-009 requires
  * these 404 tests for movie detail and, in Sprints 5-8, for playback, HLS, progress, rating,
  * watchlist, history and search; each of them reuses this class instead of writing its own
  * fixtures.
@@ -55,8 +55,8 @@ public final class MovieVisibilityRule {
             JSONCompareMode.STRICT,
             new Customization("timestamp", (actual, expected) -> isInstant(actual))
     ));
-    private static final String MOVIE_NOT_FOUND = """
-            {"timestamp": "any instant", "status": 404, "code": "MOVIE_NOT_FOUND", "message": "Movie not found"}
+    private static final String TITLE_NOT_FOUND = """
+            {"timestamp": "any instant", "status": 404, "code": "TITLE_NOT_FOUND", "message": "Title not found"}
             """;
 
     private MovieVisibilityRule() {
@@ -103,16 +103,25 @@ public final class MovieVisibilityRule {
     }
 
     /**
-     * Asserts that the endpoint answers the missing movie with 404 {@code MOVIE_NOT_FOUND}, and
+     * Asserts that the endpoint answers the missing movie with 404 {@code TITLE_NOT_FOUND}, and
      * each hidden movie with the same status, headers and body (the error timestamp aside).
      */
     public static void assertHiddenLikeMissing(Fixtures fixtures, MovieRequest request) throws Exception {
+        assertHiddenLikeMissing(fixtures, request, TITLE_NOT_FOUND);
+    }
+
+    public static void assertHiddenEpisodeLikeMissing(Fixtures fixtures, MovieRequest request) throws Exception {
+        assertHiddenLikeMissing(fixtures, request, TITLE_NOT_FOUND.replace("TITLE_NOT_FOUND", "EPISODE_NOT_FOUND")
+                .replace("Title not found", "Episode not found"));
+    }
+
+    private static void assertHiddenLikeMissing(Fixtures fixtures, MovieRequest request, String body) throws Exception {
         MvcResult missing = request.perform(fixtures.missing()).andReturn();
-        assertMovieNotFound(missing, "missing movie " + fixtures.missing());
+        assertMovieNotFound(missing, "missing movie " + fixtures.missing(), body);
         for (UUID hidden : fixtures.hidden()) {
             MvcResult result = request.perform(hidden).andReturn();
             String description = "hidden movie " + hidden;
-            assertMovieNotFound(result, description);
+            assertMovieNotFound(result, description, body);
             assertThat(headers(result.getResponse()))
                     .as("headers for the %s, compared with the missing movie", description)
                     .isEqualTo(headers(missing.getResponse()));
@@ -136,13 +145,13 @@ public final class MovieVisibilityRule {
         return id;
     }
 
-    private static void assertMovieNotFound(MvcResult result, String description) throws Exception {
+    private static void assertMovieNotFound(MvcResult result, String description, String body) throws Exception {
         MockHttpServletResponse response = result.getResponse();
         assertThat(response.getStatus()).as("status for the %s", description).isEqualTo(404);
         assertThat(MediaType.parseMediaType(response.getContentType()).isCompatibleWith(MediaType.APPLICATION_JSON))
                 .as("content type for the %s", description)
                 .isTrue();
-        content().json(MOVIE_NOT_FOUND, STRICT_WITH_ANY_TIMESTAMP).match(result);
+        content().json(body, STRICT_WITH_ANY_TIMESTAMP).match(result);
     }
 
     /** Header names and values; the names of a mock response are case-preserving and ordered. */

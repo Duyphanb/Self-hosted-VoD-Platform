@@ -1,6 +1,6 @@
 package com.vodplatform.encoding.persistence;
 
-import com.vodplatform.catalog.service.LockedMovie;
+import com.vodplatform.catalog.service.LockedEpisode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -22,7 +22,7 @@ import org.springframework.data.domain.Persistable;
 
 /**
  * One new asset per upload. Lifecycle transitions belong to conditional updates, not setters.
- * The movie reference is a UUID because catalog's aggregate is internal to that module.
+ * The episode reference is a UUID because catalog's aggregate is internal to that module.
  */
 @Entity
 @Table(name = "video_assets", uniqueConstraints = {
@@ -32,18 +32,18 @@ import org.springframework.data.domain.Persistable;
         @UniqueConstraint(name = EncodingConstraints.VIDEO_ASSETS_HLS_MASTER,
                 columnNames = {"hls_bucket", "hls_master_object_key"})
 }, indexes = {
-        @Index(name = "ix_video_assets_movie_id", columnList = "movie_id"),
+        @Index(name = "ix_video_assets_episode_id", columnList = "episode_id"),
         @Index(name = "ix_video_assets_status", columnList = "status")
 })
-// Never declare ux_video_assets_movie_in_flight here: H2 cannot express its WHERE predicate.
+// Never declare ux_video_assets_episode_in_flight here: H2 cannot express its WHERE predicate.
 public class VideoAsset implements Persistable<UUID> {
 
     @Id
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    @Column(name = "movie_id", nullable = false, updatable = false)
-    private UUID movieId;
+    @Column(name = "episode_id", nullable = false, updatable = false)
+    private UUID episodeId;
 
     @Column(name = "raw_bucket", nullable = false, length = 100, updatable = false)
     private String rawBucket;
@@ -91,12 +91,12 @@ public class VideoAsset implements Persistable<UUID> {
     protected VideoAsset() {
     }
 
-    VideoAsset(UUID id, UUID movieId, String rawBucket, String rawObjectKey, String hlsBucket,
+    VideoAsset(UUID id, UUID episodeId, String rawBucket, String rawObjectKey, String hlsBucket,
                String hlsMasterObjectKey, VideoAssetStatus status, Integer durationSeconds,
                Integer width, Integer height, String codec, Integer bitrate, String failureReason,
                Instant createdAt, Instant updatedAt) {
         this.id = Objects.requireNonNull(id, "id");
-        this.movieId = Objects.requireNonNull(movieId, "movieId");
+        this.episodeId = Objects.requireNonNull(episodeId, "episodeId");
         this.rawBucket = Objects.requireNonNull(rawBucket, "rawBucket");
         this.rawObjectKey = Objects.requireNonNull(rawObjectKey, "rawObjectKey");
         this.hlsBucket = hlsBucket;
@@ -113,13 +113,13 @@ public class VideoAsset implements Persistable<UUID> {
     }
 
     /**
-     * Call in the asset/job insert transaction, after raw PUT and the per-movie lock. The caller
+     * Call in the asset/job insert transaction, after raw PUT and the per-episode lock. The caller
      * supplies the shared appClock; time is sampled here, never alongside pre-PUT ID generation.
      */
-    public static VideoAsset queued(LockedMovie lock, UUID id, String rawBucket, String rawObjectKey, Clock clock) {
+    public static VideoAsset queued(LockedEpisode lock, UUID id, String rawBucket, String rawObjectKey, Clock clock) {
         Objects.requireNonNull(lock, "lock");
         Instant now = Objects.requireNonNull(clock, "clock").instant().truncatedTo(ChronoUnit.MICROS);
-        return new VideoAsset(id, lock.movieId(), rawBucket, rawObjectKey, null, null,
+        return new VideoAsset(id, lock.episodeId(), rawBucket, rawObjectKey, null, null,
                 VideoAssetStatus.QUEUED, null, null, null, null, null, null, now, now);
     }
 
@@ -134,7 +134,7 @@ public class VideoAsset implements Persistable<UUID> {
 
     @Override
     public UUID getId() { return id; }
-    public UUID getMovieId() { return movieId; }
+    public UUID getEpisodeId() { return episodeId; }
     public String getRawBucket() { return rawBucket; }
     public String getRawObjectKey() { return rawObjectKey; }
     public String getHlsBucket() { return hlsBucket; }

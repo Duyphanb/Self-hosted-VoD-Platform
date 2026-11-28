@@ -1,5 +1,7 @@
 package com.vodplatform.catalog.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.vodplatform.catalog.persistence.ContentType;
 import com.vodplatform.catalog.persistence.MaturityRating;
 import com.vodplatform.catalog.persistence.MovieStatus;
 import java.util.List;
@@ -32,7 +34,12 @@ public record MovieDetailResponse(
         List<String> genres,
         Double averageRating,
         MovieStatus status,
-        String videoStatus,
+        ContentType contentType,
+        String partLabel,
+        int episodeCount,
+        int playableEpisodeCount,
+        String availability,
+        @JsonInclude(JsonInclude.Include.NON_NULL) EpisodeSummary episode,
         MaturityRating maturityRating,
         List<CreditedPerson> people,
         Integer userRating,
@@ -49,7 +56,15 @@ public record MovieDetailResponse(
      * set to null, or false for {@code inWatchlist}.
      */
     public static MovieDetailResponse of(MovieDetail detail) {
+        return of(detail, null);
+    }
+
+    public static MovieDetailResponse of(MovieDetail detail, EpisodeSummary.Progress progress) {
         Objects.requireNonNull(detail, "detail");
+        var stored = detail.episode();
+        var episode = stored == null ? null : new EpisodeSummary(stored.id(), stored.titleId(), stored.ordinal(),
+                stored.displayLabel(), stored.name(), stored.videoStatus(), progress);
+        var availability = detail.availability();
         return new MovieDetailResponse(
                 detail.id(),
                 detail.title(),
@@ -60,7 +75,12 @@ public record MovieDetailResponse(
                 detail.genres(),
                 null,
                 detail.status(),
-                detail.videoStatus(),
+                detail.contentType(),
+                detail.partLabel(),
+                availability.episodes(),
+                availability.playableEpisodes(),
+                availability.label(),
+                episode,
                 detail.maturityRating(),
                 detail.people(),
                 null,

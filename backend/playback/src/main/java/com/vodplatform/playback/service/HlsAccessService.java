@@ -1,8 +1,7 @@
 package com.vodplatform.playback.service;
 
-import com.vodplatform.catalog.exception.MovieNotFoundException;
-import com.vodplatform.catalog.service.MovieService;
-import com.vodplatform.catalog.service.MovieVisibility;
+import com.vodplatform.catalog.exception.EpisodeNotFoundException;
+import com.vodplatform.catalog.service.EpisodeService;
 import com.vodplatform.encoding.exception.VideoAssetNotFoundException;
 import com.vodplatform.encoding.persistence.VideoAssetRepository;
 import com.vodplatform.shared.web.RequestIds;
@@ -19,13 +18,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class HlsAccessService {
     private static final Logger log = LoggerFactory.getLogger(HlsAccessService.class);
     private final VideoAssetRepository assets;
-    private final MovieService movies;
+    private final EpisodeService episodes;
     private final String hlsBucket;
 
-    public HlsAccessService(VideoAssetRepository assets, MovieService movies,
+    public HlsAccessService(VideoAssetRepository assets, EpisodeService episodes,
                             @Value("${storage.hls-bucket}") String hlsBucket) {
         this.assets = assets;
-        this.movies = movies;
+        this.episodes = episodes;
         this.hlsBucket = hlsBucket;
     }
 
@@ -33,8 +32,8 @@ public class HlsAccessService {
     public HlsAccess requireAccess(UUID assetId) {
         var asset = assets.findCurrentReadyById(assetId).orElseThrow(VideoAssetNotFoundException::new);
         try {
-            movies.requireVisible(asset.getMovieId(), MovieVisibility.PUBLISHED_ONLY);
-        } catch (MovieNotFoundException hidden) {
+            episodes.requireVisible(asset.getEpisodeId());
+        } catch (EpisodeNotFoundException hidden) {
             throw new VideoAssetNotFoundException();
         }
         String key = asset.getHlsMasterObjectKey();

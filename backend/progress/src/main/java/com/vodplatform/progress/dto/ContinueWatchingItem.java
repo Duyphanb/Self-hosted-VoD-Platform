@@ -1,7 +1,9 @@
 package com.vodplatform.progress.dto;
 
+import com.vodplatform.catalog.dto.EpisodeSummary;
 import com.vodplatform.catalog.dto.MovieSummaryResponse;
 
-/** A visible catalog card and the same normalized progress returned by GET /progress. */
-public record ContinueWatchingItem(MovieSummaryResponse movie, ProgressResponse progress) {
+public record ContinueWatchingItem(Kind kind, MovieSummaryResponse title, EpisodeSummary episode,
+                                   EpisodeSummary.Progress progress) {
+    public enum Kind { RESUME, NEXT_EPISODE }
 }

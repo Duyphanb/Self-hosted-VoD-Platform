@@ -6,12 +6,12 @@ Writes the runtime-generated upload files into --fixtures-dir (never committed):
 - note.txt: plain text, declared as text/plain by the collection;
 - oversize.mp4: a valid signature padded to 1.5 MiB, which exceeds MAX_UPLOAD_SIZE_MB=1.
 
-Seeds two DRAFT movies through psql in the disposable Compose project's postgres container:
-- an empty movie for the accepted upload;
-- a movie that already has an in-flight QUEUED asset/job pair, so the upload gets 409. Its job is
+Seeds two DRAFT titles and their episodes in the disposable Compose project's postgres container:
+- an empty episode for the accepted upload;
+- an episode that already has an in-flight QUEUED asset/job pair, so the upload gets 409. Its job is
   marked published, so the relay never sends it, and no broker message exists for a worker.
 
-Prints the two movie ids as KEY=VALUE lines for the caller. Only a disposable Compose project on a
+Prints the two episode ids as KEY=VALUE lines for the caller. Only a disposable Compose project on a
 loopback address is accepted; nothing secret is printed.
 """
 import argparse
@@ -32,19 +32,24 @@ def write_fixtures(directory: Path):
     (directory / "oversize.mp4").write_bytes(SIGNATURE + bytes(1536 * 1024))
 
 
-def seed_sql(upload_movie: uuid.UUID, in_flight_movie: uuid.UUID) -> str:
+def seed_sql(upload_episode: uuid.UUID, in_flight_episode: uuid.UUID) -> str:
     asset = uuid.uuid4()
     job = uuid.uuid4()
     rows = []
-    for movie, label in ((upload_movie, "upload"), (in_flight_movie, "in-flight")):
+    for episode, label in ((upload_episode, "upload"), (in_flight_episode, "in-flight")):
+        title = uuid.uuid4()
         rows.append(
-            "INSERT INTO titles (id, title, slug, description, status, created_at, updated_at) VALUES "
-            f"('{movie}', 'Newman {label} fixture {movie.hex[:8]}', 'newman-{label}-{movie}', "
-            "'Newman Sprint 4 upload fixture.', 'DRAFT', now(), now());"
+            "INSERT INTO titles (id,title,slug,description,status,created_at,updated_at,content_type) VALUES "
+            f"('{title}', 'Newman {label} fixture {title.hex[:8]}', 'newman-{label}-{title}', "
+            "'Newman upload fixture.', 'DRAFT', now(), now(), 'MOVIE');"
+        )
+        rows.append(
+            "INSERT INTO episodes (id,title_id,ordinal,display_label,status,created_at,updated_at) VALUES "
+            f"('{episode}', '{title}', 1, '1', 'PUBLISHED', now(), now());"
         )
     rows.append(
-        "INSERT INTO video_assets (id, movie_id, raw_bucket, raw_object_key, status, created_at, updated_at) "
-        f"VALUES ('{asset}', '{in_flight_movie}', 'vod-raw', '{in_flight_movie}/{asset}.mp4', 'QUEUED', now(), now());"
+        "INSERT INTO video_assets (id,episode_id,raw_bucket,raw_object_key,status,created_at,updated_at) "
+        f"VALUES ('{asset}', '{in_flight_episode}', 'vod-raw', '{title}/{asset}.mp4', 'QUEUED', now(), now());"
     )
     rows.append(
         "INSERT INTO encoding_jobs (id, video_asset_id, status, attempt, queued_at, published_at) "
@@ -70,15 +75,15 @@ def main():
     assert label == args.project
 
     write_fixtures(Path(args.fixtures_dir))
-    upload_movie = uuid.uuid4()
-    in_flight_movie = uuid.uuid4()
+    upload_episode = uuid.uuid4()
+    in_flight_episode = uuid.uuid4()
     result = subprocess.run(
         ["docker", "exec", "-i", container, "sh", "-c",
          'psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
-        input=seed_sql(upload_movie, in_flight_movie), text=True, encoding="utf-8", capture_output=True)
+        input=seed_sql(upload_episode, in_flight_episode), text=True, encoding="utf-8", capture_output=True)
     assert result.returncode == 0, "Seeding SQL failed (details withheld)"
-    print(f"uploadMovieId={upload_movie}")
-    print(f"inFlightMovieId={in_flight_movie}")
+    print(f"uploadEpisodeId={upload_episode}")
+    print(f"inFlightEpisodeId={in_flight_episode}")
 
 
 if __name__ == "__main__":

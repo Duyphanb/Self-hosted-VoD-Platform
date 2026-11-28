@@ -3,6 +3,7 @@ package com.vodplatform.catalog.service;
 import com.vodplatform.catalog.dto.MovieCreditInput;
 import com.vodplatform.catalog.dto.UpsertMovieRequest;
 import com.vodplatform.catalog.exception.CatalogValidationException;
+import com.vodplatform.catalog.persistence.ContentType;
 import com.vodplatform.catalog.service.ValidatedMovie.CreditInput;
 import com.vodplatform.catalog.service.ValidatedMovie.GenreInput;
 import com.vodplatform.catalog.text.SlugNormalizer;
@@ -64,6 +65,11 @@ final class MovieRequestValidator {
         if (request.status() == null) {
             errors.add(new ApiFieldError("status", NOT_NULL));
         }
+        if (request.contentType() != null && request.contentType() != ContentType.MOVIE) {
+            errors.add(new ApiFieldError("contentType", "must be MOVIE"));
+        }
+        String partLabel = request.partLabel() == null ? null : text(errors, "partLabel", request.partLabel(),
+                100, TextNormalizer::normalizeSingleLine);
         List<GenreInput> genres = genres(errors, request.genres());
         List<CreditInput> people = people(errors, request.people());
 
@@ -71,7 +77,8 @@ final class MovieRequestValidator {
             throw new CatalogValidationException(errors);
         }
         return new ValidatedMovie(
-                title, slug, description, releaseYear, request.maturityRating(), request.status(), genres, people);
+                title, slug, description, releaseYear, request.maturityRating(), request.status(), genres, people,
+                partLabel);
     }
 
     private static String slug(List<ApiFieldError> errors, String slug) {

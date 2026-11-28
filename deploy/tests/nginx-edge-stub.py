@@ -106,7 +106,7 @@ class Handler(BaseHTTPRequestHandler):
                    "forwarded": self.headers.get("Forwarded"),
                    "authorization": self.headers.get("Authorization"),
                    "transferEncoding": self.headers.get("Transfer-Encoding")}
-        self.respond(202 if "/admin/movies/" in self.path and "/video" in self.path else 200,
+        self.respond(202 if "/admin/episodes/" in self.path and "/video" in self.path else 200,
                      json.dumps(payload).encode())
 
     do_GET = handle_request

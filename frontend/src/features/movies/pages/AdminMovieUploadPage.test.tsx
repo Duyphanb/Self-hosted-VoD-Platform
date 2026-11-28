@@ -1,3 +1,4 @@
+import { filmEpisodeId, titlePayloadFixture } from '../../../test/titleWireFixture';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -15,7 +16,7 @@ import { AdminMovieUploadPage } from './AdminMovieUploadPage';
 
 const movieId = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
 const assetId = 'd614036c-ff08-4304-b70d-839b793e467e';
-const uploadPath = `/admin/movies/${movieId}/video`;
+const uploadPath = `/admin/titles/${movieId}/video`;
 const admin: UserProfile = { id: '3fcf25c2-f096-4462-ae63-4ba4702a9078', email: 'admin@example.com',
   displayName: 'Admin', roles: ['ROLE_USER', 'ROLE_ADMIN'] };
 const fetchMock = vi.fn<typeof fetch>();
@@ -31,7 +32,7 @@ describe('AdminMovieUploadPage through the data router', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it('rejects a non-canonical route id with no requests', async () => {
-    renderUpload({ path: '/admin/movies/not-a-uuid/video' });
+    renderUpload({ path: '/admin/titles/not-a-uuid/video' });
     expect(await screen.findByRole('heading', { name: 'Movie not found' })).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled(); expect(FakeXhr.instances.length).toBe(0);
   });
@@ -78,7 +79,7 @@ describe('AdminMovieUploadPage through the data router', () => {
   it('does a fresh canonical GET before every click even with cached detail, and never lists video assets or refreshes a valid token', async () => {
     const observations: number[] = [];
     serve(() => { observations.push(FakeXhr.instances.length); return json(detail()); });
-    const { queryClient } = renderUpload({ path: `/admin/movies/${movieId.toUpperCase()}/video`, cached: detail() });
+    const { queryClient } = renderUpload({ path: `/admin/titles/${movieId.toUpperCase()}/video`, cached: detail() });
     await screen.findByLabelText('Video file');
     choose();
     fireEvent.click(uploadButton());
@@ -90,9 +91,9 @@ describe('AdminMovieUploadPage through the data router', () => {
     fireEvent.click(uploadButton());
     await waitFor(() => expect(FakeXhr.instances.length).toBe(2));
     expect(observations[observations.length - 1]).toBe(1);
-    expect(fetchMock.mock.calls.every(([url]) => String(url) === `/api/v1/movies/${movieId}`)).toBe(true);
-    expect(queryClient.getQueryData(movieKeys.detail(movieId))).toBeDefined();
-    expect(FakeXhr.instances[1].url).toBe(`/api/v1/admin/movies/${movieId}/video`);
+    expect(fetchMock.mock.calls.every(([url]) => String(url) === `/api/v1/admin/titles/${movieId}`)).toBe(true);
+    expect(queryClient.getQueryData(movieKeys.adminDetail(movieId))).toBeDefined();
+    expect(FakeXhr.instances[1].url).toBe(`/api/v1/admin/episodes/${filmEpisodeId(movieId)}/video`);
   });
 
   it.each(['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const)('allows upload to a %s movie', async (status) => {
@@ -186,7 +187,7 @@ describe('AdminMovieUploadPage through the data router', () => {
     let movieCalls = 0;
     fetchMock.mockImplementation(async (input) => {
       if (String(input) === '/api/v1/auth/refresh') return json({ user: admin, accessToken: 'renewed-access', expiresInSeconds: 900 });
-      if (String(input) === `/api/v1/movies/${movieId}`) return ++movieCalls === 2 ? apiError(401, 'UNAUTHORIZED') : json(detail());
+      if (String(input) === `/api/v1/admin/titles/${movieId}`) return ++movieCalls === 2 ? apiError(401, 'UNAUTHORIZED') : json(detail());
       throw new Error('Unexpected request in upload refresh test');
     });
     renderUpload(); await start();
@@ -330,9 +331,9 @@ describe('AdminMovieUploadPage through the data router', () => {
   it('uses the filtered return link, blocks checking/saving navigation and removes beforeunload after settling', async () => {
     const check = deferred<Response>(); let calls = 0;
     serve(() => ++calls === 1 ? json(detail()) : check.promise);
-    renderUpload({ returnTo: '/admin/movies?status=ARCHIVED&page=2' });
+    renderUpload({ returnTo: '/admin/titles?status=ARCHIVED&page=2' });
     await screen.findByLabelText('Video file');
-    expect(screen.getByText('Back to movies')).toHaveAttribute('href', '/admin/movies?status=ARCHIVED&page=2');
+    expect(screen.getByText('Back to movies')).toHaveAttribute('href', '/admin/titles?status=ARCHIVED&page=2');
     choose(); fireEvent.click(uploadButton());
     expect(beforeUnload().defaultPrevented).toBe(true);
     fireEvent.click(screen.getByText('Back to movies'));
@@ -402,7 +403,7 @@ describe('AdminMovieUploadPage through the data router', () => {
     const { router } = renderUpload(); await start();
     fireEvent.click(screen.getByText('Back to movies'));
     fireEvent.click(within(await screen.findByRole('dialog')).getByText('Cancel upload and leave'));
-    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/movies'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/titles'));
     expect(FakeXhr.instances[0].abortCount).toBe(1);
   });
 
@@ -417,13 +418,13 @@ describe('AdminMovieUploadPage through the data router', () => {
 function renderUpload({ path = uploadPath, returnTo, cached, strict = false }: { path?: string; returnTo?: string; cached?: MovieDetail; strict?: boolean } = {}) {
   persist();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } });
-  if (cached) queryClient.setQueryData(movieKeys.detail(movieId), cached);
+  if (cached) queryClient.setQueryData(movieKeys.adminDetail(movieId), cached);
   const providers = <QueryClientProvider client={queryClient}><AuthProvider redirectToLogin={vi.fn()}><Outlet /></AuthProvider></QueryClientProvider>;
   const router = createMemoryRouter([{
     element: strict ? <StrictMode>{providers}</StrictMode> : providers,
     children: [
-      { element: <AdminRoute />, children: [{ path: '/admin/movies/:movieId/video', element: <AdminMovieUploadPage /> }] },
-      { path: '/admin/movies', element: <h1>Movies list</h1> },
+      { element: <AdminRoute />, children: [{ path: '/admin/titles/:movieId/video', element: <AdminMovieUploadPage /> }] },
+      { path: '/admin/titles', element: <h1>Movies list</h1> },
       { path: '/login', element: <h1>Sign in</h1> },
       { path: '/forbidden', element: <h1>Forbidden destination</h1> }
     ]
@@ -436,14 +437,14 @@ function persist(prefix = '') {
 }
 function serve(get?: () => Response | Promise<Response>) {
   fetchMock.mockImplementation(async (input) => {
-    if (String(input) === `/api/v1/movies/${movieId}`) return get ? get() : json(detail());
+    if (String(input) === `/api/v1/admin/titles/${movieId}`) return get ? get() : json(detail());
     throw new Error('Unexpected request in upload page test');
   });
 }
 function detail(overrides: Partial<MovieDetail> = {}): MovieDetail {
   return { id: movieId, title: 'Upload movie', slug: 'upload-movie', description: 'Movie description', releaseYear: 2026,
-    maturityRating: null, genres: [], people: [], averageRating: null, posterUrl: null, status: 'PUBLISHED', videoStatus: null,
-    userRating: null, inWatchlist: false, playbackProgress: null, ...overrides };
+    maturityRating: null, genres: [], people: [], averageRating: null, posterUrl: null, status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null, videoStatus: null,
+    userRating: null, inWatchlist: false, playbackProgress: null, episode: null, ...overrides };
 }
 function video() { return new File(['synthetic'], 'movie.mp4', { type: 'video/mp4' }); }
 function choose(file = video()) { fireEvent.change(screen.getByLabelText('Video file'), { target: { files: [file] } }); }
@@ -469,7 +470,7 @@ function guidance(panel: HTMLElement) {
   expect(panel).toHaveTextContent('Manual purge is planned');
   expect(within(panel).queryByRole('link')).not.toBeInTheDocument();
 }
-function json(body: unknown) { return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }); }
+function json(body: unknown) { return new Response(JSON.stringify(titlePayloadFixture(body)), { status: 200, headers: { 'Content-Type': 'application/json' } }); }
 function apiError(status: number, code: string) { return new Response(JSON.stringify({ timestamp: '2026-11-02T00:00:00Z', status,
   code, message: 'The movie could not be checked.' }), { status, headers: { 'Content-Type': 'application/json' } }); }
 function deferred<T>() {

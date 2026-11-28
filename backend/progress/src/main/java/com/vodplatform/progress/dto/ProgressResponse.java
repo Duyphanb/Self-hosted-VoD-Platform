@@ -6,6 +6,6 @@ import java.util.UUID;
 
 /** Explicit nulls distinguish an absent row from a saved position. */
 @JsonInclude(JsonInclude.Include.ALWAYS)
-public record ProgressResponse(UUID movieId, int currentSeconds, Integer durationSeconds,
+public record ProgressResponse(UUID episodeId, int currentSeconds, Integer durationSeconds,
                                boolean finished, Instant lastPlayedAt) {
 }

@@ -18,6 +18,8 @@ const regularUser: UserProfile = {
   displayName: 'Viewer',
   roles: ['ROLE_USER']
 };
+const TITLE_ID = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
+const EPISODE_ID = '7334b2f1-664f-4bc1-b8f1-10de58c1d74a';
 
 describe('AppRoutes guard wiring', () => {
   const fetchMock = vi.fn<typeof fetch>();
@@ -47,7 +49,7 @@ describe('AppRoutes guard wiring', () => {
     expect(await screen.findByRole('heading', { name: 'Access forbidden' })).toBeInTheDocument();
   });
 
-  const adminMovieRoutes = ['/admin/movies', '/admin/movies/new', '/admin/movies/6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21/edit', '/admin/movies/6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21/video'];
+  const adminMovieRoutes = ['/admin/titles', '/admin/titles/new', '/admin/titles/6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21/edit', '/admin/titles/6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21/video'];
   it.each(adminMovieRoutes)('rejects a regular user on the production route %s before any request', async (path) => {
     persistUser(regularUser);
     renderProductionRoutes(path);
@@ -73,7 +75,7 @@ describe('AppRoutes guard wiring', () => {
     renderRoutes('/admin');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Movies' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'New movie' })).toHaveAttribute('href', '/admin/movies/new');
+    expect(screen.getByRole('link', { name: 'New movie' })).toHaveAttribute('href', '/admin/titles/new');
   });
 
   it('sends a signed-in user from the landing page to the movie list', async () => {
@@ -107,6 +109,45 @@ describe('AppRoutes guard wiring', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['/movies?genre=Drama#top', '/titles?genre=Drama#top'],
+    [`/Movies/${TITLE_ID}#details`, `/titles/${TITLE_ID}#details`],
+    ['/admin/movies?status=DRAFT', '/admin/titles?status=DRAFT'],
+    [`/admin/movies/${TITLE_ID}/video`, `/admin/titles/${TITLE_ID}/video`]
+  ])('replaces the legacy bookmark %s', async (previous, next) => {
+    persistUser(previous.startsWith('/admin/') ? { ...regularUser, roles: ['ROLE_ADMIN'] } : regularUser);
+    fetchMock.mockResolvedValue(jsonResponse({ code: 'TITLE_NOT_FOUND', message: 'Title not found' }, 404));
+    const { router } = renderProductionRoutes(previous);
+    await waitFor(() => expect(screen.getByTestId('current-location')).toHaveTextContent(next));
+    expect(router.state.historyAction).toBe('REPLACE');
+    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('/movies'))).toBe(true);
+  });
+
+  it('resolves a V7 watch bookmark with the title API and redirects to the film episode', async () => {
+    persistUser(regularUser);
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === `/api/v1/titles/${TITLE_ID}`) {
+        return jsonResponse({
+          id: TITLE_ID, title: 'The Long Night', slug: 'the-long-night', description: 'A story.',
+          releaseYear: null, posterUrl: null, genres: [], averageRating: null, status: 'PUBLISHED',
+          contentType: 'MOVIE', partLabel: null, episodeCount: 1, playableEpisodeCount: 1, availability: 'PLAYABLE',
+          maturityRating: null, people: [], userRating: null, inWatchlist: false,
+          episode: {
+            id: EPISODE_ID, titleId: TITLE_ID, ordinal: 1, displayLabel: '1',
+            name: null, videoStatus: 'READY', progress: null
+          }
+        });
+      }
+      return jsonResponse({ code: 'EPISODE_NOT_FOUND', message: 'Episode not found' }, 404);
+    });
+    const { router } = renderProductionRoutes(`/movies/${TITLE_ID}/watch?from=bookmark#top`);
+    await waitFor(() => expect(screen.getByTestId('current-location'))
+      .toHaveTextContent(`/watch/${EPISODE_ID}?from=bookmark#top`));
+    expect(router.state.historyAction).toBe('REPLACE');
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(`/api/v1/episodes/${EPISODE_ID}/playback`);
+    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('/movies'))).toBe(true);
   });
 
   it('renders a not-found page with navigation for an unknown route', async () => {

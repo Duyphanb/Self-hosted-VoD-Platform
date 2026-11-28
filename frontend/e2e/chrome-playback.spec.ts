@@ -66,10 +66,11 @@ async function playing(video: Locator): Promise<void> {
 test('Chrome plays the uploaded asset and recovers expired HLS playback', async ({ page, browser, baseURL }) => {
   const origin = baseURL!;
   const movie = fixtureId('VOD_CHROME_MOVIE_ID');
+  const episode = fixtureId('VOD_CHROME_EPISODE_ID');
   const asset = fixtureId('VOD_CHROME_ASSET_ID');
-  const watch = `/movies/${movie}/watch`;
-  const playbackRoute = `/api/v1/movies/${movie}/playback`;
-  const progressRoute = `/api/v1/movies/${movie}/progress`;
+  const watch = `/watch/${episode}`;
+  const playbackRoute = `/api/v1/episodes/${episode}/playback`;
+  const progressRoute = `/api/v1/episodes/${episode}/progress`;
   const hlsPrefix = `/hls/video-assets/${asset}/`;
   const traffic = watchTraffic(page, origin, hlsPrefix, [loginRoute, progressRoute, playbackRoute]);
   const video = page.locator('video');
@@ -112,6 +113,7 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
     }
     await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
     await page.getByRole('link', { name: 'Chrome playback smoke' }).first().click();
+    // Stay in the login document: the 401 checkpoints below measure the token this login issued.
     await page.getByRole('link', { name: 'Watch', exact: true }).click();
     await expect(page).toHaveURL(origin + watch);
     await expect.poll(async () => (await media(video)).ready, { timeout: 22_000 }).toBeGreaterThanOrEqual(2);
@@ -365,5 +367,10 @@ test('Chrome plays the uploaded asset and recovers expired HLS playback', async 
   });
   await checkpoint('Exactly one cookie bootstrap in the new document', async () => {
     expect(traffic.current().filter(exchange => exchange.route === refreshRoute)).toHaveLength(1);
+  });
+  await checkpoint('An old watch bookmark redirects to the episode', async () => {
+    await page.goto(`/movies/${movie}/watch`);
+    await expect(page).toHaveURL(origin + watch);
+    await expect.poll(async () => (await media(video)).ready, { timeout: 22_000 }).toBeGreaterThanOrEqual(2);
   });
 });

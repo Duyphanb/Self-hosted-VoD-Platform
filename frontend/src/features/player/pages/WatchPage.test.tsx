@@ -1,3 +1,4 @@
+import { episodeFixture, filmEpisodeId, titleFixture } from '../../../test/titleWireFixture';
 import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
@@ -39,6 +40,8 @@ vi.mock('../HlsPlayer', async () => {
 
 const MOVIE_ID = '6f1c0f55-2d4a-4b64-9a43-1d0f3c7b8e21';
 const SECOND_MOVIE_ID = '7334b2f1-664f-4bc1-b8f1-10de58c1d74a';
+const EPISODE_ID = filmEpisodeId(MOVIE_ID);
+const SECOND_EPISODE_ID = filmEpisodeId(SECOND_MOVIE_ID);
 const ASSET_ID = '5f1e2d3c-4b5a-4968-8776-655443322110';
 const NEW_ASSET_ID = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
 const VIEWER: UserProfile = {
@@ -77,10 +80,13 @@ describe('WatchPage through AppRoutes', () => {
     fetchMock.mockReset();
     fetchMock.mockImplementation(async (input) => {
       const path = new URL(String(input), 'http://localhost').pathname;
-      if (path === `/api/v1/movies/${MOVIE_ID}/playback`) {
+      if (path === `/api/v1/episodes/${EPISODE_ID}/playback`) {
         return answers.playback();
       }
-      if (path === `/api/v1/movies/${MOVIE_ID}`) {
+      if (path === `/api/v1/titles/${MOVIE_ID}`) {
+        return jsonResponse(titleFixture(movieDetail()));
+      }
+      if (path === `/api/v1/episodes/${EPISODE_ID}`) {
         return answers.movie();
       }
       return apiError(404, 'NOT_FOUND', 'Unexpected request');
@@ -101,15 +107,15 @@ describe('WatchPage through AppRoutes', () => {
       expect(screen.getByRole('heading', { level: 1, name: 'The Long Night' })).toBeInTheDocument();
       expect(screen.getByText('A storm traps a crew at sea.')).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Back to movie details' }))
-        .toHaveAttribute('href', `/movies/${MOVIE_ID}`);
+        .toHaveAttribute('href', `/titles/${MOVIE_ID}`);
       const props = player.renders.at(-1)!;
-      expect(props.movieId).toBe(MOVIE_ID);
+      expect(props.episodeId).toBe(EPISODE_ID);
       expect(props.title).toBe('The Long Night');
       expect(props.playbackInfo).toEqual(playbackInfo());
     });
 
     it('opens from the Watch link of the movie detail page and moves focus to the page', async () => {
-      renderWatchPage(`/movies/${MOVIE_ID}`);
+      renderWatchPage(`/titles/${MOVIE_ID}`);
       const watch = await screen.findByRole('link', { name: 'Watch' }, LOAD_TIMEOUT);
       watch.focus();
 
@@ -125,11 +131,11 @@ describe('WatchPage through AppRoutes', () => {
       answers.movie = () => apiError(503, 'SERVICE_UNAVAILABLE', 'Try again later');
 
       await act(async () => {
-        await queryClient.refetchQueries({ queryKey: movieKeys.detail(MOVIE_ID) });
+        await queryClient.refetchQueries({ queryKey: movieKeys.watchedTitle(EPISODE_ID) });
       });
       await renderQueryNotifications();
 
-      expect(queryClient.getQueryState(movieKeys.detail(MOVIE_ID))?.status).toBe('error');
+      expect(queryClient.getQueryState(movieKeys.watchedTitle(EPISODE_ID))?.status).toBe('error');
       expect(screen.getByRole('application', { name: PLAYER_NAME })).toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       expect(player.mounts).toBe(1);
@@ -139,7 +145,7 @@ describe('WatchPage through AppRoutes', () => {
   describe('a player of this movie that just closed (ADR-011 D11)', () => {
     it('asks for the playback info only after that player\'s last save is done', async () => {
       let releaseSave: () => void = () => undefined;
-      registerClosingPlayerSaves(MOVIE_ID, VIEWER.id, new Promise<void>((resolve) => {
+      registerClosingPlayerSaves(EPISODE_ID, VIEWER.id, new Promise<void>((resolve) => {
         releaseSave = resolve;
       }));
 
@@ -156,7 +162,7 @@ describe('WatchPage through AppRoutes', () => {
 
     it('mounts the player only with playback info fetched for this visit, never with a cached answer', async () => {
       answers.playback = () => jsonResponse(playbackInfo({ resumeSeconds: 40 }));
-      renderWatchPage(`/movies/${MOVIE_ID}/watch`, { withLeaveAndReturn: true });
+      renderWatchPage(`/watch/${EPISODE_ID}`, { withLeaveAndReturn: true });
       await screen.findByRole('application', { name: PLAYER_NAME }, LOAD_TIMEOUT);
       let releasePlayback: () => void = () => undefined;
       answers.playback = () => new Promise<Response>((resolve) => {
@@ -228,7 +234,7 @@ describe('WatchPage through AppRoutes', () => {
     });
 
     it('never fetches it for the player with the account that signs in next', async () => {
-      renderWatchPage(`/movies/${MOVIE_ID}/watch`, { withSignInOtherViewer: true });
+      renderWatchPage(`/watch/${EPISODE_ID}`, { withSignInOtherViewer: true });
       await screen.findByRole('application', { name: PLAYER_NAME }, LOAD_TIMEOUT);
       const firstViewersReload = player.renders.at(-1)!.reloadPlaybackInfo;
       vi.spyOn(authApi, 'login').mockResolvedValue({
@@ -347,25 +353,28 @@ describe('WatchPage through AppRoutes', () => {
       let secondMovieAnswers = 0;
       fetchMock.mockImplementation(async (input) => {
         const path = new URL(String(input), 'http://localhost').pathname;
-        if (path === `/api/v1/movies/${MOVIE_ID}`) {
+        if (path === `/api/v1/titles/${MOVIE_ID}`) {
+        return jsonResponse(titleFixture(movieDetail()));
+      }
+      if (path === `/api/v1/episodes/${EPISODE_ID}`) {
           return jsonResponse(movieDetail());
         }
-        if (path === `/api/v1/movies/${SECOND_MOVIE_ID}`) {
+        if (path === `/api/v1/episodes/${SECOND_EPISODE_ID}`) {
           return jsonResponse(movieDetail({ id: SECOND_MOVIE_ID, title: 'Second Movie' }));
         }
-        if (path === `/api/v1/movies/${MOVIE_ID}/playback`) {
+        if (path === `/api/v1/episodes/${EPISODE_ID}/playback`) {
           firstMovieAnswers += 1;
           return apiError(409, 'VIDEO_NOT_READY', 'Video is not ready');
         }
-        if (path === `/api/v1/movies/${SECOND_MOVIE_ID}/playback`) {
+        if (path === `/api/v1/episodes/${SECOND_EPISODE_ID}/playback`) {
           secondMovieAnswers += 1;
           return secondMovieAnswers === 1
             ? apiError(409, 'VIDEO_NOT_READY', 'Video is not ready')
-            : jsonResponse(playbackInfo({ movieId: SECOND_MOVIE_ID }));
+            : jsonResponse(playbackInfo({ episodeId: SECOND_EPISODE_ID, titleId: SECOND_MOVIE_ID }));
         }
         return apiError(404, 'NOT_FOUND', 'Unexpected request');
       });
-      renderWatchPage(`/movies/${MOVIE_ID}/watch`, { withSecondMovieLink: true });
+      renderWatchPage(`/watch/${EPISODE_ID}`, { withSecondMovieLink: true });
       await screen.findByRole('heading', { level: 2, name: 'Not available' }, LOAD_TIMEOUT);
       await waitFor(() => expect(firstMovieAnswers).toBe(2));
 
@@ -380,25 +389,28 @@ describe('WatchPage through AppRoutes', () => {
       let firstMovieAnswers = 0;
       fetchMock.mockImplementation(async (input) => {
         const path = new URL(String(input), 'http://localhost').pathname;
-        if (path === `/api/v1/movies/${MOVIE_ID}`) {
+        if (path === `/api/v1/titles/${MOVIE_ID}`) {
+        return jsonResponse(titleFixture(movieDetail()));
+      }
+      if (path === `/api/v1/episodes/${EPISODE_ID}`) {
           return jsonResponse(movieDetail());
         }
-        if (path === `/api/v1/movies/${SECOND_MOVIE_ID}`) {
+        if (path === `/api/v1/episodes/${SECOND_EPISODE_ID}`) {
           return jsonResponse(movieDetail({ id: SECOND_MOVIE_ID, title: 'Second Movie' }));
         }
-        if (path === `/api/v1/movies/${MOVIE_ID}/playback`) {
+        if (path === `/api/v1/episodes/${EPISODE_ID}/playback`) {
           firstMovieAnswers += 1;
           // The first visit stays unavailable after its recheck; the return visit plays after its own.
           return firstMovieAnswers === 4
             ? jsonResponse(playbackInfo())
             : apiError(409, 'VIDEO_NOT_READY', 'Video is not ready');
         }
-        if (path === `/api/v1/movies/${SECOND_MOVIE_ID}/playback`) {
-          return jsonResponse(playbackInfo({ movieId: SECOND_MOVIE_ID }));
+        if (path === `/api/v1/episodes/${SECOND_EPISODE_ID}/playback`) {
+          return jsonResponse(playbackInfo({ episodeId: SECOND_EPISODE_ID, titleId: SECOND_MOVIE_ID }));
         }
         return apiError(404, 'NOT_FOUND', 'Unexpected request');
       });
-      renderWatchPage(`/movies/${MOVIE_ID}/watch`, { withSecondMovieLink: true });
+      renderWatchPage(`/watch/${EPISODE_ID}`, { withSecondMovieLink: true });
       await screen.findByRole('heading', { level: 2, name: 'Not available' }, LOAD_TIMEOUT);
       await waitFor(() => expect(firstMovieAnswers).toBe(2));
       fireEvent.click(screen.getByRole('button', { name: 'Go to the second movie' }));
@@ -411,8 +423,9 @@ describe('WatchPage through AppRoutes', () => {
     });
 
     it('waits for the fresh movie before it chooses the label, instead of using the cached one', async () => {
-      // The detail page cached the movie as READY; a new upload started before the viewer clicked Watch.
-      renderWatchPage(`/movies/${MOVIE_ID}`);
+      // A previous watch visit cached the episode as READY before a new upload started.
+      const { queryClient } = renderWatchPage(`/titles/${MOVIE_ID}`);
+      queryClient.setQueryData(movieKeys.watchedTitle(EPISODE_ID), movieDetail());
       const watch = await screen.findByRole('link', { name: 'Watch' }, LOAD_TIMEOUT);
       let releaseMovie: (response: Response) => void = () => undefined;
       answers.movie = () => new Promise<Response>((resolve) => {
@@ -485,19 +498,19 @@ describe('WatchPage through AppRoutes', () => {
   });
 
   describe('not found', () => {
-    it('shows the not-found state for 404 MOVIE_NOT_FOUND from the playback API', async () => {
-      answers.playback = () => apiError(404, 'MOVIE_NOT_FOUND', 'Movie not found');
+    it('shows the not-found state for 404 EPISODE_NOT_FOUND from the playback API', async () => {
+      answers.playback = () => apiError(404, 'EPISODE_NOT_FOUND', 'Movie not found');
 
       renderWatchPage();
 
       expect(await screen.findByRole('heading', { level: 1, name: 'Movie not found' }, LOAD_TIMEOUT))
         .toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/movies');
+      expect(screen.getByRole('link', { name: 'Back to movies' })).toHaveAttribute('href', '/titles');
       expect(screen.queryByRole('application')).not.toBeInTheDocument();
     });
 
     it('shows the not-found state when the movie itself is not found', async () => {
-      answers.movie = () => apiError(404, 'MOVIE_NOT_FOUND', 'Movie not found');
+      answers.movie = () => apiError(404, 'EPISODE_NOT_FOUND', 'Movie not found');
 
       renderWatchPage();
 
@@ -506,7 +519,7 @@ describe('WatchPage through AppRoutes', () => {
     });
 
     it('shows the not-found state for an address that is not a movie ID, without a request', async () => {
-      renderWatchPage('/movies/not-a-movie/watch');
+      renderWatchPage('/watch/not-a-movie');
 
       expect(await screen.findByRole('heading', { level: 1, name: 'Movie not found' }, LOAD_TIMEOUT))
         .toBeInTheDocument();
@@ -544,7 +557,7 @@ describe('WatchPage through AppRoutes', () => {
 
     it.each([
       ['400 on a valid movie address', () => apiError(400, 'VALIDATION_ERROR', 'Invalid request')],
-      ['404 without MOVIE_NOT_FOUND', () => apiError(404, 'NOT_FOUND', 'No route')],
+      ['404 without EPISODE_NOT_FOUND', () => apiError(404, 'NOT_FOUND', 'No route')],
       ['409 without VIDEO_NOT_READY', () => apiError(409, 'CONFLICT', 'Conflict')]
     ])('shows the error state with Retry for %s', async (_name, answer) => {
       answers.playback = answer;
@@ -583,7 +596,7 @@ describe('WatchPage through AppRoutes', () => {
 });
 
 function renderWatchPage(
-  path = `/movies/${MOVIE_ID}/watch`,
+  path = `/watch/${EPISODE_ID}`,
   { withSignInOtherViewer = false, withSecondMovieLink = false, withLeaveAndReturn = false } = {}
 ) {
   installCookieSession(
@@ -611,7 +624,7 @@ function GoToSecondMovie() {
   const navigate = useNavigate();
   return (
     <>
-      <button onClick={() => navigate(`/movies/${SECOND_MOVIE_ID}/watch`)} type="button">
+      <button onClick={() => navigate(`/watch/${SECOND_EPISODE_ID}`)} type="button">
         Go to the second movie
       </button>
       <button onClick={() => navigate(-1)} type="button">Go back</button>
@@ -624,8 +637,8 @@ function LeaveAndReturn() {
   const navigate = useNavigate();
   return (
     <>
-      <button onClick={() => navigate(`/movies/${MOVIE_ID}`)} type="button">Leave the watch page</button>
-      <button onClick={() => navigate(`/movies/${MOVIE_ID}/watch`)} type="button">Return to the watch page</button>
+      <button onClick={() => navigate(`/titles/${MOVIE_ID}`)} type="button">Leave the watch page</button>
+      <button onClick={() => navigate(`/watch/${EPISODE_ID}`)} type="button">Return to the watch page</button>
     </>
   );
 }
@@ -684,7 +697,7 @@ function playbackRequests(): number {
 }
 
 function movieRequests(): number {
-  return requestCount(`/movies/${MOVIE_ID}`);
+  return requestCount(`/episodes/${EPISODE_ID}`);
 }
 
 function movieDetail(overrides: Partial<MovieDetail> = {}): MovieDetail {
@@ -697,13 +710,13 @@ function movieDetail(overrides: Partial<MovieDetail> = {}): MovieDetail {
     posterUrl: null,
     genres: ['Drama'],
     averageRating: null,
-    status: 'PUBLISHED',
+    status: 'PUBLISHED', contentType: 'MOVIE', partLabel: null,
     videoStatus: 'READY',
     maturityRating: 'T16',
     people: [],
     userRating: null,
     inWatchlist: false,
-    playbackProgress: null,
+    playbackProgress: null, episode: null,
     ...overrides
   };
 }
@@ -711,7 +724,8 @@ function movieDetail(overrides: Partial<MovieDetail> = {}): MovieDetail {
 function playbackInfo(overrides: Partial<PlaybackInfo> = {}): PlaybackInfo {
   const videoAssetId = overrides.videoAssetId ?? ASSET_ID;
   return {
-    movieId: MOVIE_ID,
+    episodeId: EPISODE_ID,
+    titleId: MOVIE_ID,
     videoAssetId,
     hlsManifestUrl: `/hls/video-assets/${videoAssetId}/master.m3u8`,
     resumeSeconds: 754,
@@ -725,5 +739,8 @@ function apiError(status: number, code: string, message: string): Response {
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const isFilmDetail = body !== null && typeof body === 'object' && 'playbackProgress' in body
+    && !('episodeCount' in body);
+  const payload = isFilmDetail ? episodeFixture(body as MovieDetail) : body;
+  return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } });
 }

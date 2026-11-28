@@ -20,13 +20,13 @@ interface ResumeDetails {
  * interactive inside. The bar is hidden from assistive technology because the text says the same.
  */
 export function ContinueWatchingCard({ item }: { item: ContinueWatchingItem }) {
-  const { movie, progress } = item;
-  const resume = resumeDetails(progress);
+  const { movie, episode, progress } = item;
+  const resume = progress ? resumeDetails(progress) : null;
   return (
-    <Link className={movieCardClass} to={watchPath(movie.id)}>
+    <Link className={movieCardClass} to={`/watch/${episode.id}`}>
       <div className="relative">
         <PosterArt movie={movie} />
-        {resume.percentWatched === null ? null : (
+        {resume?.percentWatched == null ? null : (
           <div aria-hidden="true" className="absolute inset-x-0 bottom-0 h-1.5 bg-slate-950/80">
             <div className="h-full bg-sky-400" style={{ width: `${resume.percentWatched}%` }} />
           </div>
@@ -36,8 +36,10 @@ export function ContinueWatchingCard({ item }: { item: ContinueWatchingItem }) {
         <h2 className="line-clamp-2 text-sm font-semibold leading-5 text-white [overflow-wrap:anywhere]">
           {movie.title}
         </h2>
-        <p className="text-xs text-slate-300">Resume at {resume.position}</p>
-        {resume.timeLeft === null ? null : <p className="text-xs text-slate-400">{resume.timeLeft}</p>}
+        {item.kind === 'NEXT_EPISODE'
+          ? <p className="text-xs text-slate-300">Next episode {episode.displayLabel}</p>
+          : <p className="text-xs text-slate-300">Resume at {resume?.position}</p>}
+        {resume?.timeLeft ? <p className="text-xs text-slate-400">{resume.timeLeft}</p> : null}
       </div>
     </Link>
   );
@@ -61,9 +63,4 @@ function resumeDetails(progress: PlaybackProgress): ResumeDetails {
     // Unrounded, so any progress shows and only the end fills the bar.
     percentWatched: (position / duration) * 100
   };
-}
-
-// The decoder accepts only canonical UUIDs; encoding the segment keeps the path safe regardless.
-function watchPath(movieId: string): string {
-  return `/movies/${encodeURIComponent(movieId)}/watch`;
 }

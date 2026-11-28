@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "7c2e4a19-3f5d-4b6e-9a8c-1d2e3f4a5b6c",
     "name": "VoD Platform - Sprint 4 Upload",
-    "description": "Sprint 4 admin upload checks through Nginx: 401/403 before parsing, 400 unsupported type, 404 missing movie, 409 in-flight asset, backend 413 ApiError and 202 QUEUED, each error with a requestId. Needs adminEmail/adminPassword (an administrator promoted with the documented SQL), uploadMovieId/inFlightMovieId and the files from deploy/tests/newman-upload-fixtures.py (run Newman with --working-dir pointing at them) and a backend started with MAX_UPLOAD_SIZE_MB=1.",
+    "description": "Sprint 4 admin upload checks through Nginx: 401/403 before parsing, 400 unsupported type, 404 missing movie, 409 in-flight asset, backend 413 ApiError and 202 QUEUED, each error with a requestId. Needs adminEmail/adminPassword (an administrator promoted with the documented SQL), uploadEpisodeId/inFlightEpisodeId and the files from deploy/tests/newman-upload-fixtures.py (run Newman with --working-dir pointing at them) and a backend started with MAX_UPLOAD_SIZE_MB=1.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -16,7 +16,7 @@
             "exec": [
               "const suffix = Date.now().toString(36) + pm.variables.replaceIn('{{$randomInt}}');",
               "pm.environment.set('testEmail', 'newman-upload-' + suffix + '@example.com');",
-              "pm.environment.set('missingMovieId', pm.variables.replaceIn('{{$guid}}'));"
+              "pm.environment.set('missingEpisodeId', pm.variables.replaceIn('{{$guid}}'));"
             ]
           }
         },
@@ -270,7 +270,7 @@
         "method": "POST",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "raw": "{{baseUrl}}/api/v1/admin/episodes/{{uploadEpisodeId}}/video",
           "host": [
             "{{baseUrl}}"
           ],
@@ -278,8 +278,8 @@
             "api",
             "v1",
             "admin",
-            "movies",
-            "{{uploadMovieId}}",
+            "episodes",
+            "{{uploadEpisodeId}}",
             "video"
           ]
         },
@@ -338,7 +338,7 @@
         "method": "POST",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "raw": "{{baseUrl}}/api/v1/admin/episodes/{{uploadEpisodeId}}/video",
           "host": [
             "{{baseUrl}}"
           ],
@@ -346,8 +346,8 @@
             "api",
             "v1",
             "admin",
-            "movies",
-            "{{uploadMovieId}}",
+            "episodes",
+            "{{uploadEpisodeId}}",
             "video"
           ]
         },
@@ -406,7 +406,7 @@
         "method": "POST",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "raw": "{{baseUrl}}/api/v1/admin/episodes/{{uploadEpisodeId}}/video",
           "host": [
             "{{baseUrl}}"
           ],
@@ -414,8 +414,8 @@
             "api",
             "v1",
             "admin",
-            "movies",
-            "{{uploadMovieId}}",
+            "episodes",
+            "{{uploadEpisodeId}}",
             "video"
           ]
         },
@@ -445,9 +445,9 @@
               "});",
               "",
               "const body = pm.response.json();",
-              "pm.test('ApiError MOVIE_NOT_FOUND with a safe requestId', () => {",
+              "pm.test('ApiError EPISODE_NOT_FOUND with a safe requestId', () => {",
               "  pm.expect(body.status).to.equal(404);",
-              "  pm.expect(body.code).to.equal('MOVIE_NOT_FOUND');",
+              "  pm.expect(body.code).to.equal('EPISODE_NOT_FOUND');",
               "  pm.expect(body.timestamp).to.be.a('string');",
               "  pm.expect(body.message).to.be.a('string');",
               "  pm.expect(body.requestId).to.match(/^[A-Za-z0-9._-]{1,64}$/);",
@@ -474,7 +474,7 @@
         "method": "POST",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies/{{missingMovieId}}/video",
+          "raw": "{{baseUrl}}/api/v1/admin/episodes/{{missingEpisodeId}}/video",
           "host": [
             "{{baseUrl}}"
           ],
@@ -482,8 +482,8 @@
             "api",
             "v1",
             "admin",
-            "movies",
-            "{{missingMovieId}}",
+            "episodes",
+            "{{missingEpisodeId}}",
             "video"
           ]
         },
@@ -542,7 +542,7 @@
         "method": "POST",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies/{{inFlightMovieId}}/video",
+          "raw": "{{baseUrl}}/api/v1/admin/episodes/{{inFlightEpisodeId}}/video",
           "host": [
             "{{baseUrl}}"
           ],
@@ -550,8 +550,8 @@
             "api",
             "v1",
             "admin",
-            "movies",
-            "{{inFlightMovieId}}",
+            "episodes",
+            "{{inFlightEpisodeId}}",
             "video"
           ]
         },
@@ -610,7 +610,7 @@
         "method": "POST",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "raw": "{{baseUrl}}/api/v1/admin/episodes/{{uploadEpisodeId}}/video",
           "host": [
             "{{baseUrl}}"
           ],
@@ -618,8 +618,8 @@
             "api",
             "v1",
             "admin",
-            "movies",
-            "{{uploadMovieId}}",
+            "episodes",
+            "{{uploadEpisodeId}}",
             "video"
           ]
         },
@@ -673,7 +673,7 @@
         "method": "POST",
         "header": [],
         "url": {
-          "raw": "{{baseUrl}}/api/v1/admin/movies/{{uploadMovieId}}/video",
+          "raw": "{{baseUrl}}/api/v1/admin/episodes/{{uploadEpisodeId}}/video",
           "host": [
             "{{baseUrl}}"
           ],
@@ -681,8 +681,8 @@
             "api",
             "v1",
             "admin",
-            "movies",
-            "{{uploadMovieId}}",
+            "episodes",
+            "{{uploadEpisodeId}}",
             "video"
           ]
         },

@@ -16,19 +16,20 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** Authenticated per-user progress; the caller cannot supply the owner id. */
 @RestController
-@RequestMapping("/api/v1/movies/{movieId}/progress")
+@RequestMapping("/api/v1/episodes/{episodeId}/progress")
 public class ProgressController {
     private final ProgressService service;
     public ProgressController(ProgressService service) {
         this.service = service;
     }
     @GetMapping
-    public ProgressResponse get(@PathVariable UUID movieId, @AuthenticationPrincipal AuthenticatedUserPrincipal user) {
-        return service.get(user.userId(), movieId);
+    public ProgressResponse get(@PathVariable UUID episodeId,
+                                @AuthenticationPrincipal AuthenticatedUserPrincipal user) {
+        return service.get(user.userId(), episodeId);
     }
     @PutMapping
-    public ProgressResponse put(@PathVariable UUID movieId, @Valid @RequestBody ProgressRequest request,
+    public ProgressResponse put(@PathVariable UUID episodeId, @Valid @RequestBody ProgressRequest request,
                                @AuthenticationPrincipal AuthenticatedUserPrincipal user) {
-        return service.save(user.userId(), movieId, request);
+        return service.save(user.userId(), episodeId, request);
     }
 }

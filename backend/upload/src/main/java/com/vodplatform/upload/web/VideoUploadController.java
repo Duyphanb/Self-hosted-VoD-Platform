@@ -28,7 +28,7 @@ import java.io.IOException;
 import java.util.UUID;
 
 /**
- * Admin video upload ({@code POST /api/v1/admin/movies/{movieId}/video}): 202 once the raw object
+ * Admin video upload ({@code POST /api/v1/admin/episodes/{episodeId}/video}): 202 once the raw object
  * is stored and the QUEUED asset/job pair is committed, even while broker publication is pending.
  *
  * <p>The URL rule for {@code /api/v1/admin/**} authorizes {@code ROLE_ADMIN} before any body is
@@ -42,7 +42,7 @@ import java.util.UUID;
  * {@link UploadInternalException}, answered with the generic 500 {@code INTERNAL_ERROR}.
  */
 @RestController
-@RequestMapping("/api/v1/admin/movies")
+@RequestMapping("/api/v1/admin/episodes")
 @PreAuthorize("hasRole('ADMIN')")
 public class VideoUploadController {
 
@@ -52,15 +52,15 @@ public class VideoUploadController {
         this.uploads = uploads;
     }
 
-    @PostMapping("/{movieId}/video")
+    @PostMapping("/{episodeId}/video")
     public ResponseEntity<VideoAssetStatusResponse> upload(
-            @PathVariable UUID movieId,
+            @PathVariable UUID episodeId,
             @RequestPart(name = "file", required = false) MultipartFile file,
             HttpServletRequest request) {
         try {
             requireOnlyFilePart(request, file);
             VideoAssetStatusResponse accepted =
-                    uploads.upload(movieId, file, RequestIds.existing(request));
+                    uploads.upload(episodeId, file, RequestIds.existing(request));
             return ResponseEntity.status(HttpStatus.ACCEPTED).body(accepted);
         } catch (ApiException
                 | UploadStorageException

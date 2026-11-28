@@ -112,7 +112,7 @@ class CatalogConcurrencyTest {
     void cleanUp() throws InterruptedException {
         executor.shutdownNow();
         executor.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        for (String table : List.of("title_credits", "title_genres", "titles", "genres", "people")) {
+        for (String table : List.of("title_credits", "title_genres", "episodes", "titles", "genres", "people")) {
             jdbc.update("delete from " + table);
         }
     }
@@ -378,7 +378,7 @@ class CatalogConcurrencyTest {
 
         @Bean
         VideoStatusLookup videoStatusLookup() {
-            return movieIds -> java.util.Map.of();
+            return org.mockito.Mockito.mock(VideoStatusLookup.class);
         }
     }
 }

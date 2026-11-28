@@ -5,7 +5,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Which movie statuses a caller may see (ADR-009, {@code SECURITY.md#movie-visibility}). This is
+ * Which movie statuses a caller may see (ADR-009, {@code SECURITY.md#title-and-episode-visibility}). This is
  * the single place that encodes the status rule.
  */
 public enum MovieVisibility {
@@ -19,7 +19,7 @@ public enum MovieVisibility {
 
     /**
      * Every status. Only for {@code ROLE_ADMIN} on {@code GET}, {@code PUT} and {@code DELETE
-     * /api/v1/movies/{movieId}} and under {@code /api/v1/admin/**}.
+     * /api/v1/admin/titles/{titleId}} and other admin routes.
      */
     ANY_STATUS;
 

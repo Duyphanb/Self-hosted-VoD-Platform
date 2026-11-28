@@ -281,24 +281,26 @@ def json_request(port, path, body=None):
         connection.close()
 
 
-def prepare_admin_and_movie(port, postgres, env):
+def prepare_admin_and_title(port, postgres, env):
     email = "rehearsal-" + uuid.uuid4().hex + "@example.test"
     password = "Rehearsal-" + secrets.token_urlsafe(24)
     status, profile = json_request(port, "/api/v1/auth/register",
                                    {"email": email, "password": password, "displayName": "Rehearsal Admin"})
     if status != 201:
         raise RehearsalError("Rehearsal registration failed")
-    user_id, movie_id = uuid.UUID(profile["id"]), uuid.uuid4()
+    user_id, title_id, episode_id = uuid.UUID(profile["id"]), uuid.uuid4(), uuid.uuid4()
     sql = ("BEGIN;\nINSERT INTO user_roles (user_id, role_id) SELECT '" + str(user_id)
            + "', id FROM roles WHERE name = 'ROLE_ADMIN' ON CONFLICT DO NOTHING;\n"
-           "INSERT INTO titles (id, title, slug, description, status, created_at, updated_at) VALUES ('"
-           + str(movie_id) + "', 'Synthetic rehearsal', 'synthetic-" + movie_id.hex
-           + "', 'Transport/storage fixture only', 'DRAFT', now(), now());\nCOMMIT;\n")
+           "INSERT INTO titles (id, title, slug, description, status, content_type, created_at, updated_at) VALUES ('"
+           + str(title_id) + "', 'Synthetic rehearsal', 'synthetic-" + title_id.hex
+           + "', 'Transport/storage fixture only', 'DRAFT', 'MOVIE', now(), now());\n"
+           "INSERT INTO episodes (id, title_id, ordinal, status, created_at, updated_at) "
+           f"VALUES ('{episode_id}', '{title_id}', 1, 'PUBLISHED', now(), now());\nCOMMIT;\n")
     database_sql(postgres, sql, env)
     status, session = json_request(port, "/api/v1/auth/login", {"email": email, "password": password})
     if status != 200 or not isinstance(session.get("accessToken"), str):
         raise RehearsalError("Rehearsal administrator login failed")
-    return movie_id, session["accessToken"]
+    return title_id, episode_id, session["accessToken"]
 
 
 def database_sql(postgres, sql, env):
@@ -307,7 +309,7 @@ def database_sql(postgres, sql, env):
                    input_text=sql, env=env).stdout.strip()
 
 
-def send_upload(port, movie_id, token, fixture, sampler=None):
+def send_upload(port, episode_id, token, fixture, sampler=None):
     boundary = "rehearsal-" + secrets.token_hex(16)
     prefix = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"synthetic.mp4\"\r\n"
               "Content-Type: video/mp4\r\n\r\n").encode()
@@ -315,7 +317,7 @@ def send_upload(port, movie_id, token, fixture, sampler=None):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=660)
     started = time.monotonic()
     try:
-        connection.putrequest("POST", f"/api/v1/admin/movies/{movie_id}/video")
+        connection.putrequest("POST", f"/api/v1/admin/episodes/{episode_id}/video")
         connection.putheader("Authorization", "Bearer " + token)
         connection.putheader("Content-Type", "multipart/form-data; boundary=" + boundary)
         connection.putheader("Content-Length", str(len(prefix) + fixture.stat().st_size + len(suffix)))
@@ -427,14 +429,14 @@ def main():
         status, health = json_request(18088, "/actuator/health")
         if status != 200 or health.get("status") != "UP":
             raise RehearsalError("Rehearsal dependency readiness failed")
-        report["phase"] = "administrator and movie fixtures"
-        movie_id, token = prepare_admin_and_movie(18088, ids["postgres"], env)
+        report["phase"] = "administrator, title and episode fixtures"
+        title_id, episode_id, token = prepare_admin_and_title(18088, ids["postgres"], env)
         report["disk_before_upload"] = require_capacity(directory, docker_root)
         sampler = Sampler(ids, ids["backend"], directory, docker_root, env)
         sampler.sample()  # Fail immediately if a probe is unavailable.
         sampler.thread.start()
         report["phase"] = "synthetic upload and measurement"
-        asset_id, report["client"] = send_upload(18088, movie_id, token, fixture, sampler)
+        asset_id, report["client"] = send_upload(18088, episode_id, token, fixture, sampler)
         sampler.finish()
         report["measurement"] = sampler.summary()
         report["samples"] = sampler.samples
@@ -443,7 +445,7 @@ def main():
         report["phase"] = "database and raw-object verification"
         pair = database_sql(ids["postgres"],
                             "SELECT count(*) FROM video_assets a JOIN encoding_jobs j ON j.video_asset_id = a.id "
-                            f"WHERE a.id = '{asset_id}' AND a.movie_id = '{movie_id}' AND a.status = 'QUEUED' "
+                            f"WHERE a.id = '{asset_id}' AND a.episode_id = '{episode_id}' AND a.status = 'QUEUED' "
                             "AND j.status = 'QUEUED' AND j.attempt = 1;", env)
         if pair != "1":
             raise RehearsalError("Accepted upload did not persist the asset/job pair")
@@ -452,7 +454,7 @@ def main():
         size = command(["docker", "exec", ids["minio"], "sh", "-c",
                         'printf "%s\\n%s\\n" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" | '
                         'mc alias set audit http://127.0.0.1:9000 >/dev/null && '
-                        'mc stat --json "audit/vod-raw/$1/$2.mp4"', "sh", str(movie_id), str(asset_id)], env=env).stdout
+                        'mc stat --json "audit/vod-raw/$1/$2.mp4"', "sh", str(title_id), str(asset_id)], env=env).stdout
         if json.loads(size)["size"] != FIXTURE_BYTES:
             raise RehearsalError("Stored raw object has the wrong size")
         report["raw_object_bytes"] = FIXTURE_BYTES

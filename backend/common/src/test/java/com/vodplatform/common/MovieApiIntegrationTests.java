@@ -55,8 +55,8 @@ import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * {@code GET /api/v1/movies}, {@code GET /api/v1/admin/movies} and
- * {@code GET /api/v1/movies/{movieId}} through the assembled application: the bearer security
+ * {@code GET /api/v1/titles}, {@code GET /api/v1/admin/titles} and
+ * {@code GET /api/v1/titles/{movieId}} through the assembled application: the bearer security
  * chain, the controllers, the movie service and the test PostgreSQL. Each test rolls
  * back; the fixtures are written directly with the catalog repositories, so creation times and
  * therefore the {@code latest} order are fixed.
@@ -75,8 +75,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 class MovieApiIntegrationTests implements PostgresTestDatabase {
 
-    private static final String MOVIES = "/api/v1/movies";
-    private static final String ADMIN_MOVIES = "/api/v1/admin/movies";
+    private static final String MOVIES = "/api/v1/titles";
+    private static final String ADMIN_MOVIES = "/api/v1/admin/titles";
     private static final Instant T0 = Instant.parse("2026-10-01T08:00:00Z");
     private static final JsonComparator STRICT_WITH_ANY_TIMESTAMP = JsonAssert.comparator(new CustomComparator(
             JSONCompareMode.STRICT,
@@ -237,7 +237,8 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
                         {
                           "id": "%s", "title": "Draft Movie", "slug": "draft-movie", "description": "Draft",
                           "releaseYear": null, "posterUrl": null, "genres": ["Hành Động"], "averageRating": null,
-                          "status": "DRAFT", "videoStatus": null
+                          "status": "DRAFT", "contentType": "MOVIE", "partLabel": null,
+                          "episodeCount": 1, "playableEpisodeCount": 0, "availability": "UNAVAILABLE"
                         }
                         """.formatted(DRAFT_MOVIE)), JsonCompareMode.STRICT));
         perform(ADMIN_MOVIES + "?status=ARCHIVED", admin)
@@ -321,7 +322,15 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
                           "genres": ["Hài", "Hành Động"],
                           "averageRating": null,
                           "status": "PUBLISHED",
-                          "videoStatus": null,
+                          "contentType": "MOVIE",
+                          "partLabel": null,
+                          "episodeCount": 1,
+                          "playableEpisodeCount": 0,
+                          "availability": "UNAVAILABLE",
+                          "episode": {
+                            "id": "%s", "titleId": "%s", "ordinal": 1, "displayLabel": "1",
+                            "name": null, "videoStatus": null, "progress": null
+                          },
                           "maturityRating": "T13",
                           "people": [
                             {"personId": "%s", "name": "Victor Vũ", "role": "DIRECTOR"},
@@ -330,13 +339,14 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
                           "userRating": null,
                           "inWatchlist": false
                         }
-                        """.formatted(BRIGHT_DAYS, DIRECTOR, ACTOR), JsonCompareMode.STRICT));
+                        """.formatted(BRIGHT_DAYS, filmEpisodeId(BRIGHT_DAYS), BRIGHT_DAYS, DIRECTOR, ACTOR),
+                        JsonCompareMode.STRICT));
         perform(MOVIES + "/" + APPLE_STORY, user)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.maturityRating").isEmpty())
                 .andExpect(jsonPath("$.people").isEmpty())
                 .andExpect(jsonPath("$.genres").value(contains("Hài")))
-                .andExpect(jsonPath("$.playbackProgress").doesNotExist());
+                .andExpect(jsonPath("$.episode.progress").isEmpty());
     }
 
     @Test
@@ -355,16 +365,17 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
         MovieVisibilityRule.Fixtures movies = MovieVisibilityRule.persistFixtures(movieRepository);
         String admin = bearerToken("ROLE_ADMIN");
 
-        perform(MOVIES + "/" + movies.draft(), admin)
+        MovieVisibilityRule.assertHiddenLikeMissing(movies, id -> perform(MOVIES + "/" + id, admin));
+        perform(ADMIN_MOVIES + "/" + movies.draft(), admin)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(movies.draft().toString()))
                 .andExpect(jsonPath("$.status").value("DRAFT"));
-        perform(MOVIES + "/" + movies.archived(), admin)
+        perform(ADMIN_MOVIES + "/" + movies.archived(), admin)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ARCHIVED"));
-        perform(MOVIES + "/" + movies.missing(), admin)
+        perform(ADMIN_MOVIES + "/" + movies.missing(), admin)
                 .andExpect(status().isNotFound())
-                .andExpect(apiError(404, "MOVIE_NOT_FOUND", "Movie not found", null));
+                .andExpect(apiError(404, "TITLE_NOT_FOUND", "Title not found", null));
     }
 
     @Test
@@ -374,7 +385,7 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
 
         // Admins may read hidden movies on this endpoint, so the rule's assertion must fail for them.
         assertThatExceptionOfType(AssertionError.class).isThrownBy(() -> MovieVisibilityRule.assertHiddenLikeMissing(
-                movies, movieId -> perform(MOVIES + "/" + movieId, admin)));
+                movies, movieId -> perform(ADMIN_MOVIES + "/" + movieId, admin)));
     }
 
     @Test
@@ -382,7 +393,7 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
         for (String role : List.of("ROLE_USER", "ROLE_ADMIN")) {
             perform(MOVIES + "/not-a-uuid", bearerToken(role))
                     .andExpect(status().isBadRequest())
-                    .andExpect(validationError("movieId", "must be a valid UUID"));
+                    .andExpect(validationError("titleId", "must be a valid UUID"));
         }
     }
 
@@ -403,13 +414,13 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
             for (String nonCanonical : List.of("a-b-c-d-e", "+a-b-c-d-e", "0000000a-000b-000c-000d-0000000000e")) {
                 perform(MOVIES + "/" + nonCanonical, authorization)
                         .andExpect(status().isBadRequest())
-                        .andExpect(validationError("movieId", "must be a valid UUID"));
+                        .andExpect(validationError("titleId", "must be a valid UUID"));
             }
             // Surrounding whitespace is rejected, not trimmed.
             mockMvc.perform(get(URI.create(MOVIES + "/%20" + movieId))
                             .header(HttpHeaders.AUTHORIZATION, authorization))
                     .andExpect(status().isBadRequest())
-                    .andExpect(validationError("movieId", "must be a valid UUID"));
+                    .andExpect(validationError("titleId", "must be a valid UUID"));
         }
     }
 
@@ -476,7 +487,9 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
         return """
                 {
                   "id": "%s", "title": "%s", "slug": "%s", "description": "%s", "releaseYear": %s,
-                  "posterUrl": null, "genres": %s, "averageRating": null, "status": "PUBLISHED", "videoStatus": null
+                  "posterUrl": null, "genres": %s, "averageRating": null, "status": "PUBLISHED",
+                  "contentType": "MOVIE", "partLabel": null, "episodeCount": 1,
+                  "playableEpisodeCount": 0, "availability": "UNAVAILABLE"
                 }
                 """.formatted(id, title, slug, description, releaseYear, genres);
     }
@@ -493,6 +506,10 @@ class MovieApiIntegrationTests implements PostgresTestDatabase {
 
     private static UUID id(String name) {
         return UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private UUID filmEpisodeId(UUID title) {
+        return movieRepository.findById(title).orElseThrow().movieEpisode().getId();
     }
 
     // ---- helpers ----

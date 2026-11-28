@@ -1,6 +1,8 @@
 package com.vodplatform.catalog.dto;
 
+import com.vodplatform.catalog.persistence.ContentType;
 import com.vodplatform.catalog.persistence.MovieStatus;
+import com.vodplatform.catalog.service.VideoStatusLookup.Availability;
 import java.util.List;
 import java.util.UUID;
 
@@ -10,7 +12,7 @@ import java.util.UUID;
  * layer ({@link MovieSummaryResponse}).
  *
  * @param genres genre names ordered by genre slug
- * @param videoStatus READY if a READY asset exists, otherwise newest asset status, or null without assets
+ * @param availability Visible episode counts and title availability
  */
 public record MovieSummary(
         UUID id,
@@ -20,10 +22,13 @@ public record MovieSummary(
         Integer releaseYear,
         List<String> genres,
         MovieStatus status,
-        String videoStatus
+        ContentType contentType,
+        String partLabel,
+        Availability availability
 ) {
 
     public MovieSummary {
         genres = List.copyOf(genres);
     }
+
 }

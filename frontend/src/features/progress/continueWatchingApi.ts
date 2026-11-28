@@ -1,16 +1,19 @@
 import type { ApiClient } from '../../lib/api/client';
 import {
   decodeMovieSummary,
+  decodeEpisodeSummary,
   decodePlaybackProgress,
+  type EpisodeSummary,
   type MovieSummary,
   type PlaybackProgress
 } from '../movies/moviesApi';
 
 /** One movie the viewer can resume (API contract `ContinueWatchingItem`). */
 export interface ContinueWatchingItem {
+  kind: 'RESUME' | 'NEXT_EPISODE';
   movie: MovieSummary;
-  /** Normalized against the movie's current video (ADR-011 D11), so it matches where playback resumes. */
-  progress: PlaybackProgress;
+  episode: EpisodeSummary;
+  progress: PlaybackProgress | null;
 }
 
 export class InvalidContinueWatchingResponseError extends Error {
@@ -47,10 +50,14 @@ function decodeContinueWatchingItem(value: unknown): ContinueWatchingItem {
     throw new InvalidContinueWatchingResponseError();
   }
   const record = value as Record<string, unknown>;
-  const movie = decodeMovieSummary(record.movie);
-  const progress = decodePlaybackProgress(record.progress);
-  if (!movie || !progress || progress.movieId !== movie.id) {
+  const movie = decodeMovieSummary(record.title);
+  const episode = decodeEpisodeSummary(record.episode);
+  const progress = record.progress === null ? null : decodePlaybackProgress(record.progress);
+  if (!movie || !episode || episode.titleId !== movie.id || progress === undefined
+    || (progress && progress.episodeId !== episode.id)
+    || (record.kind !== 'RESUME' && record.kind !== 'NEXT_EPISODE')
+    || (record.kind === 'RESUME' && !progress)) {
     throw new InvalidContinueWatchingResponseError();
   }
-  return { movie, progress };
+  return { kind: record.kind, movie, episode, progress };
 }
