@@ -3,11 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5173",
+    "dev": "vite",
+    "dev:lan": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "lint": "eslint . --max-warnings=0",
-    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "preview": "vite preview",
+    "preview:lan": "vite preview --host 0.0.0.0",
     "test": "vitest run",
     "test:e2e": "vite build --config e2e/vite.config.ts && playwright test",
     "test:e2e:chrome": "playwright test --config playwright.chrome.config.ts"

@@ -121,7 +121,50 @@ If your local `.env` predates Issue 6.9, explicitly update it to `CORS_ALLOWED_O
 
 ### Frontend development
 
-Until #121 adds a same-origin Vite proxy, sign-in from the Vite dev server (`http://localhost:5173`) does not survive a reload: cross-origin requests cannot maintain the `vod_refresh` cookie with the current same-origin credentials policy. Use the Compose/Nginx origin to verify persistent browser sessions. Port 5173 remains in the allowlist for the upcoming proxy; this issue does not add that proxy.
+Start the [local Compose stack](#run-the-local-stack) with its Nginx edge. From `frontend/`, use Node 22
+(`nvm use` with a compatible version manager), then run:
+
+```bash
+npm ci
+npm run dev
+```
+
+Open `http://localhost:5173` for hot reload. Vite proxies `/api/v1` and `/hls` to the Compose edge at
+`http://localhost` by default. Leave `VITE_API_BASE_URL` unset so browser requests use relative URLs.
+`VOD_DEV_PROXY_TARGET` is a server-only environment variable set in the shell that starts Vite.
+
+For an edge on port 8088, set these values in the Compose `.env` and recreate the affected services:
+
+```dotenv
+NGINX_HTTP_PORT=127.0.0.1:8088
+CORS_ALLOWED_ORIGINS=http://localhost:8088,http://localhost:5173
+```
+
+Then run `VOD_DEV_PROXY_TARGET=http://localhost:8088 npm run dev` in Bash, or use PowerShell:
+
+```powershell
+$env:VOD_DEV_PROXY_TARGET = 'http://localhost:8088'
+npm run dev
+```
+
+Vite forwards the browser's `Origin` through Nginx. ADR-012 requires an exact allowlist entry for
+`http://localhost:5173` (included by default). Add any other browser-facing origin you use, including
+its scheme and port. For example, browsing on `http://127.0.0.1:5173` requires its own entry.
+
+To verify the setup, sign in, reload and sign out at `http://localhost:5173`. In browser DevTools,
+check that login and the bootstrap refresh return 200, logout returns 204 and clears `vod_refresh`,
+and reloading after logout leaves you signed out. Login and refresh set a host-only cookie with
+`Path=/api/v1/auth`, `HttpOnly`, `Secure`, and `SameSite=Strict` under the default configuration.
+Open an authenticated page or play a ready title and check that protected API and HLS requests use
+the same Vite origin and carry the access bearer.
+
+Dev and `npm run preview` bind to loopback by default. Preview serves the built files on port 4173.
+`npm run dev:lan` and `npm run preview:lan` explicitly bind to all interfaces. Use the LAN scripts
+only on a trusted network with local credentials configured for that exposure. For authenticated LAN
+access, see the HTTPS requirement [below](#lan-access-for-a-demo).
+
+From the repository root, `python deploy/tests/frontend-build-context-smoke.py` checks that a
+synthetic `.env` marker is absent from both the Docker context and the built frontend bundle.
 
 ### LAN access for a demo
 
